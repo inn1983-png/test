@@ -74,6 +74,7 @@ def register_output_artifact(
     artifact_type: str,
     description: str = "",
     metadata: dict[str, Any] | None = None,
+    is_key_output: bool = False,
 ) -> None:
     run_dir = os.getenv("AI_DRAMA_RUN_DIR")
     if not run_dir:
@@ -86,6 +87,7 @@ def register_output_artifact(
         artifact_type=artifact_type,
         description=description,
         metadata=metadata,
+        is_key_output=is_key_output,
     )
 
 
@@ -100,6 +102,58 @@ def write_placeholder_output(module_name: str, data: dict[str, Any]) -> None:
         artifact_type="json",
         description="Scaffold placeholder output.",
     )
+
+
+def write_json_key_output(
+    module_name: str,
+    filename: str,
+    data: dict[str, Any] | list[Any],
+    description: str,
+    artifact_type: str = "json",
+    metadata: dict[str, Any] | None = None,
+) -> Path:
+    """Write and register a key output used by downstream modules."""
+    _, output_dir = get_runtime_module_dirs(module_name)
+    output_path = output_dir / filename
+    io_utils.write_json(output_path, data)
+    register_output_artifact(
+        module_name=module_name,
+        artifact_name=filename,
+        path=output_path,
+        artifact_type=artifact_type,
+        description=description,
+        metadata=metadata,
+        is_key_output=True,
+    )
+    return output_path
+
+
+def write_text_key_output(
+    module_name: str,
+    filename: str,
+    content: str,
+    description: str,
+    artifact_type: str,
+    metadata: dict[str, Any] | None = None,
+) -> Path:
+    """Write and register a text-like key output.
+
+    This is used by scaffold modules for audio/video placeholder files until the
+    real binary generation logic is implemented.
+    """
+    _, output_dir = get_runtime_module_dirs(module_name)
+    output_path = output_dir / filename
+    io_utils.write_text(output_path, content)
+    register_output_artifact(
+        module_name=module_name,
+        artifact_name=filename,
+        path=output_path,
+        artifact_type=artifact_type,
+        description=description,
+        metadata=metadata,
+        is_key_output=True,
+    )
+    return output_path
 
 
 def module_output_path(module_name: str, filename: str) -> Path:
