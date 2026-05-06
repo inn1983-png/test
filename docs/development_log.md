@@ -24,9 +24,9 @@
 
 # 当前开发阶段
 
-当前阶段：00 总控基座已补齐最后一轮实用功能，建议先封版，准备进入 01 小说解析系统。
+当前阶段：00 + 01–10 子系统框架已能闭环，建议用户先一次性测试，再逐步精细打磨每一步。
 
-00 当前已经覆盖：
+当前框架已经覆盖：
 
 ```text
 短篇 / 长篇运行目录
@@ -44,12 +44,20 @@ dry-run 预演模式
 安全清理
 产物查询
 空流程自检
+01–10 框架关键产物输出
+01–10 完整框架闭环自检
 ```
 
-进入 01 前，建议用户在本地执行：
+建议用户在本地执行：
 
 ```bash
 python 00_main_controller/self_check.py
+```
+
+如果通过，再执行真实项目测试：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001
 ```
 
 ---
@@ -168,25 +176,6 @@ python 00_main_controller/query_artifacts.py --run-dir workspace/projects/projec
 6. 支持 self_check.py 一键检查 00 总控基座
 ```
 
-自检命令：
-
-```bash
-python 00_main_controller/self_check.py
-```
-
-空流程命令：
-
-```bash
-python 00_main_controller/run_pipeline.py --mode project --project-id self_check_project --empty-pipeline
-python 00_main_controller/run_pipeline.py --mode book_chapter --book-id self_check_book --chapter-id chapter_001 --empty-pipeline
-```
-
-资源释放配置文件：
-
-```text
-configs/local_resource_release.json
-```
-
 ## 2026-05-07：00 总控最后一轮补强：状态、局部运行、依赖检查、dry-run
 
 完成内容：
@@ -214,36 +203,62 @@ configs/local_resource_release.json
 10. self_check.py 增加 run_status.json 和 dry-run 检查
 ```
 
-示例命令：
+## 2026-05-07：01–10 子系统框架闭环
 
-```bash
-python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 06_storyboard
-python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 06_storyboard
-python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --dry-run
-python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --skip-dependency-check
+完成内容：
+
+- 更新 `00_common/base_module.py`，支持关键产物写入并登记到 `manifest.key_outputs`
+- 更新 `01_novel_parser/run.py`
+- 更新 `02_script_writer/run.py`
+- 更新 `03_character_library/run.py`
+- 更新 `04_scene_library/run.py`
+- 更新 `05_prop_library/run.py`
+- 更新 `06_storyboard/run.py`
+- 更新 `07_storyboard_image/run.py`
+- 更新 `08_audio/run.py`
+- 更新 `09_video/run.py`
+- 更新 `10_final_assembly/run.py`
+- 更新 `00_main_controller/self_check.py`
+- 更新 `00_main_controller/README.md`
+
+新增能力：
+
+```text
+1. 01 输出 novel_analysis.json
+2. 02 输出 script.json
+3. 03 输出 characters.json
+4. 04 输出 scenes.json
+5. 05 输出 props.json
+6. 06 输出 storyboard.json
+7. 07 输出 image_manifest.json，并生成占位 shot_001.png
+8. 08 输出 final_audio.wav，并生成 audio_manifest.json
+9. 09 输出 video_manifest.json，并生成占位 clip_001.mp4
+10. 10 输出 final.mp4，并生成 assembly_manifest.json
+11. 所有关键产物登记到 manifest.key_outputs 和 artifacts.db
+12. self_check.py 会完整跑一次 project 模式 01–10 框架流程
+13. self_check.py 会检查 01–10 关键产物、manifest 登记、run_status success
 ```
 
 重要说明：
 
 ```text
-当前 01–10 还处于骨架阶段，02 之后的真实关键输出尚未完成。
-因此完整跑 01→10 时，依赖检查可能会从 02 开始阻断。
-这是正确保护。
-调试骨架时可临时使用 --skip-dependency-check。
+当前 01–10 输出的是 scaffold 占位产物，不是真实 AI 生成结果。
+目的是先让完整系统可运行、可查询、可清理、可自检。
+后续再逐步精修每一步真实业务逻辑。
 ```
 
 ---
 
 # 下一步计划
 
-下一步建议进入 01 小说解析系统。
+下一步建议用户先本地一次性测试框架闭环。
 
-01 的第一轮目标不是复杂 AI 改写，而是先把输入输出边界打稳：
+测试通过后，再开始精修 01 小说解析系统：
 
 1. 明确小说文本输入文件位置
 2. 明确章节 / 段落 / 事件 / 候选角色 / 候选场景 / 候选道具的输出结构
 3. 只提出资产候选，不直接写入长篇共享资产库
-4. 输出关键产物 `novel_analysis.json`
+4. 输出真实 `novel_analysis.json`
 5. 把关键产物登记到 `manifest.json` 和 `artifacts.db`
 6. 跑完释放本地资源
 
@@ -254,6 +269,7 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 用户要求：
 
 ```text
+先把所有子系统的框架都弄起来，再一次性测试，慢慢精细打磨每一步。
 每一步改动都写入 README 或文档。
 每一步准备做什么都先告诉用户，方便用户补充要求。
 ```
