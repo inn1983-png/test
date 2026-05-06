@@ -31,11 +31,6 @@ def read_novel_text() -> str:
 
 
 def build_story_understanding(novel_text: str) -> dict:
-    """Build scaffold-level global story understanding.
-
-    Real implementation will use local LLM to read the full user input first,
-    then produce a global comprehension map before extracting events/assets.
-    """
     has_input = bool(novel_text)
     return {
         "status": "scaffold",
@@ -77,6 +72,39 @@ def build_story_understanding(novel_text: str) -> dict:
             "02 剧本改编必须服从 story_understanding，不得为了刺激随意改偏主线。",
             "后续角色、场景、分镜只可在此理解基础上细化，不可重造故事。",
         ],
+    }
+
+
+def build_candidate_extraction_policy() -> dict:
+    return {
+        "mode": "high_recall_first",
+        "principle": "候选角色、场景、道具提取宁可多，不可漏。01 不负责最终去重和压缩，03/04/05 负责合并、去重、标准化。",
+        "why": "后续角色库、场景库、道具库可以合并多余候选，但无法恢复 01 阶段漏掉的重要人物、地点、物件。",
+        "character_policy": {
+            "extract_all_mentions": True,
+            "include_minor_roles": True,
+            "include_unnamed_roles": True,
+            "include_group_roles": True,
+            "examples": ["主角", "有名角色", "只出现一次的人", "称谓角色", "路人", "地痞", "衙役们", "围观百姓"],
+            "do_not_merge_in_01": "01 可给 possible_same_as / merge_hint，但不得直接把候选删掉。",
+        },
+        "scene_policy": {
+            "extract_all_locations": True,
+            "include_implied_scenes": True,
+            "include_transition_locations": True,
+            "examples": ["街道", "衙门", "房间", "院子", "牢房", "门口", "回忆中的地点", "只出现一句的地点"],
+            "do_not_merge_in_01": "01 可给 possible_same_as / continuity_note，但不得直接删除相近场景候选。",
+        },
+        "prop_policy": {
+            "extract_all_visual_objects": True,
+            "include_minor_props": True,
+            "include_clothing_and_symbols": True,
+            "include_documents_and_money": True,
+            "examples": ["武器", "令牌", "信件", "钱袋", "衣服", "案卷", "惊堂木", "摊位", "碎饼", "灯笼", "桌椅"],
+            "do_not_filter_in_01": "只要可能影响画面、剧情、身份、动作或后续镜头连续性，就先提取。",
+        },
+        "candidate_confidence_rule": "不确定也要输出，但 confidence 可低，并在 risk_notes 写明不确定原因。",
+        "downstream_rule": "03/04/05 必须基于这些高召回候选进行合并、去重、筛选，不得要求 01 只输出少量精简候选。",
     }
 
 
@@ -142,6 +170,79 @@ def build_event_graph() -> dict:
         "main_event_path": ["event_001"],
         "side_event_paths": [],
     }
+
+
+def build_candidate_characters() -> list[dict]:
+    return [
+        {
+            "candidate_id": "char_candidate_001",
+            "name": "待识别角色候选",
+            "aliases": [],
+            "candidate_type": "placeholder",
+            "first_appearance_paragraph": None,
+            "appearance_paragraphs": [],
+            "role_hint": "待真实解析：主角 / 配角 / 反派 / 导师 / 路人 / 群体角色。",
+            "gender_hint": "unknown",
+            "age_hint": "unknown",
+            "identity_hint": "待真实解析：身份、职业、阵营、地位。",
+            "personality_hint": "待真实解析：性格或行为倾向。",
+            "relationship_to_protagonist": "unknown",
+            "importance": 0,
+            "confidence": 0.0,
+            "visual_clues_from_text": [],
+            "voice_clues_from_text": [],
+            "raw_mentions": [],
+            "possible_same_as": [],
+            "merge_hint": "01 不直接合并删除候选，只给 03 角色库提供合并线索。",
+            "risk_notes": ["真实解析时采用高召回策略：宁可多提角色候选，不可漏掉。"],
+        }
+    ]
+
+
+def build_candidate_scenes() -> list[dict]:
+    return [
+        {
+            "candidate_id": "scene_candidate_001",
+            "name": "待识别场景候选",
+            "aliases": [],
+            "candidate_type": "placeholder",
+            "first_appearance_paragraph": None,
+            "appearance_paragraphs": [],
+            "scene_type": "待真实解析：街道 / 衙门 / 室内 / 庭院 / 山林 / 战场 / 过渡地点。",
+            "time_hint": "unknown",
+            "era_hint": "unknown",
+            "weather_hint": "unknown",
+            "visual_clues_from_text": [],
+            "mood": "unknown",
+            "importance": 0,
+            "reuse_potential": 0,
+            "confidence": 0.0,
+            "possible_same_as": [],
+            "continuity_note": "01 不直接合并删除场景候选，只给 04 场景库提供合并与连续性线索。",
+            "risk_notes": ["真实解析时采用高召回策略：宁可多提场景候选，不可漏掉。"],
+        }
+    ]
+
+
+def build_candidate_props() -> list[dict]:
+    return [
+        {
+            "candidate_id": "prop_candidate_001",
+            "name": "待识别道具候选",
+            "aliases": [],
+            "candidate_type": "placeholder",
+            "first_appearance_paragraph": None,
+            "appearance_paragraphs": [],
+            "prop_type": "待真实解析：武器 / 文件 / 钱财 / 衣物 / 身份标志 / 家具 / 摊位 / 食物 / 灯具等。",
+            "visual_clues_from_text": [],
+            "story_function": "待真实解析：身份说明 / 冲突触发 / 动作承载 / 氛围营造 / 伏笔。",
+            "importance": 0,
+            "reuse_potential": 0,
+            "confidence": 0.0,
+            "possible_same_as": [],
+            "risk_notes": ["真实解析时采用高召回策略：只要可能影响画面、剧情、身份、动作或连续性，就先提取。"],
+        }
+    ]
 
 
 def build_voice_line_candidates() -> list[dict]:
@@ -210,6 +311,7 @@ def build_visual_risk_report() -> dict:
         "too_many_characters_events": [],
         "unclear_actor_count_events": [],
         "prop_confusion_risk": [],
+        "candidate_over_extraction_note": "角色/场景/道具候选多不是问题，遗漏才是问题。后续 03/04/05 负责筛选合并。",
         "style_risk": [
             "真实解析时必须识别现代物品、现代服饰、错误时代、欧美脸、卡通/3D 风格等风险。"
         ],
@@ -233,6 +335,9 @@ def build_scaffold_analysis(config: dict) -> dict:
     source_status = "input_found" if novel_text else "placeholder_input"
     preview = novel_text[:200]
     event_graph = build_event_graph()
+    candidate_characters = build_candidate_characters()
+    candidate_scenes = build_candidate_scenes()
+    candidate_props = build_candidate_props()
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -256,6 +361,7 @@ def build_scaffold_analysis(config: dict) -> dict:
         },
         "story_understanding": build_story_understanding(novel_text),
         "misread_prevention": build_misread_prevention(),
+        "candidate_extraction_policy": build_candidate_extraction_policy(),
         "chapters": [
             {
                 "chapter_id": "chapter_001",
@@ -271,9 +377,9 @@ def build_scaffold_analysis(config: dict) -> dict:
         "events": event_graph["events"],
         "conflicts": [],
         "high_retention_segments": [],
-        "candidate_characters": [],
-        "candidate_scenes": [],
-        "candidate_props": [],
+        "candidate_characters": candidate_characters,
+        "candidate_scenes": candidate_scenes,
+        "candidate_props": candidate_props,
         "voice_line_candidates": build_voice_line_candidates(),
         "video_unit_candidates": build_video_unit_candidates(),
         "asset_binding_hints": build_asset_binding_hints(),
@@ -288,8 +394,9 @@ def build_scaffold_analysis(config: dict) -> dict:
                 "supports": [
                     "story_understanding",
                     "event_graph.events.event_001",
+                    "candidate_extraction_policy",
                 ],
-                "note": "真实解析时，每个关键判断都应尽量回链到原文证据。",
+                "note": "真实解析时，每个关键判断都应尽量回链到原文证据。候选资产提取也要保留 raw_mentions / appearance_paragraphs。",
             }
         ],
         "adaptation_hints": {
@@ -306,15 +413,17 @@ def build_scaffold_analysis(config: dict) -> dict:
             "input_text_length": len(novel_text),
             "paragraph_count": 0,
             "event_count": len(event_graph["events"]),
-            "character_candidate_count": 0,
-            "scene_candidate_count": 0,
-            "prop_candidate_count": 0,
+            "character_candidate_count": len(candidate_characters),
+            "scene_candidate_count": len(candidate_scenes),
+            "prop_candidate_count": len(candidate_props),
             "has_full_story_understanding": True,
             "has_event_graph": True,
             "has_voice_line_candidates": True,
             "has_video_unit_candidates": True,
             "has_visual_risk_report": True,
             "has_evidence_index": True,
+            "candidate_extraction_mode": "high_recall_first",
+            "asset_candidate_review_policy": "候选过多不算错误，候选遗漏才需要返工。",
             "story_understanding_score": 0.0 if source_status == "placeholder_input" else 0.1,
             "event_graph_score": 0.0 if source_status == "placeholder_input" else 0.1,
             "visual_readiness_score": 0.0,
@@ -327,10 +436,12 @@ def build_scaffold_analysis(config: dict) -> dict:
         "warnings": [
             "当前为 scaffold 输出，story_understanding / event_graph / voice_line_candidates 尚未调用真实 LLM。",
             "当前 voice_line 和 video_unit 仅为生产预判结构，不代表最终剧本或视频 JSON。",
+            "当前候选角色/场景/道具为占位样例；真实解析时必须高召回提取，宁可多，不可漏。",
         ],
         "notes": [
             "01 必须先通读全文，理解故事核心，再提取结构信息。",
             "01 只提出角色、场景、道具候选，不直接写入 shared_assets。",
+            "01 的候选提取策略是高召回优先：越详细越好，不怕多，怕遗漏。",
             "01 可以给改编建议和生产预判，但不能直接写剧本、分镜、图片提示词或视频提示词。",
             "真实解析逻辑后续逐步接入。",
         ],
