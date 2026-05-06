@@ -16,6 +16,8 @@
 6. 按 `pipeline.json` 顺序调用各个子系统
 7. 把运行上下文传给每个模块
 8. 让每个模块知道自己的正式输出目录
+9. 提供安全清理工具
+10. 提供产物查询工具
 
 ---
 
@@ -107,6 +109,8 @@ workspace/books/book_001/global_memory/
 
 ```text
 00_main_controller/run_pipeline.py       # 总控入口
+00_main_controller/cleanup_workspace.py  # 安全清理工具
+00_main_controller/query_artifacts.py    # 产物查询工具
 00_common/workspace_manager.py           # 项目目录 / 长篇目录管理
 00_common/module_runner.py               # 子系统调用器
 00_common/base_module.py                 # 子系统基础工具
@@ -234,6 +238,63 @@ artifacts.db
 
 ---
 
+# 清理工具
+
+清理短篇项目：
+
+```bash
+python 00_main_controller/cleanup_workspace.py project --project-id project_test_001 --yes
+```
+
+清理长篇某一章，保留共享资产库：
+
+```bash
+python 00_main_controller/cleanup_workspace.py chapter --book-id book_001 --chapter-id chapter_001 --yes
+```
+
+清理整本长篇项目，包括共享资产库：
+
+```bash
+python 00_main_controller/cleanup_workspace.py book --book-id book_001 --yes
+```
+
+安全规则：
+
+```text
+cleanup_workspace.py 只允许删除 workspace/ 下的目录
+没有 --yes 不会真正删除
+```
+
+---
+
+# 产物查询工具
+
+查看某次运行的关键输出：
+
+```bash
+python 00_main_controller/query_artifacts.py --run-dir workspace/projects/project_test_001 --keys
+```
+
+查看某次运行的所有产物：
+
+```bash
+python 00_main_controller/query_artifacts.py --run-dir workspace/projects/project_test_001
+```
+
+按模块过滤：
+
+```bash
+python 00_main_controller/query_artifacts.py --run-dir workspace/projects/project_test_001 --module 01_novel_parser
+```
+
+按类型过滤：
+
+```bash
+python 00_main_controller/query_artifacts.py --run-dir workspace/projects/project_test_001 --type image
+```
+
+---
+
 # 运行数据规则
 
 正式运行时，模块不要长期写自己的 `output/`。
@@ -275,8 +336,7 @@ workspace/books/{book_id}/chapters/{chapter_id}/{module_name}/
 
 # 当前 00 后续待做
 
-1. 增加清理工具：删除项目、删除单章、保留共享资产
-2. 增加产物查询工具：列出关键输出、按模块查询产物
-3. 增加 pipeline 配置校验
-4. 增加本地模型释放命令配置
-5. 进入 01 小说解析系统前，先确保 00 可以跑通空流程
+1. 增加 pipeline 配置校验
+2. 增加本地模型释放命令配置
+3. 增加空流程自检命令
+4. 进入 01 小说解析系统前，先确保 00 可以跑通空流程
