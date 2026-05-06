@@ -15,9 +15,9 @@ stage_runner = import_module("02_script_writer.core.stage_runner")
 
 MODULE_NAME = "02_script_writer"
 DISPLAY_NAME = "剧本改编系统"
-DESCRIPTION = "负责把 01 小说解析结果分阶段改编成对白、OS、留白、动作、情绪明确的短剧剧本。"
+DESCRIPTION = "负责把 01 小说解析结果分阶段改编成音频驱动、单帧分镜友好的短剧剧本。"
 KEY_OUTPUT = "script.json"
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 def read_novel_analysis() -> dict:
@@ -47,13 +47,13 @@ def main() -> int:
             MODULE_NAME,
             KEY_OUTPUT,
             data,
-            description="剧本改编关键输出：02A–02E 分阶段生成的改编蓝图、剧本结构、正式剧本、生产标注与质量总检。",
+            description="剧本改编关键输出：02A–02F 分阶段生成的改编蓝图、剧本结构、语音行计划、正式剧本、生产标注与质量总检。",
         )
         base_module.write_text_key_output(
             MODULE_NAME,
             "script.txt",
             data.get("script_text", ""),
-            description="可读剧本文本：对白、OS、留白、动作、情绪。",
+            description="可读剧本文本：对白、OS、留白、动作、情绪，包含音频行标记。",
             artifact_type="text",
         )
         base_module.write_json_key_output(
@@ -74,7 +74,7 @@ def main() -> int:
         base_module.write_placeholder_output(MODULE_NAME, {
             "module": MODULE_NAME,
             "status": data.get("status"),
-            "message": f"剧本改编系统已按 02A–02E 阶段运行，关键输出已生成：{KEY_OUTPUT}",
+            "message": f"剧本改编系统已按 02A–02F 阶段运行，关键输出已生成：{KEY_OUTPUT}",
             "key_output": KEY_OUTPUT,
             "schema_version": SCHEMA_VERSION,
             "stage_mode": stage_result["stage_mode"],
