@@ -24,6 +24,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pipeline", default="pipeline.json", help="Pipeline config file path.")
     parser.add_argument("--skip-validation", action="store_true", help="Skip pipeline validation before running.")
     parser.add_argument("--strict-order", action="store_true", help="Warn when modules differ from recommended 01→10 order.")
+    parser.add_argument(
+        "--empty-pipeline",
+        action="store_true",
+        help="Only create runtime context and stores, then exit without running modules.",
+    )
     return parser
 
 
@@ -37,12 +42,16 @@ def create_context(args: argparse.Namespace):
     return workspace_manager.create_book_chapter_context(book_id=args.book_id, chapter_id=args.chapter_id)
 
 
+def load_pipeline_config(pipeline_arg: str) -> dict:
+    pipeline_path = ROOT_DIR / pipeline_arg
+    return io_utils.read_json(pipeline_path, default={})
+
+
 def main() -> int:
     args = build_parser().parse_args()
-    pipeline_path = ROOT_DIR / args.pipeline
-    pipeline_config = io_utils.read_json(pipeline_path, default={})
+    pipeline_config = load_pipeline_config(args.pipeline)
 
-    if not args.skip_validation:
+    if not args.empty_pipeline and not args.skip_validation:
         ok, messages = validate_pipeline.validate_pipeline_config(
             pipeline_config,
             strict_order=args.strict_order,
@@ -52,15 +61,19 @@ def main() -> int:
         if not ok:
             return 1
 
-    pipeline = pipeline_config.get("pipeline", [])
+    pipeline = [] if args.empty_pipeline else pipeline_config.get("pipeline", [])
 
-    if not pipeline:
-        print("No pipeline configured. Please edit pipeline.json.")
+    if not args.empty_pipeline and not pipeline:
+        print("No pipeline configured. Please edit pipeline.json or use --empty-pipeline for 00 self-check.")
         return 1
 
     context = create_context(args)
     print("Runtime context:")
     print(workspace_manager.dump_context_for_log(context))
+
+    if args.empty_pipeline:
+        print("Empty pipeline finished. Runtime context and artifact stores were initialized.")
+        return 0
 
     for module_name in pipeline:
         code = module_runner.run_module(module_name, context=context)
