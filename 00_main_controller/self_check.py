@@ -47,6 +47,7 @@ def check_project_context(project_id: str) -> None:
     assert_file(run_dir / "runtime_context.json", "project runtime_context.json")
     assert_file(run_dir / "manifest.json", "project manifest.json")
     assert_file(run_dir / "artifacts.db", "project artifacts.db")
+    assert_file(run_dir / "run_status.json", "project run_status.json")
 
     context = read_json(run_dir / "runtime_context.json")
     if context.get("mode") != "project":
@@ -62,6 +63,7 @@ def check_book_context(book_id: str, chapter_id: str) -> None:
     assert_file(run_dir / "runtime_context.json", "chapter runtime_context.json")
     assert_file(run_dir / "manifest.json", "chapter manifest.json")
     assert_file(run_dir / "artifacts.db", "chapter artifacts.db")
+    assert_file(run_dir / "run_status.json", "chapter run_status.json")
 
     for relative_path in [
         "shared_assets/characters/characters.json",
@@ -132,6 +134,17 @@ def main() -> int:
             "--chapter-id",
             chapter_id,
             "--empty-pipeline",
+        ],
+        [
+            sys.executable,
+            "00_main_controller/run_pipeline.py",
+            "--mode",
+            "project",
+            "--project-id",
+            project_id,
+            "--only-module",
+            "01_novel_parser",
+            "--dry-run",
         ],
     ]
 
