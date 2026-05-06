@@ -27,7 +27,7 @@
 
 # 当前开发阶段
 
-当前阶段：00 + 01–10 子系统框架已能闭环，01 已补充“先通读全文，理解故事整体”的最高前置任务。
+当前阶段：00 + 01–10 子系统框架已能闭环，01 已升级到 schema 1.1，并明确“全文理解 + 事件图谱 + 全量候选提取 + 生产预判”的方向。
 
 当前框架已经覆盖：
 
@@ -48,6 +48,11 @@ dry-run 预演模式
 产物查询
 空流程自检
 01 story_understanding 全局故事理解
+01 schema 1.1
+01 event_graph 事件图谱
+01 candidate_extraction_policy 全量候选提取策略
+01 voice_line_candidates / video_unit_candidates 生产预判
+01 visual_risk_report / evidence_index
 01–10 框架关键产物输出
 01–10 完整框架闭环自检
 ```
@@ -290,12 +295,38 @@ python 00_main_controller/query_artifacts.py --run-dir workspace/projects/projec
 8. quality_report 增加 has_full_story_understanding
 ```
 
-重要说明：
+## 2026-05-07：01 升级 schema 1.1 与全量候选提取规则
+
+完成内容：
+
+- 更新 `01_novel_parser/run.py`
+- 更新 `01_novel_parser/README.md`
+- 更新 `docs/development_log.md`
+
+新增能力：
 
 ```text
-01 不能只是机械切段、提取人物、提取场景。
-01 必须先理解全文，再提取段落、事件、冲突、角色、场景、道具。
-后续 02 剧本改编必须优先服从 story_understanding。
+1. novel_analysis.json schema_version 升级为 1.1
+2. 顶层新增 misread_prevention
+3. 顶层新增 candidate_extraction_policy
+4. 顶层新增 event_graph，包含 events / event_edges / main_event_path / side_event_paths
+5. 顶层新增 voice_line_candidates
+6. 顶层新增 video_unit_candidates
+7. 顶层新增 asset_binding_hints
+8. 顶层新增 visual_risk_report
+9. 顶层新增 evidence_index
+10. 顶层新增 chapter_memory_update
+11. candidate_characters / candidate_scenes / candidate_props 增加更详细的候选字段
+12. quality_report 增加 candidate_extraction_mode 和 asset_candidate_review_policy
+```
+
+候选提取最高规则：
+
+```text
+只要文章里提到过的人、地点、物件，都必须提取出来作为候选。
+重要性只作为 importance 字段评分，不能作为是否提取的门槛。
+候选过多不算错误；文章提到过的人、地点、物件没有进入候选，才需要返工。
+01 不负责最终筛选、合并、去重。03/04/05 负责候选合并、去重、标准化。
 ```
 
 ---
@@ -306,12 +337,14 @@ python 00_main_controller/query_artifacts.py --run-dir workspace/projects/projec
 
 测试通过后，再继续精修 01 小说解析系统：
 
-1. 设计真实 `novel_analysis.json` schema
-2. 设计 01 的本地 LLM 提示词
-3. 接入段落切分
-4. 接入事件链提取
-5. 接入冲突点、高留存片段、候选资产提取
-6. 确保所有输出都服从 `story_understanding`
+1. 设计 01 的本地 LLM 提示词
+2. 接入段落切分
+3. 接入 story_understanding 真实生成
+4. 接入 event_graph 真实生成
+5. 接入全量角色 / 场景 / 道具候选提取
+6. 接入冲突点、高留存片段、voice_line/video_unit 预判
+7. 确保所有输出都服从 `story_understanding`
+8. 确保所有候选都带 raw_mentions / appearance_paragraphs / evidence_index
 
 ---
 
@@ -324,6 +357,8 @@ python 00_main_controller/query_artifacts.py --run-dir workspace/projects/projec
 每一步改动都写入 README 或文档。
 后续尽量连续修改，不需要每一次小改动都让用户点击确认。
 01 必须通读用户给出的内容，理解到底说的是什么。
+角色/场景/道具候选提取越详细越好，不怕多，怕遗漏。
+只要文章里面提到的都需要提取出来作为候选。
 ```
 
 该要求为后续开发协作最高规则之一。
