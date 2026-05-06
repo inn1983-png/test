@@ -1,0 +1,178 @@
+{
+  "description": "Module input/output contracts used by 00 controller before running modules. Requires are checked against manifest key_outputs, artifacts.db, and conventional module output paths.",
+  "modules": {
+    "01_novel_parser": {
+      "requires": [],
+      "produces": [
+        {
+          "module": "01_novel_parser",
+          "name": "novel_analysis.json",
+          "type": "json"
+        }
+      ]
+    },
+    "02_script_writer": {
+      "requires": [
+        {
+          "module": "01_novel_parser",
+          "name": "novel_analysis.json"
+        }
+      ],
+      "produces": [
+        {
+          "module": "02_script_writer",
+          "name": "script.json",
+          "type": "json"
+        }
+      ]
+    },
+    "03_character_library": {
+      "requires": [
+        {
+          "module": "01_novel_parser",
+          "name": "novel_analysis.json"
+        },
+        {
+          "module": "02_script_writer",
+          "name": "script.json"
+        }
+      ],
+      "produces": [
+        {
+          "module": "03_character_library",
+          "name": "characters.json",
+          "type": "json"
+        }
+      ]
+    },
+    "04_scene_library": {
+      "requires": [
+        {
+          "module": "01_novel_parser",
+          "name": "novel_analysis.json"
+        },
+        {
+          "module": "02_script_writer",
+          "name": "script.json"
+        }
+      ],
+      "produces": [
+        {
+          "module": "04_scene_library",
+          "name": "scenes.json",
+          "type": "json"
+        }
+      ]
+    },
+    "05_prop_library": {
+      "requires": [
+        {
+          "module": "01_novel_parser",
+          "name": "novel_analysis.json"
+        },
+        {
+          "module": "02_script_writer",
+          "name": "script.json"
+        }
+      ],
+      "produces": [
+        {
+          "module": "05_prop_library",
+          "name": "props.json",
+          "type": "json"
+        }
+      ]
+    },
+    "06_storyboard": {
+      "requires": [
+        {
+          "module": "02_script_writer",
+          "name": "script.json"
+        },
+        {
+          "module": "03_character_library",
+          "name": "characters.json"
+        },
+        {
+          "module": "04_scene_library",
+          "name": "scenes.json"
+        },
+        {
+          "module": "05_prop_library",
+          "name": "props.json"
+        }
+      ],
+      "produces": [
+        {
+          "module": "06_storyboard",
+          "name": "storyboard.json",
+          "type": "json"
+        }
+      ]
+    },
+    "07_storyboard_image": {
+      "requires": [
+        {
+          "module": "06_storyboard",
+          "name": "storyboard.json"
+        }
+      ],
+      "produces": [
+        {
+          "module": "07_storyboard_image",
+          "name": "image_manifest.json",
+          "type": "json"
+        }
+      ]
+    },
+    "08_audio": {
+      "requires": [
+        {
+          "module": "02_script_writer",
+          "name": "script.json"
+        }
+      ],
+      "produces": [
+        {
+          "module": "08_audio",
+          "name": "final_audio.wav",
+          "type": "audio"
+        }
+      ]
+    },
+    "09_video": {
+      "requires": [
+        {
+          "module": "07_storyboard_image",
+          "name": "image_manifest.json"
+        },
+        {
+          "module": "08_audio",
+          "name": "final_audio.wav"
+        }
+      ],
+      "produces": [
+        {
+          "module": "09_video",
+          "name": "video_manifest.json",
+          "type": "json"
+        }
+      ]
+    },
+    "10_final_assembly": {
+      "requires": [
+        {
+          "module": "09_video",
+          "name": "video_manifest.json"
+        }
+      ],
+      "produces": [
+        {
+          "module": "10_final_assembly",
+          "name": "final.mp4",
+          "type": "video"
+        }
+      ]
+    }
+  }
+}
