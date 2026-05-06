@@ -12,7 +12,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run 00 controller self-check without executing business modules.")
+    parser = argparse.ArgumentParser(description="Run 00 controller self-check and scaffold pipeline check.")
     parser.add_argument("--keep", action="store_true", help="Keep generated self-check workspace directories.")
     return parser
 
@@ -54,6 +54,47 @@ def check_project_context(project_id: str) -> None:
         raise AssertionError("Project self-check context mode is not project")
     if context.get("project_id") != project_id:
         raise AssertionError("Project self-check project_id mismatch")
+
+
+def check_project_scaffold_outputs(project_id: str) -> None:
+    run_dir = ROOT_DIR / "workspace" / "projects" / project_id
+    expected_files = [
+        "01_novel_parser/novel_analysis.json",
+        "02_script_writer/script.json",
+        "03_character_library/characters.json",
+        "04_scene_library/scenes.json",
+        "05_prop_library/props.json",
+        "06_storyboard/storyboard.json",
+        "07_storyboard_image/image_manifest.json",
+        "08_audio/final_audio.wav",
+        "09_video/video_manifest.json",
+        "10_final_assembly/final.mp4",
+    ]
+    for relative_path in expected_files:
+        assert_file(run_dir / relative_path, f"scaffold key output {relative_path}")
+
+    manifest = read_json(run_dir / "manifest.json")
+    key_outputs = manifest.get("key_outputs", {})
+    for module_name in [
+        "01_novel_parser",
+        "02_script_writer",
+        "03_character_library",
+        "04_scene_library",
+        "05_prop_library",
+        "06_storyboard",
+        "07_storyboard_image",
+        "08_audio",
+        "09_video",
+        "10_final_assembly",
+    ]:
+        if module_name not in key_outputs:
+            raise AssertionError(f"Missing manifest key_outputs for {module_name}")
+
+    status = read_json(run_dir / "run_status.json")
+    modules = status.get("modules", {})
+    for module_name, item in modules.items():
+        if item.get("status") != "success":
+            raise AssertionError(f"Module did not finish successfully: {module_name} -> {item.get('status')}")
 
 
 def check_book_context(book_id: str, chapter_id: str) -> None:
@@ -146,6 +187,14 @@ def main() -> int:
             "01_novel_parser",
             "--dry-run",
         ],
+        [
+            sys.executable,
+            "00_main_controller/run_pipeline.py",
+            "--mode",
+            "project",
+            "--project-id",
+            project_id,
+        ],
     ]
 
     for command in commands:
@@ -158,6 +207,7 @@ def main() -> int:
 
     try:
         check_project_context(project_id)
+        check_project_scaffold_outputs(project_id)
         check_book_context(book_id, chapter_id)
     except Exception as exc:  # noqa: BLE001
         print(f"[SELF_CHECK] failed: {exc}")
@@ -166,7 +216,7 @@ def main() -> int:
         if not args.keep:
             cleanup(project_id, book_id)
 
-    print("[SELF_CHECK] 00 controller self-check passed.")
+    print("[SELF_CHECK] 00 controller and 01-10 scaffold pipeline self-check passed.")
     return 0
 
 
