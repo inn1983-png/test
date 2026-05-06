@@ -10,16 +10,17 @@ quality_checker = import_module("02_script_writer.core.quality_checker")
 json_repair = import_module("02_script_writer.core.json_repair")
 schema_validator = import_module("02_script_writer.core.schema_validator")
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_MAX_FINAL_REVISION_ROUNDS = 1
 
 STAGES: list[dict[str, str]] = [
     {"stage_id": "02A", "name": "adaptation_blueprint", "prompt_file": "prompts/02A_adaptation_blueprint.md", "output_file": "02A_adaptation_blueprint.json"},
     {"stage_id": "02B", "name": "script_structure", "prompt_file": "prompts/02B_script_structure.md", "output_file": "02B_script_structure.json"},
-    {"stage_id": "02C", "name": "script_draft", "prompt_file": "prompts/02C_script_draft.md", "output_file": "02C_script_draft.json"},
-    {"stage_id": "02D", "name": "production_annotations", "prompt_file": "prompts/02D_production_annotations.md", "output_file": "02D_production_annotations.json"},
-    {"stage_id": "02E", "name": "quality_check", "prompt_file": "prompts/02E_quality_check.md", "output_file": "02E_quality_check.json"},
+    {"stage_id": "02C", "name": "voice_line_plan", "prompt_file": "prompts/02C_voice_line_plan.md", "output_file": "02C_voice_line_plan.json"},
+    {"stage_id": "02D", "name": "script_draft", "prompt_file": "prompts/02D_script_draft.md", "output_file": "02D_script_draft.json"},
+    {"stage_id": "02E", "name": "production_annotations", "prompt_file": "prompts/02E_production_annotations.md", "output_file": "02E_production_annotations.json"},
+    {"stage_id": "02F", "name": "quality_check", "prompt_file": "prompts/02F_quality_check.md", "output_file": "02F_quality_check.json"},
 ]
 STAGE_INDEX = {stage["stage_id"]: index for index, stage in enumerate(STAGES)}
 
@@ -49,22 +50,11 @@ def _read_prompt(prompt_file: str) -> str:
 
 
 def initial_context() -> dict[str, dict[str, Any]]:
+    return {stage["stage_id"]: {} for stage in STAGES}
+
+
+def _source_summary(novel_analysis: dict[str, Any]) -> dict[str, Any]:
     return {
-        "02A": {},
-        "02B": {},
-        "02C": {},
-        "02D": {},
-        "02E": {},
-    }
-
-
-def build_stage_payload(
-    stage_id: str,
-    novel_analysis: dict[str, Any],
-    outputs: dict[str, dict[str, Any]],
-    final_revision_context: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    source_summary = {
         "story_understanding": novel_analysis.get("story_understanding", {}),
         "story_spine": novel_analysis.get("story_spine", {}),
         "viewer_experience_plan": novel_analysis.get("viewer_experience_plan", {}),
@@ -81,38 +71,59 @@ def build_stage_payload(
         "video_unit_candidates": novel_analysis.get("video_unit_candidates", []),
         "emotion_curve": novel_analysis.get("emotion_curve", []),
         "visual_risk_report": novel_analysis.get("visual_risk_report", {}),
+        "candidate_characters": novel_analysis.get("candidate_characters", []),
+        "candidate_scenes": novel_analysis.get("candidate_scenes", []),
+        "candidate_props": novel_analysis.get("candidate_props", []),
         "paragraphs": novel_analysis.get("paragraphs", []),
     }
+
+
+def build_stage_payload(
+    stage_id: str,
+    novel_analysis: dict[str, Any],
+    outputs: dict[str, dict[str, Any]],
+    final_revision_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    source_summary = _source_summary(novel_analysis)
 
     if stage_id == "02A":
         payload: dict[str, Any] = {
             "novel_analysis": source_summary,
-            "task": "制定剧本改编蓝图，重点防止过度压缩，保留关键事件和高刺激冲突。",
+            "task": "制定剧本改编蓝图、长度策略和反过度压缩规则。02 是剧本改编系统，不生成分镜。",
         }
     elif stage_id == "02B":
         payload = {
             "novel_analysis": source_summary,
             "adaptation_blueprint": outputs["02A"],
-            "task": "把改编蓝图拆成可写剧本的 scene_beats 和事件覆盖表。",
+            "task": "把改编蓝图拆成剧本 scene_beats、事件覆盖表、角色称呼一致性表。",
         }
     elif stage_id == "02C":
         payload = {
             "novel_analysis": source_summary,
             "adaptation_blueprint": outputs["02A"],
             "script_structure": outputs["02B"],
-            "task": "生成正式剧本正文：对白 + OS + 留白 + 动作 + 情绪。",
+            "task": "先做音频驱动语音行预拆分，输出 N/D/M/S voice_line_plan 和 6-12 秒视频单元候选。",
         }
     elif stage_id == "02D":
         payload = {
             "novel_analysis": source_summary,
-            "script_draft": outputs["02C"],
-            "task": "为 08_audio 和 06_storyboard 生成生产标注。",
+            "adaptation_blueprint": outputs["02A"],
+            "script_structure": outputs["02B"],
+            "voice_line_plan": outputs["02C"],
+            "task": "按 voice_line_plan 生成正式剧本正文：对白 + OS + 留白 + 动作 + 情绪。",
         }
     elif stage_id == "02E":
         payload = {
             "novel_analysis": source_summary,
+            "script_draft": outputs["02D"],
+            "voice_line_plan": outputs["02C"],
+            "task": "为 08_audio 和 06 单帧分镜生成剧本生产标注。只输出动作链和连续性锚点，不生成正式分镜。",
+        }
+    elif stage_id == "02F":
+        payload = {
+            "novel_analysis": source_summary,
             "stage_outputs": outputs,
-            "task": "总检 02A-02D，判断是否压缩过狠、事件遗漏、对白/OS/留白不足，并给出重跑阶段。",
+            "task": "总检 02A-02E，判断是否压缩过狠、事件遗漏、对白/OS比例失衡、12秒风险、单帧分镜准备不足，并给出重跑阶段。",
         }
     else:
         raise ValueError(f"Unknown stage_id: {stage_id}")
@@ -178,10 +189,10 @@ def _run_stage_range(client: Any, novel_analysis: dict[str, Any], outputs: dict[
     return statuses
 
 
-def _extract_retry_stage_ids(stage_e_output: dict[str, Any]) -> list[str]:
-    quality_report = stage_e_output.get("quality_report", {}) if isinstance(stage_e_output, dict) else {}
+def _extract_retry_stage_ids(stage_f_output: dict[str, Any]) -> list[str]:
+    quality_report = stage_f_output.get("quality_report", {}) if isinstance(stage_f_output, dict) else {}
     retry_stages = quality_report.get("retry_stages", []) if isinstance(quality_report, dict) else []
-    return [stage_id for stage_id in retry_stages if stage_id in STAGE_INDEX and stage_id != "02E"]
+    return [stage_id for stage_id in retry_stages if stage_id in STAGE_INDEX and stage_id != "02F"]
 
 
 def run_llm_stages(novel_analysis: dict[str, Any], output_dir: str | Path, max_retries: int = DEFAULT_MAX_RETRIES, max_final_revision_rounds: int = DEFAULT_MAX_FINAL_REVISION_ROUNDS) -> dict[str, Any]:
@@ -194,12 +205,12 @@ def run_llm_stages(novel_analysis: dict[str, Any], output_dir: str | Path, max_r
     final_revision_rounds = []
 
     for round_index in range(1, max_final_revision_rounds + 1):
-        retry_stage_ids = _extract_retry_stage_ids(outputs.get("02E", {}))
+        retry_stage_ids = _extract_retry_stage_ids(outputs.get("02F", {}))
         if not retry_stage_ids:
             break
         start_index = min(STAGE_INDEX[stage_id] for stage_id in retry_stage_ids)
-        quality_report = outputs.get("02E", {}).get("quality_report", {})
-        final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_report, "instruction": "02E 总检要求重跑。请按 quality_report.revision_instructions 修正本阶段，并保持 JSON 字段完整。"}
+        quality_report = outputs.get("02F", {}).get("quality_report", {})
+        final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_report, "instruction": "02F 总检要求重跑。请按 quality_report.revision_instructions 修正本阶段，并保持 JSON 字段完整。"}
         rerun_status = _run_stage_range(client, novel_analysis, outputs, output_dir, start_index, max_retries, final_revision_context)
         final_revision_rounds.append({"round": round_index, "retry_stage_ids": retry_stage_ids, "rerun_status": rerun_status})
         stage_status.extend(rerun_status)
@@ -215,12 +226,14 @@ def build_script_text(segments: list[dict[str, Any]]) -> str:
         stype = item.get("type")
         text = str(item.get("text", "")).strip()
         speaker = str(item.get("speaker", "")).strip()
+        tag = str(item.get("voice_line_tag", "")).strip()
+        prefix = tag if tag else ""
         if stype == "os":
-            lines.append(f"【OS】{text}")
+            lines.append(f"{prefix}【OS】{text}")
         elif stype == "dialogue":
-            lines.append(f"【{speaker or '角色'}】{text}")
+            lines.append(f"{prefix}【{speaker or '角色'}】{text}")
         elif stype == "blank":
-            lines.append("【留白】" + (text if text and text != "留白" else ""))
+            lines.append(f"{prefix}【留白】" + (text if text and text != "留白" else ""))
         elif stype == "action":
             lines.append(f"【动作】{text}")
         elif stype == "emotion":
@@ -230,12 +243,12 @@ def build_script_text(segments: list[dict[str, Any]]) -> str:
 
 def merge_stage_outputs(novel_analysis: dict[str, Any], config: dict[str, Any], stage_result: dict[str, Any]) -> dict[str, Any]:
     outputs = stage_result["outputs"]
-    a, b, c, d, e = outputs["02A"], outputs["02B"], outputs["02C"], outputs["02D"], outputs["02E"]
-    segments = c.get("segments", []) or []
-    script_text = c.get("script_text") or build_script_text(segments)
+    a, b, c, d, e, f = outputs["02A"], outputs["02B"], outputs["02C"], outputs["02D"], outputs["02E"], outputs["02F"]
+    segments = d.get("segments", []) or []
+    script_text = d.get("script_text") or build_script_text(segments)
     latest_status_by_stage = {item["stage_id"]: item for item in stage_result["stage_status"]}
     stage_scores = {stage_id: (item.get("quality") or {}).get("score") for stage_id, item in latest_status_by_stage.items()}
-    quality_report = e.get("quality_report", {}) if isinstance(e.get("quality_report", {}), dict) else {}
+    quality_report = f.get("quality_report", {}) if isinstance(f.get("quality_report", {}), dict) else {}
 
     data = {
         "schema_version": SCHEMA_VERSION,
@@ -249,29 +262,36 @@ def merge_stage_outputs(novel_analysis: dict[str, Any], config: dict[str, Any], 
             "upstream_schema_version": novel_analysis.get("schema_version"),
             "source_status": "input_found",
         },
-        "script_id": c.get("script", {}).get("script_id") or "script_001",
-        "title": c.get("script", {}).get("title") or c.get("title") or "未命名短剧剧本",
-        "format": "dialogue_os_blank",
+        "script_id": d.get("script", {}).get("script_id") or "script_001",
+        "title": d.get("script", {}).get("title") or d.get("title") or "未命名短剧剧本",
+        "format": "audio_driven_dialogue_os_blank_single_frame_ready",
         "adaptation_blueprint": a.get("adaptation_blueprint", {}),
         "coverage_plan": a.get("coverage_plan", []),
         "tone_plan": a.get("tone_plan", {}),
         "compression_guardrails": a.get("compression_guardrails", {}),
+        "length_strategy": a.get("length_strategy", {}),
         "script_structure": b.get("script_structure", {}),
         "scene_beats": b.get("scene_beats", []),
         "event_coverage_map": b.get("event_coverage_map", []),
         "retention_design": b.get("retention_design", {}),
-        "script": c.get("script", {}),
+        "character_name_usage": b.get("character_name_usage", []),
+        "voice_line_plan": c.get("voice_line_plan", []),
+        "script_video_unit_candidates": c.get("script_video_unit_candidates", []),
+        "duration_risk_report": c.get("duration_risk_report", {}),
+        "script": d.get("script", {}),
         "segments": segments,
         "script_text": script_text,
-        "production_annotations": d.get("production_annotations", {}),
-        "audio_cues": d.get("audio_cues", []),
-        "storyboard_hints": d.get("storyboard_hints", []),
-        "risk_report": d.get("risk_report", {}),
-        "evidence_index": e.get("evidence_index", []),
-        "warnings": e.get("warnings", []),
-        "revision_plan": e.get("revision_plan", {}),
+        "source_line_usage": d.get("source_line_usage", []),
+        "production_annotations": e.get("production_annotations", {}),
+        "audio_cues": e.get("audio_cues", []),
+        "visual_dramatic_units": e.get("visual_dramatic_units", []),
+        "storyboard_hints": e.get("storyboard_hints", []),
+        "risk_report": e.get("risk_report", {}),
+        "evidence_index": f.get("evidence_index", []),
+        "warnings": f.get("warnings", []),
+        "revision_plan": f.get("revision_plan", {}),
         "quality_report": {**quality_report, "stage_scores": stage_scores},
-        "notes": ["02 已采用真实 LLM 分阶段剧本改编；02E 总检可触发前置阶段重跑。"],
+        "notes": ["02 已升级为音频驱动、单帧分镜友好的真实 LLM 分阶段剧本改编系统；02F 总检可触发前置阶段重跑。"],
         "config": config,
     }
     validation = schema_validator.validate_final_output(data)
