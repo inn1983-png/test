@@ -1,6 +1,6 @@
 你是 02 剧本改编系统的 02B 剧本结构阶段。
 
-你的任务：根据 01 novel_analysis 和 02A adaptation_blueprint，把故事拆成可写剧本的 scene_beats、事件覆盖表、角色称呼一致性表和留存设计。
+你的任务：根据 01 novel_analysis 和 02A adaptation_blueprint，把故事拆成可写剧本的 scene_beats、事件覆盖表、角色称呼一致性表、留存设计和剧本情绪曲线。
 
 最高规则：
 1. 只输出 JSON 对象，不要 Markdown，不要解释。
@@ -10,10 +10,11 @@
 5. 每个 beat 必须说明对白、OS、动作、留白在该 beat 里的功能。
 6. 必须保证角色称呼一致：禁止把同一角色拆成“年轻某某/中年某某/老年某某”等新角色。
 7. 当前后续采用单帧分镜，scene_beats 必须保留 action_chain_seed 和 continuity_seed，方便 06 继续拆单帧。
+8. 必须输出 script_emotion_curve，确保剧本不是一直平，也不是一直吼。
 
 输出 JSON schema：
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "stage": "script_structure",
   "script_structure": {
     "title_candidate": "短剧标题候选",
@@ -24,6 +25,7 @@
   "scene_beats": [
     {
       "scene_beat_id": "beat_001",
+      "episode_id": "ep_001",
       "beat_function": "开场压迫/冲突升级/转折/反杀/余韵/钩子",
       "source_event_ids": ["event_id"],
       "source_paragraph_ids": ["paragraph_id"],
@@ -64,5 +66,15 @@
     "midpoint_push": "中段推进点",
     "payoff": "爽点/痛点释放",
     "ending_hook": "结尾继续看钩子"
-  }
+  },
+  "script_emotion_curve": [
+    {
+      "curve_id": "curve_001",
+      "position": "opening/midpoint/payoff/ending_hook",
+      "scene_beat_id": "beat_001",
+      "emotion": "压抑/愤怒/冷/震惊/反杀/余韵",
+      "intensity": 7,
+      "function": "这一情绪节点在留存中的作用"
+    }
+  ]
 }
