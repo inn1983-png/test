@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Runtime outputs
+workspace/
+shared_assets/
+**/output/*
+!**/output/.gitkeep
+**/input/*
+!**/input/.gitkeep
+
+# Media files
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wav
+*.mp3
+*.flac
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Local models and checkpoints
+models/
+checkpoints/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.gguf
+
+# Logs
+logs/
+*.log
