@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "description": "Optional external cleanup commands for local model resources. Disabled by default to avoid stopping user services by accident.",
+  "global_commands": [],
+  "module_commands": {
+    "01_novel_parser": [],
+    "02_script_writer": [],
+    "03_character_library": [],
+    "04_scene_library": [],
+    "05_prop_library": [],
+    "06_storyboard": [],
+    "07_storyboard_image": [],
+    "08_audio": [],
+    "09_video": [],
+    "10_final_assembly": []
+  }
+}
