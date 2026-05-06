@@ -24,9 +24,29 @@
 
 # 当前开发阶段
 
-当前阶段：打磨 00 总控基座。
+当前阶段：00 总控基座基本打磨完成，准备进入 01 小说解析系统。
 
-目标：先把运行目录、短篇/长篇模式、共享资产库、产物索引、模块调度、显存释放规则全部定稳，再进入 01 小说解析系统。
+00 当前已经覆盖：
+
+```text
+短篇 / 长篇运行目录
+长篇 shared_assets / global_memory 初始化
+runtime_context.json
+manifest.json
+artifacts.db
+pipeline 校验
+模块调度
+显存 / 本地资源释放入口
+安全清理
+产物查询
+空流程自检
+```
+
+进入 01 前，建议用户在本地执行：
+
+```bash
+python 00_main_controller/self_check.py
+```
 
 ---
 
@@ -123,17 +143,60 @@ python 00_main_controller/query_artifacts.py --run-dir workspace/projects/projec
 python 00_main_controller/query_artifacts.py --run-dir workspace/projects/project_test_001
 ```
 
+## 2026-05-07：继续打磨 00 总控基座：资源释放配置 + 空流程自检
+
+完成内容：
+
+- 更新 `00_common/resource_manager.py`
+- 新增 `configs/local_resource_release.json`
+- 更新 `00_main_controller/run_pipeline.py`
+- 新增 `00_main_controller/self_check.py`
+- 更新 `00_main_controller/README.md`
+
+新增能力：
+
+```text
+1. 本地资源释放命令配置
+2. 外部释放命令默认关闭，避免误停 ComfyUI / 本地 LLM / TTS 等服务
+3. 支持 AI_DRAMA_ENABLE_RESOURCE_COMMANDS=1 显式启用释放命令
+4. 支持 AI_DRAMA_RESOURCE_RELEASE_CONFIG 指定释放配置文件
+5. 支持 run_pipeline.py --empty-pipeline 只初始化运行上下文和产物索引
+6. 支持 self_check.py 一键检查 00 总控基座
+```
+
+自检命令：
+
+```bash
+python 00_main_controller/self_check.py
+```
+
+空流程命令：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id self_check_project --empty-pipeline
+python 00_main_controller/run_pipeline.py --mode book_chapter --book-id self_check_book --chapter-id chapter_001 --empty-pipeline
+```
+
+资源释放配置文件：
+
+```text
+configs/local_resource_release.json
+```
+
 ---
 
 # 下一步计划
 
-下一步继续打磨 00 总控基座：
+下一步建议进入 01 小说解析系统。
 
-1. 增加 pipeline 配置校验
-2. 增加本地模型释放命令配置
-3. 增加空流程自检命令
-4. 确保 00 可以跑通空流程
-5. 进入 01 小说解析系统前，让 00 的输入/输出/清理/查询全部稳定
+01 的第一轮目标不是复杂 AI 改写，而是先把输入输出边界打稳：
+
+1. 明确小说文本输入文件位置
+2. 明确章节 / 段落 / 事件 / 候选角色 / 候选场景 / 候选道具的输出结构
+3. 只提出资产候选，不直接写入长篇共享资产库
+4. 输出关键产物 `novel_analysis.json`
+5. 把关键产物登记到 `manifest.json` 和 `artifacts.db`
+6. 跑完释放本地资源
 
 ---
 
