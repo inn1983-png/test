@@ -13,14 +13,18 @@
 3. 初始化长篇共享资产库
 4. 初始化产物数据库 `artifacts.db`
 5. 初始化轻量摘要 `manifest.json`
-6. 按 `pipeline.json` 顺序调用各个子系统
-7. 把运行上下文传给每个模块
-8. 让每个模块知道自己的正式输出目录
-9. 提供安全清理工具
-10. 提供产物查询工具
-11. 提供 pipeline 配置校验工具
-12. 提供空流程自检工具
-13. 提供本地模型释放命令配置
+6. 初始化运行状态表 `run_status.json`
+7. 按 `pipeline.json` 顺序调用各个子系统
+8. 把运行上下文传给每个模块
+9. 让每个模块知道自己的正式输出目录
+10. 提供安全清理工具
+11. 提供产物查询工具
+12. 提供 pipeline 配置校验工具
+13. 提供模块输入依赖检查
+14. 提供局部运行：`--from-module` / `--only-module`
+15. 提供 dry-run 预演模式
+16. 提供空流程自检工具
+17. 提供本地模型释放命令配置
 
 ---
 
@@ -37,6 +41,9 @@
 单章数据和全书资产混在一起
 用户不知道哪些文件可以删除
 Codex 不知道该从哪里接手
+不知道哪个模块失败、失败前哪些模块成功
+只想重跑一个模块却被迫从头跑
+模块缺上游文件还继续盲跑
 ```
 
 所以工程顺序是：
@@ -71,8 +78,6 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 ```text
 workspace/projects/project_test_001/
 ```
-
----
 
 ## 2. 长篇小说章节模式
 
@@ -118,11 +123,14 @@ workspace/books/book_001/global_memory/
 00_main_controller/query_artifacts.py    # 产物查询工具
 00_common/workspace_manager.py           # 项目目录 / 长篇目录管理
 00_common/module_runner.py               # 子系统调用器
+00_common/module_contracts.py            # 模块输入 / 输出契约检查
+00_common/run_status.py                  # 模块运行状态记录
 00_common/base_module.py                 # 子系统基础工具
 00_common/artifact_db.py                 # SQLite 产物数据库
 00_common/artifact_registry.py           # 产物登记器
 00_common/artifact_resolver.py           # 后续模块查找上一步资产
 00_common/resource_manager.py            # 本地模型显存释放 / 外部释放命令配置
+configs/module_contracts.json            # 模块依赖契约配置
 configs/local_resource_release.json      # 本地资源释放命令配置
 ```
 
@@ -164,6 +172,161 @@ pipeline 是否为空
 
 ---
 
+# 局部运行
+
+## 从指定模块开始跑
+
+例如 01–05 已经完成，只想从 06 分镜开始继续：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 06_storyboard
+```
+
+它会运行：
+
+```text
+06_storyboard
+07_storyboard_image
+08_audio
+09_video
+10_final_assembly
+```
+
+## 只跑一个模块
+
+例如只重跑 06 分镜：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 06_storyboard
+```
+
+`--from-module` 和 `--only-module` 不能同时使用。
+
+---
+
+# dry-run 预演模式
+
+只打印本次运行计划，不真正执行模块：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --dry-run
+```
+
+只预演单个模块：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 01_novel_parser --dry-run
+```
+
+它会打印：
+
+```text
+mode
+run_id
+run_dir
+input_dir
+shared_assets_dir
+global_memory_dir
+每个模块的 input_dir
+每个模块的 output_dir
+每个模块 requires
+每个模块 produces
+```
+
+用于正式跑之前确认目录、模块顺序、依赖关系是否正确。
+
+---
+
+# 模块依赖检查
+
+依赖配置文件：
+
+```text
+configs/module_contracts.json
+```
+
+每个模块可以声明：
+
+```json
+{
+  "requires": [
+    {
+      "module": "01_novel_parser",
+      "name": "novel_analysis.json"
+    }
+  ],
+  "produces": [
+    {
+      "module": "02_script_writer",
+      "name": "script.json",
+      "type": "json"
+    }
+  ]
+}
+```
+
+运行模块前，00 会按以下顺序查找上游产物：
+
+```text
+1. manifest.json 的 key_outputs
+2. artifacts.db
+3. workspace 中约定的模块输出路径
+```
+
+如果缺少上游产物，00 会在模块运行前阻断，而不是盲目继续。
+
+跳过依赖检查：
+
+```bash
+python 00_main_controller/run_pipeline.py --skip-dependency-check
+```
+
+注意：当前 01–10 还处于骨架阶段，02 之后的真实关键输出尚未完成。因此完整跑 01→10 时，依赖检查可能会从 02 开始阻断。这是正确保护。调试骨架时可临时使用 `--skip-dependency-check`。
+
+---
+
+# 运行状态记录
+
+每次运行会生成：
+
+```text
+run_status.json
+```
+
+它记录：
+
+```text
+pipeline
+每个模块 status
+每个模块 start_time
+每个模块 end_time
+每个模块 duration_seconds
+每个模块 return_code
+每个模块 message
+```
+
+常见状态：
+
+```text
+pending   等待运行
+running   正在运行
+success   运行成功
+failed    运行失败
+blocked   依赖缺失，被 00 阻断
+skipped   跳过
+```
+
+这个文件用于后续判断：
+
+```text
+哪个模块失败了
+失败前哪些模块成功了
+每个模块耗时多久
+是否适合从失败点继续跑
+```
+
+---
+
 # 空流程自检
 
 00 总控层必须先能独立跑通，才能进入 01 小说解析系统。
@@ -180,6 +343,7 @@ python 00_main_controller/run_pipeline.py --mode project --project-id self_check
 workspace/projects/self_check_project/runtime_context.json
 workspace/projects/self_check_project/manifest.json
 workspace/projects/self_check_project/artifacts.db
+workspace/projects/self_check_project/run_status.json
 ```
 
 ## 只初始化长篇章节目录，不运行任何模块
@@ -194,6 +358,7 @@ python 00_main_controller/run_pipeline.py --mode book_chapter --book-id self_che
 workspace/books/self_check_book/chapters/chapter_001/runtime_context.json
 workspace/books/self_check_book/chapters/chapter_001/manifest.json
 workspace/books/self_check_book/chapters/chapter_001/artifacts.db
+workspace/books/self_check_book/chapters/chapter_001/run_status.json
 workspace/books/self_check_book/shared_assets/
 workspace/books/self_check_book/global_memory/
 ```
@@ -213,8 +378,10 @@ pipeline.json 是否能通过严格顺序校验
 runtime_context.json 是否存在
 manifest.json 是否存在
 artifacts.db 是否存在
+run_status.json 是否存在
 shared_assets 默认文件是否存在
 global_memory 默认文件是否存在
+--only-module + --dry-run 是否可用
 ```
 
 默认自检结束后会删除临时目录。
@@ -279,23 +446,6 @@ set AI_DRAMA_ENABLE_RESOURCE_COMMANDS=1
 
 ```bash
 set AI_DRAMA_RESOURCE_RELEASE_CONFIG=configs/local_resource_release.json
-```
-
-配置示例：
-
-```json
-{
-  "enabled": true,
-  "global_commands": [],
-  "module_commands": {
-    "09_video": [
-      "python scripts/unload_video_model.py"
-    ],
-    "08_audio": [
-      "python scripts/unload_tts_model.py"
-    ]
-  }
-}
 ```
 
 ---
@@ -515,5 +665,5 @@ workspace/books/{book_id}/chapters/{chapter_id}/{module_name}/
 # 当前 00 后续待做
 
 1. 在真实本地环境执行 `python 00_main_controller/self_check.py`
-2. 确认空流程通过后，进入 01 小说解析系统
+2. 确认 00 自检通过后，进入 01 小说解析系统
 3. 后续根据本地 ComfyUI / LLM / TTS 实际卸载方式，再逐步补充 `configs/local_resource_release.json`
