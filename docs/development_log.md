@@ -20,7 +20,7 @@
 ```text
 00 + 01–10 子系统框架已能闭环。
 01 理论搭建已完成，进入等待统一测试阶段。
-02 剧本改编系统已升级到 schema 1.1，成为音频驱动、单帧分镜友好的真实 LLM 子系统。
+02 剧本改编系统已升级到 schema 1.2，成为音频驱动、单帧分镜友好、多版本评估、失败样本回灌的真实 LLM 子系统。
 ```
 
 01 当前能力：
@@ -44,12 +44,12 @@ JSON 修复
 
 ```text
 真实 LLM 分阶段剧本改编
-02A 改编蓝图 + 长度策略
-02B 剧本结构 + 角色称呼一致性 + 连续性种子
+02A 改编蓝图 + 长度策略 + 分集/分段计划 + 多版本策略
+02B 剧本结构 + 角色称呼一致性 + 连续性种子 + 情绪曲线
 02C 语音行预拆分 + 6-12 秒视频单元候选
-02D 正式剧本 + 原文关键句继承
-02E 剧本生产标注 + 单帧分镜准备字段
-02F 总检评分
+02D 多版本正式剧本 + 最终版本选择 + 原文关键句继承 + 口播节奏检查
+02E 剧本生产标注 + 单帧分镜准备字段 + 画面可执行性 + 人物负载 + 连续性链表
+02F 总检评分 + 失败样本回灌建议
 JSON 修复
 阶段评分与修改意见重跑
 02F 总检触发阶段重跑
@@ -90,17 +90,6 @@ script.json / script.txt / script_meta.json 输出
 01_novel_parser/core/stage_runner.py
 ```
 
-阶段提示词：
-
-```text
-01_novel_parser/prompts/01A_story_understanding.md
-01_novel_parser/prompts/01B_paragraph_split.md
-01_novel_parser/prompts/01C_event_graph.md
-01_novel_parser/prompts/01D_candidate_extract.md
-01_novel_parser/prompts/01E_production_predict.md
-01_novel_parser/prompts/01F_quality_check.md
-```
-
 ## 02 剧本改编系统
 
 正式入口：
@@ -128,6 +117,14 @@ script.json / script.txt / script_meta.json 输出
 02_script_writer/prompts/02D_script_draft.md
 02_script_writer/prompts/02E_production_annotations.md
 02_script_writer/prompts/02F_quality_check.md
+```
+
+测试与回灌：
+
+```text
+02_script_writer/tests/README.md
+02_script_writer/tests/failure_cases/README.md
+02_script_writer/prompt_tuning_notes.md
 ```
 
 关键输出：
@@ -191,7 +188,7 @@ schema_version = 1.2
 schema：
 
 ```text
-schema_version = 1.1
+schema_version = 1.2
 ```
 
 02 最高任务：
@@ -206,8 +203,15 @@ schema_version = 1.1
 剧本改编
 对白 / OS / 留白 / 动作 / 情绪
 N/D/M/S 语音行预拆分
+分集/分段计划
+多版本剧本生成与选择
+原文关键句继承
+口播节奏检查
 剧本层面的音频提示
 剧本层面的单帧分镜动作链和连续性提示
+画面可执行性检查
+角色上场人数负载检查
+失败样本回灌建议
 剧本质量评分和修改意见
 ```
 
@@ -229,7 +233,7 @@ ComfyUI 调用
 ```text
 单帧 = 生产单位
 四宫格 = 后续连续性预览 / 检查单位
-02 只输出 visual_dramatic_units / storyboard_hints 等剧本层动作链和连续性提示。
+02 只输出 visual_dramatic_units / storyboard_hints / continuity_chain 等剧本层动作链和连续性提示。
 ```
 
 02 反过度压缩规则：
@@ -238,7 +242,7 @@ ComfyUI 调用
 不得把多个关键事件压成一句话。
 不得只用 OS 概括冲突。
 原文信息量较大时，宁可增加剧本段落和语音行，也不能强行压成 2 分钟。
-02F 必须检查是否压缩过狠，并可触发 02B、02C 或 02D 重跑。
+02F 必须检查是否压缩过狠，并可触发 02A、02B、02C、02D 或 02E 重跑。
 ```
 
 02 音频驱动规则：
@@ -249,38 +253,6 @@ ComfyUI 调用
 N/D/M 必须有 tts_text。
 D 必须有稳定 speaker。
 语音行和 script_video_unit_candidates 必须提前标记 12 秒风险。
-```
-
----
-
-# 01 真实执行机制
-
-## 真实 LLM
-
-01 不支持占位解析。必须配置：
-
-```bash
-set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
-set AI_DRAMA_LLM_MODEL=你的本地模型名
-```
-
-## 分阶段
-
-```text
-01A 全文理解
-01B 段落切分标注
-01C 事件图谱
-01D 全量候选提取
-01E 声音和视频生产预判
-01F 汇总校验
-```
-
-## 评分与重跑
-
-```text
-每阶段生成后 quality_checker.py 评分。
-低于阈值时生成 revision_instructions，并把修改意见传回同阶段重跑。
-01F 总检如果输出 needs_retry=true 和 retry_stages，会从最早有问题的阶段开始，连同后续阶段再跑一轮。
 ```
 
 ---
@@ -311,15 +283,6 @@ set AI_DRAMA_LLM_TEMPERATURE=0.25
 02D 正式剧本
 02E 剧本生产标注
 02F 总检评分
-```
-
-## JSON 修复
-
-LLM 返回 JSON 解析失败时：
-
-```text
-02_script_writer/core/json_repair.py 把 broken_json 和错误原因发回 LLM
-要求只修复 JSON 格式
 ```
 
 ## 评分与重跑
@@ -354,11 +317,18 @@ segment_id 是否缺失或重复
 segment type 是否合法
 对白 segment 是否有 speaker
 segment 是否绑定真实 voice_line_id
+script_versions 是否为空
+selected_version_id 是否存在于 script_versions
 script_text 是否为空
 audio_cues / storyboard_hints / visual_dramatic_units 是否引用真实 segment_id / voice_line_id
 event_coverage_map 是否为空
 source_line_usage 是否为空
 character_name_usage 是否为空
+episode_split_plan 是否为空
+script_emotion_curve 是否为空
+continuity_chain 是否引用真实 visual_unit_id
+failure_learning_notes 是否为空
+tts_readability_report / visual_executability_report / character_load_report 是否为空
 ```
 
 ---
@@ -403,19 +373,11 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 # 用户最新明确要求
 
 ```text
-先把所有子系统的框架都弄起来，再一次性测试，慢慢精细打磨每一步。
-每一步改动都写入 README 或文档。
-后续尽量连续修改，不需要每一次小改动都让用户点击确认。
-01 必须通读用户给出的内容，理解到底说的是什么。
-角色/场景/道具候选越详细越好，不怕多，怕遗漏。
-只要文章里面提到的人、地点、物件都需要提取出来作为候选。
-01 不能一次塞所有内容给 LLM；必须分阶段使用不同输入和不同提示词。
-所有需要 LLM 的 01A–01F 都必须真实调用 LLM，不允许占位文件。
-评分必须给出修改意见，并能让 LLM 按修改意见再执行。
 02 是剧本改编系统，重点生成正式剧本，不是分镜系统、资产系统或视频系统。
 02 必须延续 01 的分阶段真实 LLM + 评分 + 修改意见重跑机制。
 02 必须防止剧本压缩过狠，不能把多个关键事件压成一句话。
 02 采用单帧分镜路线：单帧分镜作为生产单位，四宫格仅作为后续连续性检查/预览单位。
 02 要补齐音频行、视频单元预切分、单帧分镜准备字段、原文继承、角色一致、长度策略和总检重跑。
+02 还要补齐：多版本剧本选择、强制分集/分段、剧本情绪曲线、口播节奏检查、画面可执行性检查、角色上场人数控制、单帧连续性链表、失败样本回灌机制。
 后续根据真实测试数据继续精修。
 ```
