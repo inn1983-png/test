@@ -20,7 +20,7 @@
 ```text
 00 + 01–10 子系统框架已能闭环。
 01 理论搭建已完成，进入等待统一测试阶段。
-02 剧本改编系统已完成理论搭建，延续 01 的分阶段真实 LLM + 评分 + 修改意见重跑机制。
+02 剧本改编系统已升级到 schema 1.1，成为音频驱动、单帧分镜友好的真实 LLM 子系统。
 ```
 
 01 当前能力：
@@ -44,14 +44,15 @@ JSON 修复
 
 ```text
 真实 LLM 分阶段剧本改编
-02A 改编蓝图
-02B 剧本结构
-02C 正式剧本
-02D 剧本生产标注
-02E 总检评分
+02A 改编蓝图 + 长度策略
+02B 剧本结构 + 角色称呼一致性 + 连续性种子
+02C 语音行预拆分 + 6-12 秒视频单元候选
+02D 正式剧本 + 原文关键句继承
+02E 剧本生产标注 + 单帧分镜准备字段
+02F 总检评分
 JSON 修复
 阶段评分与修改意见重跑
-02E 总检触发阶段重跑
+02F 总检触发阶段重跑
 最终 schema 硬规则校验
 script.json / script.txt / script_meta.json 输出
 ```
@@ -100,13 +101,6 @@ script.json / script.txt / script_meta.json 输出
 01_novel_parser/prompts/01F_quality_check.md
 ```
 
-测试资料：
-
-```text
-01_novel_parser/input/novel.txt.example
-01_novel_parser/tests/README.md
-```
-
 ## 02 剧本改编系统
 
 正式入口：
@@ -130,9 +124,10 @@ script.json / script.txt / script_meta.json 输出
 ```text
 02_script_writer/prompts/02A_adaptation_blueprint.md
 02_script_writer/prompts/02B_script_structure.md
-02_script_writer/prompts/02C_script_draft.md
-02_script_writer/prompts/02D_production_annotations.md
-02_script_writer/prompts/02E_quality_check.md
+02_script_writer/prompts/02C_voice_line_plan.md
+02_script_writer/prompts/02D_script_draft.md
+02_script_writer/prompts/02E_production_annotations.md
+02_script_writer/prompts/02F_quality_check.md
 ```
 
 关键输出：
@@ -189,32 +184,6 @@ schema_version = 1.2
 01 不负责最终筛选、合并、去重。03/04/05 负责标准化。
 ```
 
-故事质量字段：
-
-```text
-story_understanding
-story_spine
-viewer_experience_plan
-information_reveal_plan
-character_arc_map
-scene_value_map
-golden_lines
-confusion_risk_report
-adaptation_strategy
-```
-
-生产预判字段：
-
-```text
-voice_line_candidates
-video_unit_candidates
-emotion_curve
-asset_binding_hints
-visual_risk_report
-evidence_index
-quality_report
-```
-
 ---
 
 # 02 核心原则
@@ -222,13 +191,13 @@ quality_report
 schema：
 
 ```text
-schema_version = 1.0
+schema_version = 1.1
 ```
 
 02 最高任务：
 
 ```text
-把 01 的小说解析结果改编成正式剧本，重点是对白 + OS + 留白 + 动作 + 情绪。
+把 01 的小说解析结果改编成正式剧本，并提前适配音频驱动、6-12 秒视频单元和后续单帧分镜。
 ```
 
 02 只做：
@@ -236,8 +205,9 @@ schema_version = 1.0
 ```text
 剧本改编
 对白 / OS / 留白 / 动作 / 情绪
+N/D/M/S 语音行预拆分
 剧本层面的音频提示
-剧本层面的画面动作锚点
+剧本层面的单帧分镜动作链和连续性提示
 剧本质量评分和修改意见
 ```
 
@@ -254,11 +224,12 @@ ComfyUI 调用
 直接写入 shared_assets
 ```
 
-02D 边界说明：
+02 单帧分镜路线：
 
 ```text
-02D 的 storyboard_hints 只是剧本层面的画面动作锚点，方便 06 分镜系统使用。
-它不是正式分镜，也不是图像提示词。
+单帧 = 生产单位
+四宫格 = 后续连续性预览 / 检查单位
+02 只输出 visual_dramatic_units / storyboard_hints 等剧本层动作链和连续性提示。
 ```
 
 02 反过度压缩规则：
@@ -266,8 +237,18 @@ ComfyUI 调用
 ```text
 不得把多个关键事件压成一句话。
 不得只用 OS 概括冲突。
-原文信息量较大时，宁可增加剧本段落，也不能强行压成 2 分钟。
-02E 必须检查是否压缩过狠，并可触发 02B 或 02C 重跑。
+原文信息量较大时，宁可增加剧本段落和语音行，也不能强行压成 2 分钟。
+02F 必须检查是否压缩过狠，并可触发 02B、02C 或 02D 重跑。
+```
+
+02 音频驱动规则：
+
+```text
+02C 必须输出 voice_line_plan。
+语音行类型只能为 N / D / M / S。
+N/D/M 必须有 tts_text。
+D 必须有稳定 speaker。
+语音行和 script_video_unit_candidates 必须提前标记 12 秒风险。
 ```
 
 ---
@@ -294,52 +275,12 @@ set AI_DRAMA_LLM_MODEL=你的本地模型名
 01F 汇总校验
 ```
 
-## 段落稳定
-
-01B 采用：
-
-```text
-paragraph_splitter.py 程序锁定 paragraph_id / text / start_char / end_char
-LLM 只补充章节、段落类型、timeline 和属性标注
-```
-
-## 候选分批
-
-01D 采用：
-
-```text
-chunk_manager.py 按段落分批
-每批调用 LLM 提取候选
-程序合并所有批次
-不删除不确定重复项
-```
-
-## JSON 修复
-
-LLM 返回 JSON 解析失败时：
-
-```text
-json_repair.py 把 broken_json 和错误原因发回 LLM
-要求只修复 JSON 格式
-```
-
 ## 评分与重跑
 
 ```text
 每阶段生成后 quality_checker.py 评分。
 低于阈值时生成 revision_instructions，并把修改意见传回同阶段重跑。
 01F 总检如果输出 needs_retry=true 和 retry_stages，会从最早有问题的阶段开始，连同后续阶段再跑一轮。
-```
-
-## 硬规则校验
-
-最终合并后 `schema_validator.py` 检查：
-
-```text
-必要顶层字段
-paragraphs 是否为空
-event_graph.events 是否为空
-事件 / 候选 / voice_line / video_unit / evidence 的 ID 引用是否存在
 ```
 
 ---
@@ -366,9 +307,10 @@ set AI_DRAMA_LLM_TEMPERATURE=0.25
 ```text
 02A 改编蓝图
 02B 剧本结构
-02C 正式剧本
-02D 剧本生产标注
-02E 总检评分
+02C 语音行预拆分
+02D 正式剧本
+02E 剧本生产标注
+02F 总检评分
 ```
 
 ## JSON 修复
@@ -385,14 +327,14 @@ LLM 返回 JSON 解析失败时：
 ```text
 每阶段生成后 quality_checker.py 评分。
 低于阈值时生成 revision_instructions，并把修改意见传回同阶段重跑。
-02E 总检如果输出 needs_retry=true 和 retry_stages，会从最早有问题的阶段开始，连同后续阶段再跑一轮。
+02F 总检如果输出 needs_retry=true 和 retry_stages，会从最早有问题的阶段开始，连同后续阶段再跑一轮。
 ```
 
 示例：
 
 ```text
-02E 发现剧本结构压缩过狠 → retry_stages = ["02B"]
-系统会重跑：02B → 02C → 02D → 02E
+02F 发现语音行超过 12 秒 → retry_stages = ["02C"]
+系统会重跑：02C → 02D → 02E → 02F
 ```
 
 ## 硬规则校验
@@ -401,13 +343,22 @@ LLM 返回 JSON 解析失败时：
 
 ```text
 必要顶层字段
+voice_line_plan 是否为空
+voice_line_id 是否缺失或重复
+voice_line_type 是否只能为 N/D/M/S
+D 类型 voice_line 是否有 speaker
+N/D/M 是否有 tts_text
+voice_line / video_unit 是否超过 12 秒
 segments 是否为空
 segment_id 是否缺失或重复
 segment type 是否合法
 对白 segment 是否有 speaker
+segment 是否绑定真实 voice_line_id
 script_text 是否为空
-audio_cues / storyboard_hints 是否引用真实 segment_id
+audio_cues / storyboard_hints / visual_dramatic_units 是否引用真实 segment_id / voice_line_id
 event_coverage_map 是否为空
+source_line_usage 是否为空
+character_name_usage 是否为空
 ```
 
 ---
@@ -458,12 +409,13 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 01 必须通读用户给出的内容，理解到底说的是什么。
 角色/场景/道具候选越详细越好，不怕多，怕遗漏。
 只要文章里面提到的人、地点、物件都需要提取出来作为候选。
-为了最终视频讲的故事质量，story_spine、viewer_experience_plan、information_reveal_plan、character_arc_map、scene_value_map、golden_lines、confusion_risk_report、adaptation_strategy 这 8 个字段都需要。
 01 不能一次塞所有内容给 LLM；必须分阶段使用不同输入和不同提示词。
 所有需要 LLM 的 01A–01F 都必须真实调用 LLM，不允许占位文件。
 评分必须给出修改意见，并能让 LLM 按修改意见再执行。
-先完成 01 的理论搭建，后续再根据具体数据精修。
 02 是剧本改编系统，重点生成正式剧本，不是分镜系统、资产系统或视频系统。
 02 必须延续 01 的分阶段真实 LLM + 评分 + 修改意见重跑机制。
 02 必须防止剧本压缩过狠，不能把多个关键事件压成一句话。
+02 采用单帧分镜路线：单帧分镜作为生产单位，四宫格仅作为后续连续性检查/预览单位。
+02 要补齐音频行、视频单元预切分、单帧分镜准备字段、原文继承、角色一致、长度策略和总检重跑。
+后续根据真实测试数据继续精修。
 ```
