@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from importlib import import_module
 from typing import Any
 
 
@@ -11,6 +12,5 @@ def repair_json_with_llm(client: Any, broken_json: str, error: str) -> dict[str,
 """.strip()
     payload = {"error": error, "broken_json": broken_json}
     text = client.complete_text(system_prompt, json.dumps(payload, ensure_ascii=False, indent=2))
-    from 03_character_system.core.llm_client import parse_json_from_text  # type: ignore
-
-    return parse_json_from_text(text)
+    llm_client = import_module("03_character_system.core.llm_client")
+    return llm_client.parse_json_from_text(text)
