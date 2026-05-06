@@ -7,6 +7,7 @@ from typing import Any
 from importlib import import_module
 
 io_utils = import_module("00_common.io_utils")
+artifact_registry = import_module("00_common.artifact_registry")
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
@@ -66,10 +67,39 @@ def bootstrap_module(module_name: str, display_name: str, description: str) -> d
     return {**config, "runtime": runtime}
 
 
+def register_output_artifact(
+    module_name: str,
+    artifact_name: str,
+    path: str | Path,
+    artifact_type: str,
+    description: str = "",
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    run_dir = os.getenv("AI_DRAMA_RUN_DIR")
+    if not run_dir:
+        return
+    artifact_registry.register_artifact(
+        run_dir=run_dir,
+        module_name=module_name,
+        artifact_name=artifact_name,
+        path=path,
+        artifact_type=artifact_type,
+        description=description,
+        metadata=metadata,
+    )
+
+
 def write_placeholder_output(module_name: str, data: dict[str, Any]) -> None:
     _, output_dir = get_runtime_module_dirs(module_name)
     output_path = output_dir / "result.json"
     io_utils.write_json(output_path, data)
+    register_output_artifact(
+        module_name=module_name,
+        artifact_name="result",
+        path=output_path,
+        artifact_type="json",
+        description="Scaffold placeholder output.",
+    )
 
 
 def module_output_path(module_name: str, filename: str) -> Path:
