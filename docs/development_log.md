@@ -24,7 +24,7 @@
 
 # 当前开发阶段
 
-当前阶段：00 总控基座基本打磨完成，准备进入 01 小说解析系统。
+当前阶段：00 总控基座已补齐最后一轮实用功能，建议先封版，准备进入 01 小说解析系统。
 
 00 当前已经覆盖：
 
@@ -34,8 +34,12 @@
 runtime_context.json
 manifest.json
 artifacts.db
+run_status.json
 pipeline 校验
 模块调度
+模块输入依赖检查
+局部运行 --from-module / --only-module
+dry-run 预演模式
 显存 / 本地资源释放入口
 安全清理
 产物查询
@@ -181,6 +185,51 @@ python 00_main_controller/run_pipeline.py --mode book_chapter --book-id self_che
 
 ```text
 configs/local_resource_release.json
+```
+
+## 2026-05-07：00 总控最后一轮补强：状态、局部运行、依赖检查、dry-run
+
+完成内容：
+
+- 新增 `00_common/run_status.py`
+- 新增 `00_common/module_contracts.py`
+- 新增 `configs/module_contracts.json`
+- 更新 `00_common/module_runner.py`
+- 更新 `00_main_controller/run_pipeline.py`
+- 更新 `00_main_controller/self_check.py`
+- 更新 `00_main_controller/README.md`
+
+新增能力：
+
+```text
+1. 每次运行生成 run_status.json
+2. 每个模块记录 pending / running / success / failed / blocked / skipped
+3. 记录 start_time / end_time / duration_seconds / return_code / message
+4. 支持 --from-module 从指定模块继续跑
+5. 支持 --only-module 只跑一个模块
+6. 支持 --dry-run 只预演运行计划，不执行模块
+7. 支持 configs/module_contracts.json 声明模块 requires / produces
+8. 运行模块前检查上游关键产物是否存在
+9. 支持 --skip-dependency-check 临时跳过依赖检查
+10. self_check.py 增加 run_status.json 和 dry-run 检查
+```
+
+示例命令：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 06_storyboard
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 06_storyboard
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --dry-run
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --skip-dependency-check
+```
+
+重要说明：
+
+```text
+当前 01–10 还处于骨架阶段，02 之后的真实关键输出尚未完成。
+因此完整跑 01→10 时，依赖检查可能会从 02 开始阻断。
+这是正确保护。
+调试骨架时可临时使用 --skip-dependency-check。
 ```
 
 ---
