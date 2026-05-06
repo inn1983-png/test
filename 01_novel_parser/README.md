@@ -2,9 +2,9 @@
 
 ## 模块定位
 
-小说解析系统是整个流水线的第一步。
+01 小说解析系统是整个流水线的第一步。
 
-它不负责写剧本，不负责分镜，不负责生成角色图。
+它不负责写剧本，不负责分镜，不负责生成角色图，不负责生成视频提示词。
 
 它只负责：
 
@@ -14,6 +14,29 @@
 再把原始小说文本拆干净
 提取后续模块需要的基础信息
 为最终视频故事质量提供控制信息
+```
+
+---
+
+# 最高原则
+
+01 只做：
+
+```text
+理解 + 解析 + 故事质量控制 + 生产预判
+```
+
+01 禁止做：
+
+```text
+改写小说
+扩写剧情
+压缩成剧本
+生成正式剧本
+生成分镜
+生成图像提示词
+生成视频提示词
+直接写入 shared_assets
 ```
 
 ---
@@ -36,7 +59,7 @@
 story_understanding
 ```
 
-`story_understanding` 用于回答：
+它用于回答：
 
 ```text
 这篇故事一句话讲什么
@@ -58,7 +81,7 @@ story_understanding
 
 01 不直接写剧本，但必须为 02 提供故事质量控制字段。
 
-新增 8 个故事质量字段：
+schema 1.2 必须包含 8 个故事质量字段：
 
 ```text
 story_spine
@@ -71,7 +94,7 @@ confusion_risk_report
 adaptation_strategy
 ```
 
-它们的目的：
+用途：
 
 ```text
 story_spine：保证故事不散，有清晰主轴
@@ -132,47 +155,303 @@ adaptation_strategy：给 02 一个总体改编策略，但不直接写剧本
 
 ---
 
-# 输入
+# 重要：01 不允许一次大 prompt 完成
 
-正式 pipeline 输入：
+01 的最终输出很多，但不能一次把所有内容都塞给 LLM。
+
+错误做法：
 
 ```text
-workspace/projects/{project_id}/input/novel.txt
+一个超大 prompt + 全文小说 → 一次生成完整 novel_analysis.json
 ```
 
-或长篇章节模式：
+这样容易导致：
 
 ```text
-workspace/books/{book_id}/chapters/{chapter_id}/input/novel.txt
+漏字段
+漏角色/场景/道具候选
+JSON 截断
+前后理解不一致
+把解析和改写混在一起
+只抓局部爆点，忽略全文主线
 ```
 
-单模块调试输入：
+正确做法：
 
 ```text
-01_novel_parser/input/novel.txt
+多阶段解析
+每一阶段给 LLM 不同输入
+每一阶段使用不同提示词
+每一阶段输出不同中间结果
+最后由程序合并成 novel_analysis.json
 ```
 
 ---
 
-# 输出
+# 01 分阶段 LLM 工作流
 
-正式 pipeline 输出：
+## 01A：全文理解阶段
 
-```text
-workspace/projects/{project_id}/01_novel_parser/novel_analysis.json
-```
-
-或长篇章节模式：
+输入：
 
 ```text
-workspace/books/{book_id}/chapters/{chapter_id}/01_novel_parser/novel_analysis.json
+完整 novel.txt
 ```
 
-单模块调试输出：
+提示词目标：
 
 ```text
-01_novel_parser/output/novel_analysis.json
+只理解全文，不提取全量候选，不写剧本。
 ```
+
+输出：
+
+```text
+story_understanding
+story_spine
+viewer_experience_plan
+information_reveal_plan
+adaptation_strategy
+misread_prevention
+```
+
+作用：
+
+```text
+先确定故事到底讲什么，主角是谁，核心矛盾是什么，故事主轴是什么，信息释放怎么控制。
+```
+
+---
+
+## 01B：段落切分阶段
+
+输入：
+
+```text
+完整 novel.txt
+```
+
+提示词目标：
+
+```text
+只切段，不总结，不改写。
+```
+
+输出：
+
+```text
+chapters
+paragraphs
+timeline 初步标记
+```
+
+每个段落必须有：
+
+```text
+paragraph_id
+chapter_id
+index
+text
+start_char
+end_char
+paragraph_type
+```
+
+作用：
+
+```text
+后续所有事件、候选、金句、证据都必须能回到 paragraph_id。
+```
+
+---
+
+## 01C：事件图谱阶段
+
+输入：
+
+```text
+story_understanding
+story_spine
+paragraphs
+```
+
+提示词目标：
+
+```text
+只提取事件、因果、冲突、高留存片段，不提取全量资产候选。
+```
+
+输出：
+
+```text
+event_graph
+conflicts
+high_retention_segments
+scene_value_map
+character_arc_map
+```
+
+作用：
+
+```text
+搞清楚故事怎么推进，哪些事件是因果、反转、铺垫、回忆、插叙，哪些戏值得后续重点改编。
+```
+
+---
+
+## 01D：全量候选提取阶段
+
+输入：
+
+```text
+paragraphs
+event_graph
+candidate_extraction_policy
+```
+
+提示词目标：
+
+```text
+只提取文章里提到过的全部人、地点、物件。
+不筛选，不压缩，不最终合并。
+```
+
+输出：
+
+```text
+candidate_characters
+candidate_scenes
+candidate_props
+asset_binding_hints
+visual_risk_report
+```
+
+建议执行方式：
+
+```text
+按段落批量提取
+或按事件批量提取
+最后程序汇总候选
+```
+
+硬规则：
+
+```text
+只要文章里提到过，就必须输出为候选。
+不确定也要输出，confidence 可以低。
+```
+
+---
+
+## 01E：声音和视频生产预判阶段
+
+输入：
+
+```text
+story_understanding
+story_spine
+event_graph
+paragraphs
+golden_lines 初稿
+```
+
+提示词目标：
+
+```text
+不写正式剧本，只判断哪些原文信息适合变成旁白、对白、心理 OS、留白，以及哪些事件适合 6–12 秒视频单元。
+```
+
+输出：
+
+```text
+voice_line_candidates
+video_unit_candidates
+emotion_curve
+golden_lines
+confusion_risk_report
+```
+
+作用：
+
+```text
+提前服务 02 剧本、08 音频、09 视频，避免后面才发现台词太长、事件太挤、观众看不懂。
+```
+
+---
+
+## 01F：汇总校验阶段
+
+输入：
+
+```text
+01A–01E 的所有中间结果
+paragraphs
+原文 novel.txt
+```
+
+提示词目标：
+
+```text
+检查遗漏、矛盾、误读、JSON 缺字段、证据不足。
+```
+
+输出：
+
+```text
+evidence_index
+quality_report
+warnings
+chapter_memory_update
+最终 novel_analysis.json
+```
+
+重点检查：
+
+```text
+故事主轴是否清楚
+主角是否明确
+事件图谱是否断裂
+时间线是否混乱
+文章提到的人、地点、物件是否全部进入候选
+金句是否漏掉
+所有关键判断是否能回查 paragraph_id
+是否需要重跑某一阶段
+```
+
+---
+
+# 01 内部建议目录结构
+
+后续精修 01 时，可以按下面结构拆：
+
+```text
+01_novel_parser/
+  run.py
+  prompts/
+    01A_story_understanding.md
+    01B_paragraph_split.md
+    01C_event_graph.md
+    01D_candidate_extract.md
+    01E_production_predict.md
+    01F_quality_check.md
+  core/
+    llm_client.py
+    paragraph_splitter.py
+    schema_builder.py
+    stage_runner.py
+    candidate_merger.py
+    evidence_builder.py
+    quality_checker.py
+  intermediate/
+    01A_story_understanding.json
+    01B_paragraphs.json
+    01C_event_graph.json
+    01D_candidates.json
+    01E_production_predict.json
+    01F_quality_check.json
+```
+
+注意：这只是 01 内部步骤，不是新建 01A–01F 子系统。
 
 ---
 
@@ -184,7 +463,7 @@ workspace/books/{book_id}/chapters/{chapter_id}/01_novel_parser/novel_analysis.j
 schema_version = 1.2
 ```
 
-建议顶层结构：
+顶层结构：
 
 ```json
 {
@@ -235,342 +514,6 @@ schema_version = 1.2
 
 ---
 
-# 8 个故事质量字段
-
-## story_spine
-
-用于固定故事主轴。
-
-```text
-opening_state
-inciting_incident
-rising_pressure
-key_turning_point
-climax
-ending_state
-viewer_question
-```
-
-## viewer_experience_plan
-
-用于规划观众情绪体验。
-
-```text
-opening_emotion
-middle_emotion
-climax_emotion
-ending_emotion
-primary_viewer_question
-retention_strategy
-```
-
-## information_reveal_plan
-
-用于控制信息释放顺序。
-
-```text
-content
-known_by_characters
-known_by_viewer_at_start
-best_reveal_event_id
-reveal_too_early_risk
-reveal_too_late_risk
-```
-
-## character_arc_map
-
-用于记录人物变化。
-
-```text
-character
-start_belief
-pressure
-choice
-change
-end_belief
-```
-
-## scene_value_map
-
-用于判断每场戏的价值。
-
-```text
-event_id
-scene_function
-story_value
-visual_value
-dialogue_value
-emotion_value
-can_merge_with
-can_skip
-reason
-```
-
-## golden_lines
-
-用于提取原文金句、狠话、关键信息句。
-
-```text
-line_id
-raw_text
-speaker
-line_type
-event_id
-paragraph_id
-keep_priority
-why
-```
-
-01 只提取原文句子，不改写。
-
-## confusion_risk_report
-
-用于提前标记观众看不懂风险。
-
-```text
-unclear_protagonist
-unclear_relationships
-unclear_timeline
-missing_motivation
-too_many_names
-too_many_events
-requires_explanation
-```
-
-## adaptation_strategy
-
-用于给 02 总体改编方向。
-
-```text
-recommended_structure
-opening_strategy
-compression_strategy
-dialogue_strategy
-os_strategy
-ending_strategy
-guardrail
-```
-
-01 只给策略，不直接写剧本。
-
----
-
-# story_understanding 字段
-
-`story_understanding` 是 01 的最高优先级输出。
-
-建议字段：
-
-```json
-{
-  "requires_full_reading": true,
-  "one_sentence_summary": "一句话说明整篇内容到底讲的是什么",
-  "full_story_summary": "不改写、不扩写，只概括全文真实主线",
-  "core_premise": "故事成立的核心前提",
-  "protagonist_journey": {
-    "protagonist": "主角是谁",
-    "goal": "主角想要什么",
-    "misbelief": "主角开局的误解、执念或盲区",
-    "start_state": "主角开局处境、身份、误解或欲望",
-    "pressure": "主角遭遇的主要压迫或困境",
-    "turning_point": "主角认知或命运发生变化的关键点",
-    "end_state": "本章或本文末尾主角处境变化"
-  },
-  "central_conflict": "全文最核心的矛盾，不是局部争吵",
-  "deep_theme": "故事真正想表达的底层主题",
-  "world_rules": [],
-  "relationship_core": [],
-  "must_not_misread": [],
-  "adaptation_guardrails": []
-}
-```
-
----
-
-# candidate_extraction_policy 字段
-
-`candidate_extraction_policy` 用来约束候选提取。
-
-核心策略：
-
-```text
-extract_every_mentioned_candidate
-```
-
-必须明确：
-
-```text
-只要文章提到，就进入候选
-不因重要性低而过滤
-不因只出现一次而过滤
-不因没有名字而过滤
-不因只是群体角色而过滤
-不因只是被提到但没出场而过滤
-```
-
----
-
-# event_graph 字段
-
-01 不只输出事件列表，还要输出事件图谱。
-
-```json
-{
-  "event_graph": {
-    "events": [],
-    "event_edges": [],
-    "main_event_path": [],
-    "side_event_paths": []
-  }
-}
-```
-
-事件之间必须记录：
-
-```text
-因果
-推进
-反转
-铺垫
-回忆
-插叙
-并行支线
-```
-
----
-
-# voice_line_candidates 字段
-
-01 不写剧本，但要提前判断哪些原文信息适合转成：
-
-```text
-N：旁白
-D：对白
-M：心理 OS
-S：留白
-```
-
-用于后续 02、08、09 提前考虑音频长度和视频单元切分。
-
----
-
-# video_unit_candidates 字段
-
-01 不生成视频 JSON，但要预判哪些事件适合成为 6–12 秒视频单元。
-
-每个候选单元应记录：
-
-```text
-event_id
-voice_line_candidate_ids
-main_scene
-main_characters
-main_action_chain
-estimated_duration_sec
-target_duration_range_sec
-single_scene_required
-action_chain_count
-needs_split
-split_warning
-```
-
----
-
-# visual_risk_report 字段
-
-用于提前标记后续图像/视频容易出错的地方：
-
-```text
-性别不明确
-年龄不明确
-身份不明确
-现代物品风险
-场景连续性风险
-人物数量过多
-人物数量不清
-道具混淆风险
-风格风险
-```
-
----
-
-# evidence_index 字段
-
-01 的关键判断必须尽量回到原文证据。
-
-尤其是：
-
-```text
-story_understanding
-story_spine
-event_graph
-candidate_characters
-candidate_scenes
-candidate_props
-golden_lines
-conflicts
-high_retention_segments
-```
-
-每条证据建议包含：
-
-```text
-evidence_id
-paragraph_id
-raw_text
-supports
-note
-```
-
----
-
-# 主要任务
-
-1. 通读全文，理解故事整体
-2. 识别章节信息
-3. 切分段落并保留原文索引
-4. 提取事件图谱
-5. 提取关键冲突
-6. 标记高留存 / 高刺激片段
-7. 生成 story_spine
-8. 生成 viewer_experience_plan
-9. 生成 information_reveal_plan
-10. 生成 character_arc_map
-11. 生成 scene_value_map
-12. 提取 golden_lines
-13. 生成 confusion_risk_report
-14. 生成 adaptation_strategy
-15. 全量提取人物候选清单
-16. 全量提取场景候选清单
-17. 全量提取道具候选清单
-18. 提取时间线
-19. 提取情绪节奏
-20. 预判 voice_line_candidates
-21. 预判 video_unit_candidates
-22. 生成 asset_binding_hints
-23. 生成 visual_risk_report
-24. 生成 evidence_index
-25. 给 02 剧本系统提供改编建议，但不直接改写
-
----
-
-# 最高原则
-
-本模块只做“理解 + 解析 + 故事质量控制 + 生产预判”，不做“改编”。
-
-禁止在本模块里：
-
-- 改写小说
-- 扩写剧情
-- 压缩成剧本
-- 生成正式剧本
-- 生成分镜
-- 生成图像提示词
-- 生成视频提示词
-- 直接写入 shared_assets
-
----
-
 # 与后续模块的关系
 
 ```text
@@ -608,18 +551,47 @@ evidence_index
 
 ---
 
-# 清理规则
+# 输入
 
-本模块正式运行数据写入 workspace 下的运行目录。
-
-模块自身：
+正式 pipeline 输入：
 
 ```text
-01_novel_parser/input/
-01_novel_parser/output/
+workspace/projects/{project_id}/input/novel.txt
 ```
 
-只用于单模块调试。
+长篇章节模式：
+
+```text
+workspace/books/{book_id}/chapters/{chapter_id}/input/novel.txt
+```
+
+单模块调试输入：
+
+```text
+01_novel_parser/input/novel.txt
+```
+
+---
+
+# 输出
+
+正式 pipeline 输出：
+
+```text
+workspace/projects/{project_id}/01_novel_parser/novel_analysis.json
+```
+
+长篇章节模式：
+
+```text
+workspace/books/{book_id}/chapters/{chapter_id}/01_novel_parser/novel_analysis.json
+```
+
+单模块调试输出：
+
+```text
+01_novel_parser/output/novel_analysis.json
+```
 
 ---
 
