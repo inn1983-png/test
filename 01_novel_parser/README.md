@@ -13,6 +13,7 @@
 理解这篇到底讲的是什么
 再把原始小说文本拆干净
 提取后续模块需要的基础信息
+为最终视频故事质量提供控制信息
 ```
 
 ---
@@ -49,6 +50,38 @@ story_understanding
 主要人物关系真实作用是什么
 哪些地方绝对不能误读
 后续改编必须遵守哪些护栏
+```
+
+---
+
+# 最高故事质量任务：让视频讲的故事好看、清楚、留人
+
+01 不直接写剧本，但必须为 02 提供故事质量控制字段。
+
+新增 8 个故事质量字段：
+
+```text
+story_spine
+viewer_experience_plan
+information_reveal_plan
+character_arc_map
+scene_value_map
+golden_lines
+confusion_risk_report
+adaptation_strategy
+```
+
+它们的目的：
+
+```text
+story_spine：保证故事不散，有清晰主轴
+viewer_experience_plan：保证观众情绪路线清楚
+information_reveal_plan：保证悬念、秘密、反转不会太早或太晚揭露
+character_arc_map：保证视频讲的是人物变化，不只是事件堆叠
+scene_value_map：判断每场戏的作用，防止平均用力
+golden_lines：提取原文狠话、金句、关键信息句，防止原文味道丢失
+confusion_risk_report：提前标记观众可能看不懂的地方
+adaptation_strategy：给 02 一个总体改编策略，但不直接写剧本
 ```
 
 ---
@@ -148,20 +181,28 @@ workspace/books/{book_id}/chapters/{chapter_id}/01_novel_parser/novel_analysis.j
 当前 schema：
 
 ```text
-schema_version = 1.1
+schema_version = 1.2
 ```
 
 建议顶层结构：
 
 ```json
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "module": "01_novel_parser",
   "status": "success",
   "source_status": "input_found",
   "input": {},
   "novel": {},
   "story_understanding": {},
+  "story_spine": {},
+  "viewer_experience_plan": {},
+  "information_reveal_plan": [],
+  "character_arc_map": [],
+  "scene_value_map": [],
+  "golden_lines": [],
+  "confusion_risk_report": {},
+  "adaptation_strategy": {},
   "misread_prevention": {},
   "candidate_extraction_policy": {},
   "chapters": [],
@@ -191,6 +232,126 @@ schema_version = 1.1
   "warnings": []
 }
 ```
+
+---
+
+# 8 个故事质量字段
+
+## story_spine
+
+用于固定故事主轴。
+
+```text
+opening_state
+inciting_incident
+rising_pressure
+key_turning_point
+climax
+ending_state
+viewer_question
+```
+
+## viewer_experience_plan
+
+用于规划观众情绪体验。
+
+```text
+opening_emotion
+middle_emotion
+climax_emotion
+ending_emotion
+primary_viewer_question
+retention_strategy
+```
+
+## information_reveal_plan
+
+用于控制信息释放顺序。
+
+```text
+content
+known_by_characters
+known_by_viewer_at_start
+best_reveal_event_id
+reveal_too_early_risk
+reveal_too_late_risk
+```
+
+## character_arc_map
+
+用于记录人物变化。
+
+```text
+character
+start_belief
+pressure
+choice
+change
+end_belief
+```
+
+## scene_value_map
+
+用于判断每场戏的价值。
+
+```text
+event_id
+scene_function
+story_value
+visual_value
+dialogue_value
+emotion_value
+can_merge_with
+can_skip
+reason
+```
+
+## golden_lines
+
+用于提取原文金句、狠话、关键信息句。
+
+```text
+line_id
+raw_text
+speaker
+line_type
+event_id
+paragraph_id
+keep_priority
+why
+```
+
+01 只提取原文句子，不改写。
+
+## confusion_risk_report
+
+用于提前标记观众看不懂风险。
+
+```text
+unclear_protagonist
+unclear_relationships
+unclear_timeline
+missing_motivation
+too_many_names
+too_many_events
+requires_explanation
+```
+
+## adaptation_strategy
+
+用于给 02 总体改编方向。
+
+```text
+recommended_structure
+opening_strategy
+compression_strategy
+dialogue_strategy
+os_strategy
+ending_strategy
+guardrail
+```
+
+01 只给策略，不直接写剧本。
 
 ---
 
@@ -245,32 +406,6 @@ extract_every_mentioned_candidate
 不因没有名字而过滤
 不因只是群体角色而过滤
 不因只是被提到但没出场而过滤
-```
-
-候选字段至少包含：
-
-```text
-candidate_id
-name
-aliases
-candidate_type
-mention_type
-first_appearance_paragraph
-appearance_paragraphs
-importance
-confidence
-raw_mentions
-possible_same_as
-risk_notes
-```
-
-其中：
-
-```text
-importance = 后续优先级
-confidence = 识别置信度
-raw_mentions = 原文提到证据
-possible_same_as = 可能和其他候选是同一个，留给后续模块合并
 ```
 
 ---
@@ -367,10 +502,12 @@ split_warning
 
 ```text
 story_understanding
+story_spine
 event_graph
 candidate_characters
 candidate_scenes
 candidate_props
+golden_lines
 conflicts
 high_retention_segments
 ```
@@ -395,23 +532,31 @@ note
 4. 提取事件图谱
 5. 提取关键冲突
 6. 标记高留存 / 高刺激片段
-7. 全量提取人物候选清单
-8. 全量提取场景候选清单
-9. 全量提取道具候选清单
-10. 提取时间线
-11. 提取情绪节奏
-12. 预判 voice_line_candidates
-13. 预判 video_unit_candidates
-14. 生成 asset_binding_hints
-15. 生成 visual_risk_report
-16. 生成 evidence_index
-17. 给 02 剧本系统提供改编建议，但不直接改写
+7. 生成 story_spine
+8. 生成 viewer_experience_plan
+9. 生成 information_reveal_plan
+10. 生成 character_arc_map
+11. 生成 scene_value_map
+12. 提取 golden_lines
+13. 生成 confusion_risk_report
+14. 生成 adaptation_strategy
+15. 全量提取人物候选清单
+16. 全量提取场景候选清单
+17. 全量提取道具候选清单
+18. 提取时间线
+19. 提取情绪节奏
+20. 预判 voice_line_candidates
+21. 预判 video_unit_candidates
+22. 生成 asset_binding_hints
+23. 生成 visual_risk_report
+24. 生成 evidence_index
+25. 给 02 剧本系统提供改编建议，但不直接改写
 
 ---
 
 # 最高原则
 
-本模块只做“理解 + 解析 + 生产预判”，不做“改编”。
+本模块只做“理解 + 解析 + 故事质量控制 + 生产预判”，不做“改编”。
 
 禁止在本模块里：
 
@@ -446,12 +591,20 @@ note
 
 ```text
 story_understanding
+story_spine
+viewer_experience_plan
+information_reveal_plan
+character_arc_map
+scene_value_map
+golden_lines
+confusion_risk_report
+adaptation_strategy
 candidate_extraction_policy
 event_graph
 evidence_index
 ```
 
-尤其是 02 剧本改编系统，不得为了刺激感违背 01 对全文主线、主角旅程、核心矛盾的理解。
+尤其是 02 剧本改编系统，不得为了刺激感违背 01 对全文主线、主角旅程、故事主轴、信息释放和人物弧光的理解。
 
 ---
 
