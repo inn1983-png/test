@@ -10,7 +10,7 @@ quality_checker = import_module("02_script_writer.core.quality_checker")
 json_repair = import_module("02_script_writer.core.json_repair")
 schema_validator = import_module("02_script_writer.core.schema_validator")
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 DEFAULT_MAX_RETRIES = 2
 DEFAULT_MAX_FINAL_REVISION_ROUNDS = 1
 
@@ -89,13 +89,13 @@ def build_stage_payload(
     if stage_id == "02A":
         payload: dict[str, Any] = {
             "novel_analysis": source_summary,
-            "task": "制定剧本改编蓝图、长度策略和反过度压缩规则。02 是剧本改编系统，不生成分镜。",
+            "task": "制定剧本改编蓝图、长度策略、分集/分段计划和多版本策略。02 是剧本改编系统，不生成分镜。",
         }
     elif stage_id == "02B":
         payload = {
             "novel_analysis": source_summary,
             "adaptation_blueprint": outputs["02A"],
-            "task": "把改编蓝图拆成剧本 scene_beats、事件覆盖表、角色称呼一致性表。",
+            "task": "把改编蓝图拆成剧本 scene_beats、事件覆盖表、角色称呼一致性表和剧本情绪曲线。",
         }
     elif stage_id == "02C":
         payload = {
@@ -110,20 +110,20 @@ def build_stage_payload(
             "adaptation_blueprint": outputs["02A"],
             "script_structure": outputs["02B"],
             "voice_line_plan": outputs["02C"],
-            "task": "按 voice_line_plan 生成正式剧本正文：对白 + OS + 留白 + 动作 + 情绪。",
+            "task": "按 voice_line_plan 生成多版本正式剧本，选择最终版本，并输出口播节奏检查。",
         }
     elif stage_id == "02E":
         payload = {
             "novel_analysis": source_summary,
             "script_draft": outputs["02D"],
             "voice_line_plan": outputs["02C"],
-            "task": "为 08_audio 和 06 单帧分镜生成剧本生产标注。只输出动作链和连续性锚点，不生成正式分镜。",
+            "task": "为 08_audio 和 06 单帧分镜生成剧本生产标注。输出画面可执行性、人物负载和连续性链表；不生成正式分镜。",
         }
     elif stage_id == "02F":
         payload = {
             "novel_analysis": source_summary,
             "stage_outputs": outputs,
-            "task": "总检 02A-02E，判断是否压缩过狠、事件遗漏、对白/OS比例失衡、12秒风险、单帧分镜准备不足，并给出重跑阶段。",
+            "task": "总检 02A-02E，检查压缩、分集、多版本、情绪曲线、口播、画面可执行性、人物负载、连续性链表和失败样本回灌建议。",
         }
     else:
         raise ValueError(f"Unknown stage_id: {stage_id}")
@@ -270,26 +270,37 @@ def merge_stage_outputs(novel_analysis: dict[str, Any], config: dict[str, Any], 
         "tone_plan": a.get("tone_plan", {}),
         "compression_guardrails": a.get("compression_guardrails", {}),
         "length_strategy": a.get("length_strategy", {}),
+        "episode_split_plan": a.get("episode_split_plan", []),
+        "script_version_strategy": a.get("script_version_strategy", {}),
         "script_structure": b.get("script_structure", {}),
         "scene_beats": b.get("scene_beats", []),
         "event_coverage_map": b.get("event_coverage_map", []),
         "retention_design": b.get("retention_design", {}),
         "character_name_usage": b.get("character_name_usage", []),
+        "script_emotion_curve": b.get("script_emotion_curve", []),
         "voice_line_plan": c.get("voice_line_plan", []),
         "script_video_unit_candidates": c.get("script_video_unit_candidates", []),
         "duration_risk_report": c.get("duration_risk_report", {}),
         "script": d.get("script", {}),
+        "script_versions": d.get("script_versions", []),
+        "selected_version_id": d.get("selected_version_id"),
+        "selection_reason": d.get("selection_reason", ""),
         "segments": segments,
         "script_text": script_text,
         "source_line_usage": d.get("source_line_usage", []),
+        "tts_readability_report": d.get("tts_readability_report", {}),
         "production_annotations": e.get("production_annotations", {}),
         "audio_cues": e.get("audio_cues", []),
         "visual_dramatic_units": e.get("visual_dramatic_units", []),
         "storyboard_hints": e.get("storyboard_hints", []),
+        "visual_executability_report": e.get("visual_executability_report", {}),
+        "character_load_report": e.get("character_load_report", {}),
+        "continuity_chain": e.get("continuity_chain", []),
         "risk_report": e.get("risk_report", {}),
         "evidence_index": f.get("evidence_index", []),
         "warnings": f.get("warnings", []),
         "revision_plan": f.get("revision_plan", {}),
+        "failure_learning_notes": f.get("failure_learning_notes", []),
         "quality_report": {**quality_report, "stage_scores": stage_scores},
         "notes": ["02 已升级为音频驱动、单帧分镜友好的真实 LLM 分阶段剧本改编系统；02F 总检可触发前置阶段重跑。"],
         "config": config,
