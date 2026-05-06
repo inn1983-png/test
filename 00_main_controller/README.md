@@ -18,6 +18,7 @@
 8. 让每个模块知道自己的正式输出目录
 9. 提供安全清理工具
 10. 提供产物查询工具
+11. 提供 pipeline 配置校验工具
 
 ---
 
@@ -109,6 +110,7 @@ workspace/books/book_001/global_memory/
 
 ```text
 00_main_controller/run_pipeline.py       # 总控入口
+00_main_controller/validate_pipeline.py  # pipeline 配置校验
 00_main_controller/cleanup_workspace.py  # 安全清理工具
 00_main_controller/query_artifacts.py    # 产物查询工具
 00_common/workspace_manager.py           # 项目目录 / 长篇目录管理
@@ -118,6 +120,42 @@ workspace/books/book_001/global_memory/
 00_common/artifact_registry.py           # 产物登记器
 00_common/artifact_resolver.py           # 后续模块查找上一步资产
 00_common/resource_manager.py            # 本地模型显存释放
+```
+
+---
+
+# pipeline 校验
+
+单独校验：
+
+```bash
+python 00_main_controller/validate_pipeline.py --pipeline pipeline.json
+```
+
+严格顺序校验：
+
+```bash
+python 00_main_controller/validate_pipeline.py --pipeline pipeline.json --strict-order
+```
+
+`run_pipeline.py` 默认会在运行前先执行校验。
+
+如果确实要跳过校验：
+
+```bash
+python 00_main_controller/run_pipeline.py --skip-validation
+```
+
+校验内容包括：
+
+```text
+pipeline 是否为空
+模块名是否为字符串
+模块目录是否存在
+模块 run.py 是否存在
+是否有重复模块
+是否误把 00_* 放进 pipeline
+是否偏离推荐 01→10 顺序（strict-order 时提示）
 ```
 
 ---
@@ -336,7 +374,6 @@ workspace/books/{book_id}/chapters/{chapter_id}/{module_name}/
 
 # 当前 00 后续待做
 
-1. 增加 pipeline 配置校验
-2. 增加本地模型释放命令配置
-3. 增加空流程自检命令
-4. 进入 01 小说解析系统前，先确保 00 可以跑通空流程
+1. 增加本地模型释放命令配置
+2. 增加空流程自检命令
+3. 进入 01 小说解析系统前，先确保 00 可以跑通空流程
