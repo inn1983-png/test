@@ -17,7 +17,7 @@ MODULE_NAME = "02_script_writer"
 DISPLAY_NAME = "剧本改编系统"
 DESCRIPTION = "负责把 01 小说解析结果分阶段改编成音频驱动、单帧分镜友好的短剧剧本。"
 KEY_OUTPUT = "script.json"
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 
 def read_novel_analysis() -> dict:
