@@ -24,7 +24,8 @@
 14. 提供局部运行：`--from-module` / `--only-module`
 15. 提供 dry-run 预演模式
 16. 提供空流程自检工具
-17. 提供本地模型释放命令配置
+17. 提供完整框架流程自检工具
+18. 提供本地模型释放命令配置
 
 ---
 
@@ -50,8 +51,44 @@ Codex 不知道该从哪里接手
 
 ```text
 先搭 00 运行基座
-再搭 01 小说解析系统
-再逐步打磨 02–10
+再搭 01–10 子系统框架
+再逐步精修每个子系统
+```
+
+---
+
+# 当前框架闭环状态
+
+当前 01–10 已全部具备框架级关键产物输出。
+
+完整跑一次 project 模式后，会生成：
+
+```text
+01_novel_parser/novel_analysis.json
+02_script_writer/script.json
+03_character_library/characters.json
+04_scene_library/scenes.json
+05_prop_library/props.json
+06_storyboard/storyboard.json
+07_storyboard_image/image_manifest.json
+08_audio/final_audio.wav
+09_video/video_manifest.json
+10_final_assembly/final.mp4
+```
+
+这些关键产物会登记到：
+
+```text
+manifest.json 的 key_outputs
+artifacts.db
+```
+
+说明：
+
+```text
+当前生成的是 scaffold 占位产物，不是真实 AI 结果。
+目的是先打通 00→10 的完整流程、依赖检查、manifest 登记、状态记录。
+后续再逐步精修每个模块的真实业务逻辑。
 ```
 
 ---
@@ -118,7 +155,7 @@ workspace/books/book_001/global_memory/
 ```text
 00_main_controller/run_pipeline.py       # 总控入口
 00_main_controller/validate_pipeline.py  # pipeline 配置校验
-00_main_controller/self_check.py         # 00 空流程自检
+00_main_controller/self_check.py         # 00 空流程 + 01–10 框架闭环自检
 00_main_controller/cleanup_workspace.py  # 安全清理工具
 00_main_controller/query_artifacts.py    # 产物查询工具
 00_common/workspace_manager.py           # 项目目录 / 长篇目录管理
@@ -158,18 +195,6 @@ python 00_main_controller/validate_pipeline.py --pipeline pipeline.json --strict
 python 00_main_controller/run_pipeline.py --skip-validation
 ```
 
-校验内容包括：
-
-```text
-pipeline 是否为空
-模块名是否为字符串
-模块目录是否存在
-模块 run.py 是否存在
-是否有重复模块
-是否误把 00_* 放进 pipeline
-是否偏离推荐 01→10 顺序（strict-order 时提示）
-```
-
 ---
 
 # 局部运行
@@ -180,16 +205,6 @@ pipeline 是否为空
 
 ```bash
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 06_storyboard
-```
-
-它会运行：
-
-```text
-06_storyboard
-07_storyboard_image
-08_audio
-09_video
-10_final_assembly
 ```
 
 ## 只跑一个模块
@@ -233,8 +248,6 @@ global_memory_dir
 每个模块 produces
 ```
 
-用于正式跑之前确认目录、模块顺序、依赖关系是否正确。
-
 ---
 
 # 模块依赖检查
@@ -243,26 +256,6 @@ global_memory_dir
 
 ```text
 configs/module_contracts.json
-```
-
-每个模块可以声明：
-
-```json
-{
-  "requires": [
-    {
-      "module": "01_novel_parser",
-      "name": "novel_analysis.json"
-    }
-  ],
-  "produces": [
-    {
-      "module": "02_script_writer",
-      "name": "script.json",
-      "type": "json"
-    }
-  ]
-}
 ```
 
 运行模块前，00 会按以下顺序查找上游产物：
@@ -280,8 +273,6 @@ configs/module_contracts.json
 ```bash
 python 00_main_controller/run_pipeline.py --skip-dependency-check
 ```
-
-注意：当前 01–10 还处于骨架阶段，02 之后的真实关键输出尚未完成。因此完整跑 01→10 时，依赖检查可能会从 02 开始阻断。这是正确保护。调试骨架时可临时使用 `--skip-dependency-check`。
 
 ---
 
@@ -316,34 +307,14 @@ blocked   依赖缺失，被 00 阻断
 skipped   跳过
 ```
 
-这个文件用于后续判断：
-
-```text
-哪个模块失败了
-失败前哪些模块成功了
-每个模块耗时多久
-是否适合从失败点继续跑
-```
-
 ---
 
-# 空流程自检
-
-00 总控层必须先能独立跑通，才能进入 01 小说解析系统。
+# 自检命令
 
 ## 只初始化短篇运行目录，不运行任何模块
 
 ```bash
 python 00_main_controller/run_pipeline.py --mode project --project-id self_check_project --empty-pipeline
-```
-
-会生成：
-
-```text
-workspace/projects/self_check_project/runtime_context.json
-workspace/projects/self_check_project/manifest.json
-workspace/projects/self_check_project/artifacts.db
-workspace/projects/self_check_project/run_status.json
 ```
 
 ## 只初始化长篇章节目录，不运行任何模块
@@ -352,18 +323,7 @@ workspace/projects/self_check_project/run_status.json
 python 00_main_controller/run_pipeline.py --mode book_chapter --book-id self_check_book --chapter-id chapter_001 --empty-pipeline
 ```
 
-会生成：
-
-```text
-workspace/books/self_check_book/chapters/chapter_001/runtime_context.json
-workspace/books/self_check_book/chapters/chapter_001/manifest.json
-workspace/books/self_check_book/chapters/chapter_001/artifacts.db
-workspace/books/self_check_book/chapters/chapter_001/run_status.json
-workspace/books/self_check_book/shared_assets/
-workspace/books/self_check_book/global_memory/
-```
-
-## 一键自检 00 总控
+## 一键自检 00 + 01–10 框架闭环
 
 ```bash
 python 00_main_controller/self_check.py
@@ -382,6 +342,10 @@ run_status.json 是否存在
 shared_assets 默认文件是否存在
 global_memory 默认文件是否存在
 --only-module + --dry-run 是否可用
+project 模式完整 01–10 框架流程是否能跑通
+01–10 关键产物是否全部生成
+01–10 关键产物是否登记到 manifest.key_outputs
+run_status.json 中 01–10 是否全部 success
 ```
 
 默认自检结束后会删除临时目录。
@@ -416,37 +380,7 @@ resource_manager.release_local_resources(MODULE_NAME)
 configs/local_resource_release.json
 ```
 
-默认配置是关闭的：
-
-```json
-{
-  "enabled": false,
-  "global_commands": [],
-  "module_commands": {
-    "09_video": []
-  }
-}
-```
-
-这样做是为了避免误停 ComfyUI、本地 LLM、TTS 服务或其他用户正在使用的进程。
-
-需要启用外部释放命令时，可以把：
-
-```json
-"enabled": true
-```
-
-或者在运行前设置环境变量：
-
-```bash
-set AI_DRAMA_ENABLE_RESOURCE_COMMANDS=1
-```
-
-也可以指定其他配置文件：
-
-```bash
-set AI_DRAMA_RESOURCE_RELEASE_CONFIG=configs/local_resource_release.json
-```
+默认关闭，避免误停 ComfyUI、本地 LLM、TTS 服务或其他用户正在使用的进程。
 
 ---
 
@@ -456,20 +390,6 @@ set AI_DRAMA_RESOURCE_RELEASE_CONFIG=configs/local_resource_release.json
 
 ```text
 runtime_context.json
-```
-
-它记录：
-
-```text
-mode
-run_id
-project_id
-book_id
-chapter_id
-run_dir
-input_dir
-shared_assets_dir
-global_memory_dir
 ```
 
 每个模块运行时都会收到环境变量：
@@ -493,8 +413,6 @@ AI_DRAMA_GLOBAL_MEMORY_DIR
 
 # 产物索引规则
 
-本项目不使用巨大 `manifest.json` 存所有文件。
-
 正式规则：
 
 ```text
@@ -503,37 +421,11 @@ artifacts.db = 所有产物详细记录
 真实目录 = 保存实际文件
 ```
 
-## 关键输出
-
-例如：
-
-```text
-novel_analysis.json
-script.json
-characters.json
-storyboard.json
-image_manifest.json
-final_audio.wav
-video_manifest.json
-final.mp4
-```
-
 关键输出要进入：
 
 ```text
 manifest.json 的 key_outputs
 artifacts.db
-```
-
-## 批量产物
-
-例如：
-
-```text
-shot_001.png
-shot_002.png
-clip_001.mp4
-clip_002.mp4
 ```
 
 批量产物只进入：
@@ -561,8 +453,6 @@ artifacts.db
 2. artifacts.db
 3. 约定目录兜底
 ```
-
-这样后续模块不用猜文件在哪里。
 
 ---
 
@@ -662,8 +552,8 @@ workspace/books/{book_id}/chapters/{chapter_id}/{module_name}/
 
 ---
 
-# 当前 00 后续待做
+# 当前后续建议
 
 1. 在真实本地环境执行 `python 00_main_controller/self_check.py`
-2. 确认 00 自检通过后，进入 01 小说解析系统
-3. 后续根据本地 ComfyUI / LLM / TTS 实际卸载方式，再逐步补充 `configs/local_resource_release.json`
+2. 如果通过，就说明 00 + 01–10 框架闭环成功
+3. 接下来开始逐步精修 01 小说解析系统
