@@ -19,15 +19,24 @@
 
 ```text
 00 + 01–10 子系统框架已能闭环。
-01 已进入 01A–01F 真实 LLM 分阶段解析框架。
+01 理论搭建已完成，进入等待统一测试阶段。
 ```
 
-01 当前方向：
+01 当前能力：
 
 ```text
-不是一个大 prompt 生成一个大 JSON。
-而是不同阶段给 LLM 不同输入、不同提示词、不同输出，最后由程序合并为 novel_analysis.json。
-01 不再支持 scaffold 占位解析。所有 01A–01F 阶段必须真实调用 LLM。
+真实 LLM 分阶段解析
+程序锁定段落边界
+LLM 标注段落属性
+事件图谱生成
+长文本分批候选提取
+候选批次合并
+声音/视频生产预判
+JSON 修复
+阶段评分与修改意见重跑
+01F 总检触发阶段重跑
+最终 schema 硬规则校验
+测试样例与测试清单
 ```
 
 ---
@@ -43,42 +52,27 @@
 否则运行 run.py。
 ```
 
-该规则用于让复杂模块使用内部分阶段流程，同时不影响其他简单模块。
-
 ## 01 小说解析系统
 
-01 当前正式 pipeline 入口：
+正式入口：
 
 ```text
 01_novel_parser/run_staged.py
 ```
 
-01 真实 LLM 调用层：
+核心文件：
 
 ```text
 01_novel_parser/core/llm_client.py
-```
-
-必须配置：
-
-```bash
-set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
-set AI_DRAMA_LLM_MODEL=你的本地模型名
-```
-
-01 阶段执行器：
-
-```text
+01_novel_parser/core/json_repair.py
+01_novel_parser/core/paragraph_splitter.py
+01_novel_parser/core/chunk_manager.py
+01_novel_parser/core/quality_checker.py
+01_novel_parser/core/schema_validator.py
 01_novel_parser/core/stage_runner.py
 ```
 
-01 阶段评分器：
-
-```text
-01_novel_parser/core/quality_checker.py
-```
-
-01 分阶段提示词：
+阶段提示词：
 
 ```text
 01_novel_parser/prompts/01A_story_understanding.md
@@ -89,23 +83,18 @@ set AI_DRAMA_LLM_MODEL=你的本地模型名
 01_novel_parser/prompts/01F_quality_check.md
 ```
 
-运行后会生成：
+测试资料：
 
 ```text
-intermediate/01A_story_understanding.json
-intermediate/01B_paragraphs.json
-intermediate/01C_event_graph.json
-intermediate/01D_candidates.json
-intermediate/01E_production_predict.json
-intermediate/01F_quality_check.json
-01_novel_parser/novel_analysis.json
+01_novel_parser/input/novel.txt.example
+01_novel_parser/tests/README.md
 ```
 
 ---
 
-# 01 schema 与核心原则
+# 01 核心原则
 
-当前 schema：
+schema：
 
 ```text
 schema_version = 1.2
@@ -175,84 +164,81 @@ quality_report
 
 ---
 
-# 评分与重跑机制
+# 01 真实执行机制
 
-01 有两层修正机制：
+## 真实 LLM
 
-```text
-1. 每个阶段生成后，quality_checker.py 评分。
-2. 如果阶段低于阈值，生成 revision_instructions，并把修改意见传回同一阶段重跑。
-3. 01F 做总检，如果输出 needs_retry=true 和 retry_stages，会从最早有问题的阶段开始，连同后续阶段再跑一轮。
+01 不支持占位解析。必须配置：
+
+```bash
+set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
+set AI_DRAMA_LLM_MODEL=你的本地模型名
 ```
 
-示例：
+## 分阶段
 
 ```text
-01F 发现候选漏提 → retry_stages=["01D"]
-系统重跑 01D → 01E → 01F
+01A 全文理解
+01B 段落切分标注
+01C 事件图谱
+01D 全量候选提取
+01E 声音和视频生产预判
+01F 汇总校验
 ```
 
----
+## 段落稳定
 
-# 已完成关键改动
+01B 采用：
 
-## 2026-05-07：初始化 00–10 模块框架
+```text
+paragraph_splitter.py 程序锁定 paragraph_id / text / start_char / end_char
+LLM 只补充章节、段落类型、timeline 和属性标注
+```
 
-- 创建 00–10 模块目录
-- 创建 00_common 公共工具层
-- 创建 pipeline.json
-- 创建 01–10 基础 run.py
-- 加入资源释放逻辑
+## 候选分批
 
-## 2026-05-07：完成 00 总控基座
+01D 采用：
 
-- 支持短篇项目和长篇章节两种模式
-- 支持 shared_assets / global_memory
-- 支持 manifest + SQLite artifacts.db
-- 支持 run_status.json
-- 支持 pipeline 校验、依赖检查、dry-run、局部运行
-- 支持清理、查询、自检、资源释放配置
+```text
+chunk_manager.py 按段落分批
+每批调用 LLM 提取候选
+程序合并所有批次
+不删除不确定重复项
+```
 
-## 2026-05-07：打通 01–10 scaffold 闭环
+## JSON 修复
 
-- 01 输出 novel_analysis.json
-- 02 输出 script.json
-- 03 输出 characters.json
-- 04 输出 scenes.json
-- 05 输出 props.json
-- 06 输出 storyboard.json
-- 07 输出 image_manifest.json
-- 08 输出 final_audio.wav
-- 09 输出 video_manifest.json
-- 10 输出 final.mp4
-- 所有关键产物登记到 manifest.key_outputs 和 artifacts.db
+LLM 返回 JSON 解析失败时：
 
-## 2026-05-07：01 升级到 schema 1.2
+```text
+json_repair.py 把 broken_json 和错误原因发回 LLM
+要求只修复 JSON 格式
+```
 
-- 增加全局故事理解 story_understanding
-- 增加故事质量控制字段
-- 增加事件图谱 event_graph
-- 增加全量候选提取策略
-- 增加声音/视频生产预判
-- 增加证据链和质量报告
+## 评分与重跑
 
-## 2026-05-07：01 改为真实 LLM 分阶段解析框架
+```text
+每阶段生成后 quality_checker.py 评分。
+低于阈值时生成 revision_instructions，并把修改意见传回同阶段重跑。
+01F 总检如果输出 needs_retry=true 和 retry_stages，会从最早有问题的阶段开始，连同后续阶段再跑一轮。
+```
 
-- 新增 `01_novel_parser/run_staged.py`
-- 新增 `01_novel_parser/core/llm_client.py`
-- 新增 `01_novel_parser/core/stage_runner.py`
-- 新增 `01_novel_parser/core/quality_checker.py`
-- 新增 01A–01F 六个真实 JSON 输出 prompt
-- 移除 01 scaffold 占位回退逻辑
-- 01 缺少 LLM 配置或 input/novel.txt 为空时直接失败
-- 每阶段评分，低分按修改意见重跑
-- 01F 总检可触发目标阶段及后续阶段再执行一轮
-- 更新 `00_common/module_runner.py`，优先运行 run_staged.py
-- 更新 `01_novel_parser/README.md`
+## 硬规则校验
+
+最终合并后 `schema_validator.py` 检查：
+
+```text
+必要顶层字段
+paragraphs 是否为空
+event_graph.events 是否为空
+事件 / 候选 / voice_line / video_unit / evidence 的 ID 引用是否存在
+```
 
 ---
 
 # 下一步计划
+
+进入统一测试阶段。
 
 建议本地测试前先配置：
 
@@ -261,13 +247,13 @@ set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
 set AI_DRAMA_LLM_MODEL=你的本地模型名
 ```
 
-然后准备：
+准备：
 
 ```text
 workspace/projects/project_test_001/input/novel.txt
 ```
 
-再运行：
+运行：
 
 ```bash
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 01_novel_parser
@@ -288,4 +274,5 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 01 不能一次塞所有内容给 LLM；必须分阶段使用不同输入和不同提示词。
 所有需要 LLM 的 01A–01F 都必须真实调用 LLM，不允许占位文件。
 评分必须给出修改意见，并能让 LLM 按修改意见再执行。
+先完成 01 的理论搭建，后续再根据具体数据精修。
 ```
