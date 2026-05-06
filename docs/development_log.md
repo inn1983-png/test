@@ -97,17 +97,43 @@ artifacts.db = 全部产物详细记录
 artifact_resolver.py = 后续模块查找资产的统一工具
 ```
 
+## 2026-05-07：完善 00 总控说明、清理工具、产物查询工具
+
+完成内容：
+
+- 新增 `00_main_controller/README.md`
+- 新增 `00_main_controller/cleanup_workspace.py`
+- 新增 `00_main_controller/query_artifacts.py`
+- 更新 `00_common/workspace_manager.py`，初始化运行目录时同步创建 `runtime_context.json`、`manifest.json`、`artifacts.db`
+- 更新 `00_main_controller/README.md`，写入运行命令、清理命令、产物查询命令
+
+新增能力：
+
+```text
+安全删除短篇项目：
+python 00_main_controller/cleanup_workspace.py project --project-id project_test_001 --yes
+
+安全删除长篇某章，保留共享资产：
+python 00_main_controller/cleanup_workspace.py chapter --book-id book_001 --chapter-id chapter_001 --yes
+
+查询关键输出：
+python 00_main_controller/query_artifacts.py --run-dir workspace/projects/project_test_001 --keys
+
+查询全部产物：
+python 00_main_controller/query_artifacts.py --run-dir workspace/projects/project_test_001
+```
+
 ---
 
 # 下一步计划
 
 下一步继续打磨 00 总控基座：
 
-1. 补齐 `00_main_controller/README.md`
-2. 补齐 00 的运行命令示例
-3. 增加清理工具：删除单章、删除项目、保留共享资产
-4. 增加产物查询工具：列出某次运行的关键输出和全部产物
-5. 确保 00 的 README 能让 Codex 明白下一步该从 01 开始
+1. 增加 pipeline 配置校验
+2. 增加本地模型释放命令配置
+3. 增加空流程自检命令
+4. 确保 00 可以跑通空流程
+5. 进入 01 小说解析系统前，让 00 的输入/输出/清理/查询全部稳定
 
 ---
 
