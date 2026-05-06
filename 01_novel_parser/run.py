@@ -8,6 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 base_module = import_module("00_common.base_module")
+resource_manager = import_module("00_common.resource_manager")
 
 MODULE_NAME = "01_novel_parser"
 DISPLAY_NAME = "小说解析系统"
@@ -15,15 +16,18 @@ DESCRIPTION = "负责从小说文本中解析章节、剧情主线、冲突点�
 
 
 def main() -> int:
-    config = base_module.bootstrap_module(MODULE_NAME, DISPLAY_NAME, DESCRIPTION)
-    base_module.write_placeholder_output(MODULE_NAME, {
-        "module": MODULE_NAME,
-        "status": "scaffold",
-        "message": "小说解析系统骨架已运行，后续在此接入小说解析逻辑。",
-        "config": config
-    })
-    print(f"{DISPLAY_NAME} finished.")
-    return 0
+    try:
+        config = base_module.bootstrap_module(MODULE_NAME, DISPLAY_NAME, DESCRIPTION)
+        base_module.write_placeholder_output(MODULE_NAME, {
+            "module": MODULE_NAME,
+            "status": "scaffold",
+            "message": "小说解析系统骨架已运行，后续在此接入小说解析逻辑。",
+            "config": config
+        })
+        print(f"{DISPLAY_NAME} finished.")
+        return 0
+    finally:
+        resource_manager.release_local_resources(MODULE_NAME)
 
 
 if __name__ == "__main__":
