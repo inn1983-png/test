@@ -12,6 +12,7 @@ from importlib import import_module
 io_utils = import_module("00_common.io_utils")
 module_runner = import_module("00_common.module_runner")
 workspace_manager = import_module("00_common.workspace_manager")
+validate_pipeline = import_module("00_main_controller.validate_pipeline")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +22,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--book-id", default=None, help="Long novel book id, required for book_chapter mode.")
     parser.add_argument("--chapter-id", default=None, help="Chapter id, required for book_chapter mode.")
     parser.add_argument("--pipeline", default="pipeline.json", help="Pipeline config file path.")
+    parser.add_argument("--skip-validation", action="store_true", help="Skip pipeline validation before running.")
+    parser.add_argument("--strict-order", action="store_true", help="Warn when modules differ from recommended 01→10 order.")
     return parser
 
 
@@ -38,6 +41,17 @@ def main() -> int:
     args = build_parser().parse_args()
     pipeline_path = ROOT_DIR / args.pipeline
     pipeline_config = io_utils.read_json(pipeline_path, default={})
+
+    if not args.skip_validation:
+        ok, messages = validate_pipeline.validate_pipeline_config(
+            pipeline_config,
+            strict_order=args.strict_order,
+        )
+        for message in messages:
+            print(message)
+        if not ok:
+            return 1
+
     pipeline = pipeline_config.get("pipeline", [])
 
     if not pipeline:
