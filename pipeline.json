@@ -1,0 +1,21 @@
+{
+  "project_name": "AI_ShortDrama_System",
+  "version": "0.1.0",
+  "description": "Modular AI short drama production pipeline.",
+  "pipeline": [
+    "01_novel_parser",
+    "02_script_writer",
+    "03_character_library",
+    "04_scene_library",
+    "05_prop_library",
+    "06_storyboard",
+    "07_storyboard_image",
+    "08_audio",
+    "09_video",
+    "10_final_assembly"
+  ],
+  "paths": {
+    "workspace": "workspace",
+    "shared_assets": "shared_assets"
+  }
+}
