@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from importlib import import_module
 
 io_utils = import_module("00_common.io_utils")
+artifact_registry = import_module("00_common.artifact_registry")
+artifact_db = import_module("00_common.artifact_db")
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
-RunMode = Literal["project", "book_chapter"]
+RunMode = Literal["project", "book_chapter", "standalone"]
 
 
 @dataclass
@@ -43,6 +46,9 @@ class RuntimeContext:
     def module_output_dir(self, module_name: str) -> Path:
         return self.module_dir(module_name)
 
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
 
 def make_run_id(prefix: str = "run") -> str:
     return f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -68,7 +74,7 @@ def create_project_context(project_id: str | None = None) -> RuntimeContext:
         shared_assets_dir=None,
         global_memory_dir=None,
     )
-    save_context(context)
+    initialize_run_store(context)
     return context
 
 
@@ -102,19 +108,70 @@ def create_book_chapter_context(book_id: str, chapter_id: str) -> RuntimeContext
         shared_assets_dir=str(shared_assets_dir),
         global_memory_dir=str(global_memory_dir),
     )
-    save_context(context)
     bootstrap_shared_asset_files(context)
+    initialize_run_store(context)
     return context
+
+
+def initialize_run_store(context: RuntimeContext) -> None:
+    """Initialize runtime_context.json, artifacts.db, and manifest.json."""
+    io_utils.ensure_dir(context.run_dir)
+    save_context(context)
+    artifact_db.connect(context.run_dir).close()
+    manifest = artifact_registry.load_manifest(context.run_dir)
+    manifest.update(
+        {
+            "run_id": context.run_id,
+            "mode": context.mode,
+            "project_id": context.project_id,
+            "book_id": context.book_id,
+            "chapter_id": context.chapter_id,
+            "artifact_store": "artifacts.db",
+            "created_or_updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    )
+    artifact_registry.save_manifest(context.run_dir, manifest)
+    artifact_registry.refresh_manifest_summary(context.run_dir)
 
 
 def save_context(context: RuntimeContext) -> None:
     context_path = Path(context.run_dir) / "runtime_context.json"
-    io_utils.write_json(context_path, asdict(context))
+    io_utils.write_json(context_path, context.to_dict())
 
 
 def load_context(path: str | Path) -> RuntimeContext:
     data = io_utils.read_json(path, default={})
     return RuntimeContext(**data)
+
+
+def load_current_context() -> RuntimeContext | None:
+    """Load context from AI_DRAMA_CONTEXT_PATH if running inside pipeline."""
+    context_path = os.getenv("AI_DRAMA_CONTEXT_PATH")
+    if not context_path:
+        return None
+    path = Path(context_path)
+    if not path.exists():
+        return None
+    return load_context(path)
+
+
+def get_runtime_dict() -> dict[str, Any]:
+    context = load_current_context()
+    if context:
+        return context.to_dict()
+    return {
+        "mode": "standalone",
+        "run_id": os.getenv("AI_DRAMA_RUN_ID"),
+        "project_id": os.getenv("AI_DRAMA_PROJECT_ID"),
+        "book_id": os.getenv("AI_DRAMA_BOOK_ID"),
+        "chapter_id": os.getenv("AI_DRAMA_CHAPTER_ID"),
+        "root_dir": str(ROOT_DIR),
+        "workspace_dir": str(ROOT_DIR / "workspace"),
+        "run_dir": os.getenv("AI_DRAMA_RUN_DIR"),
+        "input_dir": os.getenv("AI_DRAMA_INPUT_DIR"),
+        "shared_assets_dir": os.getenv("AI_DRAMA_SHARED_ASSETS_DIR"),
+        "global_memory_dir": os.getenv("AI_DRAMA_GLOBAL_MEMORY_DIR"),
+    }
 
 
 def context_to_env(context: RuntimeContext, module_name: str) -> dict[str, str]:
@@ -186,4 +243,4 @@ def bootstrap_shared_asset_files(context: RuntimeContext) -> None:
 
 
 def dump_context_for_log(context: RuntimeContext) -> str:
-    return json.dumps(asdict(context), ensure_ascii=False, indent=2)
+    return json.dumps(context.to_dict(), ensure_ascii=False, indent=2)
