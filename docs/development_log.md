@@ -27,7 +27,7 @@
 
 # 当前开发阶段
 
-当前阶段：00 + 01–10 子系统框架已能闭环，建议用户先一次性测试，再逐步精细打磨每一步。
+当前阶段：00 + 01–10 子系统框架已能闭环，01 已补充“先通读全文，理解故事整体”的最高前置任务。
 
 当前框架已经覆盖：
 
@@ -47,6 +47,7 @@ dry-run 预演模式
 安全清理
 产物查询
 空流程自检
+01 story_understanding 全局故事理解
 01–10 框架关键产物输出
 01–10 完整框架闭环自检
 ```
@@ -268,20 +269,49 @@ python 00_main_controller/query_artifacts.py --run-dir workspace/projects/projec
 每轮完成后必须总结做了什么、改了哪些文件、下一步建议。
 ```
 
+## 2026-05-07：01 增加全局故事理解 story_understanding
+
+完成内容：
+
+- 更新 `01_novel_parser/run.py`
+- 更新 `01_novel_parser/README.md`
+- 更新 `docs/development_log.md`
+
+新增能力：
+
+```text
+1. 01 的最高前置任务改为：先通读用户给出的全部内容，理解故事整体到底在讲什么
+2. novel_analysis.json 顶层新增 story_understanding
+3. story_understanding 包含 one_sentence_summary / full_story_summary / core_premise
+4. story_understanding 包含 protagonist_journey，用于记录主角是谁、开局处境、压力、转折、结尾状态
+5. story_understanding 包含 central_conflict / deep_theme / world_rules / relationship_core
+6. story_understanding 包含 must_not_misread，防止后续模块误读主角、关系、时间线、核心矛盾
+7. story_understanding 包含 adaptation_guardrails，约束 02 剧本系统不得为了刺激感改偏主线
+8. quality_report 增加 has_full_story_understanding
+```
+
+重要说明：
+
+```text
+01 不能只是机械切段、提取人物、提取场景。
+01 必须先理解全文，再提取段落、事件、冲突、角色、场景、道具。
+后续 02 剧本改编必须优先服从 story_understanding。
+```
+
 ---
 
 # 下一步计划
 
 下一步建议用户先本地一次性测试框架闭环。
 
-测试通过后，再开始精修 01 小说解析系统：
+测试通过后，再继续精修 01 小说解析系统：
 
-1. 明确小说文本输入文件位置
-2. 明确章节 / 段落 / 事件 / 候选角色 / 候选场景 / 候选道具的输出结构
-3. 只提出资产候选，不直接写入长篇共享资产库
-4. 输出真实 `novel_analysis.json`
-5. 把关键产物登记到 `manifest.json` 和 `artifacts.db`
-6. 跑完释放本地资源
+1. 设计真实 `novel_analysis.json` schema
+2. 设计 01 的本地 LLM 提示词
+3. 接入段落切分
+4. 接入事件链提取
+5. 接入冲突点、高留存片段、候选资产提取
+6. 确保所有输出都服从 `story_understanding`
 
 ---
 
@@ -293,6 +323,7 @@ python 00_main_controller/query_artifacts.py --run-dir workspace/projects/projec
 先把所有子系统的框架都弄起来，再一次性测试，慢慢精细打磨每一步。
 每一步改动都写入 README 或文档。
 后续尽量连续修改，不需要每一次小改动都让用户点击确认。
+01 必须通读用户给出的内容，理解到底说的是什么。
 ```
 
 该要求为后续开发协作最高规则之一。
