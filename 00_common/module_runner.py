@@ -19,14 +19,26 @@ def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def resolve_run_file(module_dir: Path) -> Path:
+    """Prefer staged entrypoint when a module provides it.
+
+    This keeps existing modules compatible with run.py while allowing complex
+    modules such as 01_novel_parser to use an internal staged workflow.
+    """
+    staged_file = module_dir / "run_staged.py"
+    if staged_file.exists():
+        return staged_file
+    return module_dir / "run.py"
+
+
 def run_module(module_name: str, context: Any | None = None) -> int:
     module_dir = ROOT_DIR / module_name
-    run_file = module_dir / "run.py"
+    run_file = resolve_run_file(module_dir)
 
     if not run_file.exists():
-        print(f"[SKIP] {module_name}: run.py not found")
+        print(f"[SKIP] {module_name}: run.py / run_staged.py not found")
         if context is not None:
-            run_status.mark_skipped(context.run_dir, module_name, "run.py not found")
+            run_status.mark_skipped(context.run_dir, module_name, "run.py / run_staged.py not found")
         return 0
 
     env = os.environ.copy()
@@ -41,10 +53,10 @@ def run_module(module_name: str, context: Any | None = None) -> int:
             module_name,
             status="running",
             start_time=start_time,
-            message="module started",
+            message=f"module started: {run_file.name}",
         )
 
-    print(f"[RUN] {module_name}")
+    print(f"[RUN] {module_name} via {run_file.name}")
     result = subprocess.run([sys.executable, str(run_file)], cwd=str(ROOT_DIR), env=env)
 
     end_dt = datetime.now()
@@ -73,7 +85,7 @@ def run_module(module_name: str, context: Any | None = None) -> int:
                 end_time=end_time,
                 duration_seconds=duration_seconds,
                 return_code=0,
-                message="module finished",
+                message=f"module finished: {run_file.name}",
             )
 
     return result.returncode
