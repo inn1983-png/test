@@ -38,7 +38,36 @@ run.py
 01_novel_parser/run_staged.py
 ```
 
-旧的 `run.py` 暂时保留，用作历史 scaffold / 单模块调试参考。
+---
+
+# 01 必须真实调用 LLM
+
+01 不再支持 scaffold 占位解析。
+
+凡是 01A–01F 需要理解、切分、提取、预判、评分的步骤，都必须真实调用 LLM。
+
+如果没有配置本地 LLM，01 应该直接失败，不允许继续生成占位 `novel_analysis.json`。
+
+必须配置环境变量：
+
+```bash
+set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
+set AI_DRAMA_LLM_MODEL=你的本地模型名
+```
+
+可选配置：
+
+```bash
+set AI_DRAMA_LLM_API_KEY=你的 key，没有可不填
+set AI_DRAMA_LLM_TIMEOUT_SEC=180
+set AI_DRAMA_LLM_TEMPERATURE=0.2
+```
+
+输入文件必须存在且非空：
+
+```text
+input/novel.txt
+```
 
 ---
 
@@ -49,6 +78,8 @@ run.py
   run_staged.py
   core/
     __init__.py
+    llm_client.py
+    quality_checker.py
     stage_runner.py
   prompts/
     01A_story_understanding.md
@@ -57,12 +88,6 @@ run.py
     01D_candidate_extract.md
     01E_production_predict.md
     01F_quality_check.md
-```
-
-当前 `stage_runner.py` 已经能按 01A–01F 生成 scaffold 中间结果，并最终合并为：
-
-```text
-novel_analysis.json
 ```
 
 运行后会额外生成：
@@ -75,6 +100,66 @@ intermediate/01D_candidates.json
 intermediate/01E_production_predict.json
 intermediate/01F_quality_check.json
 ```
+
+最终合并为：
+
+```text
+novel_analysis.json
+```
+
+---
+
+# 评分与重跑机制
+
+01 有两层修正机制。
+
+## 第一层：阶段内评分重跑
+
+每个阶段生成后，`quality_checker.py` 会检查：
+
+```text
+必要字段是否存在
+JSON 是否符合阶段结构
+是否仍是占位内容
+候选是否为空
+paragraphs 是否为空
+story_understanding 是否完整
+```
+
+如果分数低于阈值，会生成：
+
+```text
+revision_instructions
+```
+
+然后把修改意见传回同一阶段，让 LLM 重新执行。
+
+## 第二层：01F 总检触发阶段重跑
+
+01F 会检查 01A–01E 的总结果。
+
+如果 01F 输出：
+
+```json
+{
+  "quality_report": {
+    "needs_retry": true,
+    "retry_stages": ["01D"],
+    "revision_instructions": []
+  }
+}
+```
+
+`stage_runner.py` 会从最早需要重跑的阶段开始，连同后续阶段再执行一轮。
+
+例如：
+
+```text
+01F 发现候选漏提 → retry_stages = ["01D"]
+系统会重跑：01D → 01E → 01F
+```
+
+这样不是只给分，而是会根据修改意见自动修正。
 
 ---
 
@@ -127,13 +212,7 @@ intermediate/01F_quality_check.json
 
 ## 01A：全文理解阶段
 
-输入：
-
-```text
-完整 novel.txt
-```
-
-只做全文理解，不提取全量候选，不写剧本。
+输入：完整 `novel.txt`
 
 输出：
 
@@ -146,17 +225,9 @@ adaptation_strategy
 misread_prevention
 ```
 
----
-
 ## 01B：段落切分阶段
 
-输入：
-
-```text
-完整 novel.txt
-```
-
-只切段，不总结，不改写。
+输入：完整 `novel.txt`
 
 输出：
 
@@ -178,10 +249,6 @@ end_char
 paragraph_type
 ```
 
-后续所有事件、候选、金句、证据都必须能回到 `paragraph_id`。
-
----
-
 ## 01C：事件图谱阶段
 
 输入：
@@ -191,8 +258,6 @@ story_understanding
 story_spine
 paragraphs
 ```
-
-只提取事件、因果、冲突、高留存片段，不提取全量资产候选。
 
 输出：
 
@@ -204,8 +269,6 @@ scene_value_map
 character_arc_map
 ```
 
----
-
 ## 01D：全量候选提取阶段
 
 输入：
@@ -215,8 +278,6 @@ paragraphs
 event_graph
 candidate_extraction_policy
 ```
-
-只提取文章里提到过的全部人、地点、物件。
 
 输出：
 
@@ -236,8 +297,6 @@ visual_risk_report
 importance 只表示后续优先级，不能作为是否提取的门槛。
 ```
 
----
-
 ## 01E：声音和视频生产预判阶段
 
 输入：
@@ -250,8 +309,6 @@ paragraphs
 golden_lines 初稿
 ```
 
-不写正式剧本，只判断哪些原文信息适合变成旁白、对白、心理 OS、留白，以及哪些事件适合 6–12 秒视频单元。
-
 输出：
 
 ```text
@@ -261,8 +318,6 @@ emotion_curve
 golden_lines
 confusion_risk_report
 ```
-
----
 
 ## 01F：汇总校验阶段
 
@@ -274,8 +329,6 @@ paragraphs
 原文 novel.txt
 ```
 
-检查遗漏、矛盾、误读、JSON 缺字段、证据不足。
-
 输出：
 
 ```text
@@ -283,7 +336,6 @@ evidence_index
 quality_report
 warnings
 chapter_memory_update
-最终 novel_analysis.json
 ```
 
 重点检查：
@@ -307,10 +359,11 @@ chapter_memory_update
 {
   "schema_version": "1.2",
   "module": "01_novel_parser",
-  "status": "success",
+  "status": "success / needs_review",
   "source_status": "input_found",
-  "stage_mode": "scaffold / llm",
+  "stage_mode": "llm",
   "stage_status": [],
+  "final_revision_rounds": [],
   "input": {},
   "novel": {},
   "story_understanding": {},
@@ -350,23 +403,6 @@ chapter_memory_update
 ---
 
 # 与后续模块的关系
-
-后续模块必须优先参考：
-
-```text
-story_understanding
-story_spine
-viewer_experience_plan
-information_reveal_plan
-character_arc_map
-scene_value_map
-golden_lines
-confusion_risk_report
-adaptation_strategy
-candidate_extraction_policy
-event_graph
-evidence_index
-```
 
 核心依赖：
 
@@ -427,17 +463,9 @@ workspace/books/{book_id}/chapters/{chapter_id}/01_novel_parser/novel_analysis.j
 
 ---
 
-# 是否使用本地模型
-
-未来会使用本地 LLM。
-
-当前阶段只输出 scaffold 结构。
-
----
-
 # 显存释放
 
-本模块未来会调用本地 LLM。
+本模块会调用本地 LLM。
 
 运行结束后必须执行：
 
