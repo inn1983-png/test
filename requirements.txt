@@ -1,0 +1,11 @@
+# Core runtime dependencies
+pydantic>=2.7.0
+PyYAML>=6.0.1
+python-dotenv>=1.0.1
+requests>=2.31.0
+rich>=13.7.0
+
+# Optional local media dependencies, enabled when later modules need them
+# moviepy>=1.0.3
+# pillow>=10.0.0
+# pydub>=0.25.1
