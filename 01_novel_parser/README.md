@@ -18,6 +18,29 @@
 
 ---
 
+# 当前理论完成状态
+
+01 当前已完成理论架构闭合：
+
+```text
+真实 LLM 分阶段解析
+程序锁定段落边界
+LLM 标注段落属性
+事件图谱生成
+长文本分批候选提取
+候选批次合并
+声音/视频生产预判
+JSON 修复
+阶段评分与修改意见重跑
+01F 总检触发阶段重跑
+最终 schema 硬规则校验
+测试样例与测试清单
+```
+
+后续需要根据真实小说数据和本地模型表现继续精修 prompt、阈值、分批大小和评分规则。
+
+---
+
 # 当前实际运行入口
 
 当前 00 总控会优先运行模块内的：
@@ -44,7 +67,7 @@ run.py
 
 01 不再支持 scaffold 占位解析。
 
-凡是 01A–01F 需要理解、切分、提取、预判、评分的步骤，都必须真实调用 LLM。
+凡是 01A–01F 需要理解、切分标注、事件分析、候选提取、预判、评分的步骤，都必须真实调用 LLM。
 
 如果没有配置本地 LLM，01 应该直接失败，不允许继续生成占位 `novel_analysis.json`。
 
@@ -71,7 +94,7 @@ input/novel.txt
 
 ---
 
-# 已落地的阶段结构
+# 已落地的工程结构
 
 ```text
 01_novel_parser/
@@ -79,7 +102,11 @@ input/novel.txt
   core/
     __init__.py
     llm_client.py
+    json_repair.py
+    paragraph_splitter.py
+    chunk_manager.py
     quality_checker.py
+    schema_validator.py
     stage_runner.py
   prompts/
     01A_story_understanding.md
@@ -88,14 +115,19 @@ input/novel.txt
     01D_candidate_extract.md
     01E_production_predict.md
     01F_quality_check.md
+  input/
+    novel.txt.example
+  tests/
+    README.md
 ```
 
-运行后会额外生成：
+运行后会生成：
 
 ```text
 intermediate/01A_story_understanding.json
 intermediate/01B_paragraphs.json
 intermediate/01C_event_graph.json
+intermediate/01D_batch_XXX_candidates.json
 intermediate/01D_candidates.json
 intermediate/01E_production_predict.json
 intermediate/01F_quality_check.json
@@ -106,6 +138,64 @@ intermediate/01F_quality_check.json
 ```text
 novel_analysis.json
 ```
+
+---
+
+# 01B：程序切段 + LLM 标注
+
+01B 不再完全依赖 LLM 决定段落边界。
+
+当前流程：
+
+```text
+paragraph_splitter.py 先按原文生成稳定 paragraph_id / text / start_char / end_char
+LLM 只负责补充 chapters / paragraph_type / timeline / 标注属性
+merge_llm_paragraph_annotations 保留程序段落边界
+```
+
+这样可以保证后续所有事件、候选、金句、证据都能稳定回链到 `paragraph_id`。
+
+---
+
+# 01D：分批全量候选提取
+
+01D 不再一次把所有 paragraphs 塞给 LLM。
+
+当前流程：
+
+```text
+chunk_manager.py 按段落分批
+每个 batch 调用 01D_candidate_extract.md
+每批输出候选角色 / 场景 / 道具
+程序合并所有 batch 候选
+不删除不确定重复项，只标记 source_batch_id / possible_same_as
+```
+
+最高规则仍然是：
+
+```text
+只要文章里提到过的人、地点、物件，都必须作为候选输出。
+不确定也要输出，confidence 可以低。
+importance 只表示后续优先级，不能作为是否提取的门槛。
+```
+
+候选过多不是错误，遗漏才是错误。
+
+---
+
+# JSON 修复机制
+
+`llm_client.py` 会尝试解析 LLM 返回 JSON。
+
+如果解析失败：
+
+```text
+json_repair.py 会把 broken_json 和错误原因发回 LLM
+要求只修复 JSON 格式
+再重新解析
+```
+
+该机制只修复格式，不新增业务内容。
 
 ---
 
@@ -120,7 +210,6 @@ novel_analysis.json
 ```text
 必要字段是否存在
 JSON 是否符合阶段结构
-是否仍是占位内容
 候选是否为空
 paragraphs 是否为空
 story_understanding 是否完整
@@ -159,7 +248,31 @@ revision_instructions
 系统会重跑：01D → 01E → 01F
 ```
 
-这样不是只给分，而是会根据修改意见自动修正。
+---
+
+# 最终硬规则校验
+
+最终合并 `novel_analysis.json` 后，`schema_validator.py` 会做程序级硬校验：
+
+```text
+顶层必要字段是否存在
+paragraphs 是否为空
+event_graph.events 是否为空
+event.paragraph_ids 是否引用真实 paragraph_id
+event_edges 是否引用真实 event_id
+候选 raw_mentions / appearance_paragraphs 是否引用真实 paragraph_id
+voice_line 是否引用真实 paragraph_id / event_id
+video_unit 是否引用真实 event_id
+evidence_index 是否引用真实 paragraph_id
+```
+
+校验结果写入：
+
+```text
+schema_validation
+quality_report.schema_validation_passed
+quality_report.schema_validation_issues
+```
 
 ---
 
@@ -225,9 +338,14 @@ adaptation_strategy
 misread_prevention
 ```
 
-## 01B：段落切分阶段
+## 01B：段落切分标注阶段
 
-输入：完整 `novel.txt`
+输入：
+
+```text
+完整 novel.txt
+程序生成的 base_split
+```
 
 输出：
 
@@ -237,16 +355,26 @@ paragraphs
 timeline
 ```
 
-每个段落必须有：
+程序锁定：
 
 ```text
 paragraph_id
-chapter_id
-index
 text
 start_char
 end_char
+```
+
+LLM 标注：
+
+```text
+chapter 信息
 paragraph_type
+contains_dialogue
+contains_action
+contains_new_character
+contains_new_scene
+contains_new_prop
+timeline
 ```
 
 ## 01C：事件图谱阶段
@@ -274,7 +402,7 @@ character_arc_map
 输入：
 
 ```text
-paragraphs
+paragraph batch
 event_graph
 candidate_extraction_policy
 ```
@@ -287,14 +415,6 @@ candidate_scenes
 candidate_props
 asset_binding_hints
 visual_risk_report
-```
-
-最高规则：
-
-```text
-只要文章里提到过的人、地点、物件，都必须作为候选输出。
-不确定也要输出，confidence 可以低。
-importance 只表示后续优先级，不能作为是否提取的门槛。
 ```
 
 ## 01E：声音和视频生产预判阶段
@@ -338,19 +458,6 @@ warnings
 chapter_memory_update
 ```
 
-重点检查：
-
-```text
-故事主轴是否清楚
-主角是否明确
-事件图谱是否断裂
-时间线是否混乱
-文章提到的人、地点、物件是否全部进入候选
-金句是否漏掉
-所有关键判断是否能回查 paragraph_id
-是否需要重跑某一阶段
-```
-
 ---
 
 # schema 1.2 顶层结构
@@ -364,6 +471,7 @@ chapter_memory_update
   "stage_mode": "llm",
   "stage_status": [],
   "final_revision_rounds": [],
+  "schema_validation": {},
   "input": {},
   "novel": {},
   "story_understanding": {},
@@ -459,6 +567,28 @@ workspace/books/{book_id}/chapters/{chapter_id}/01_novel_parser/novel_analysis.j
 
 ```text
 01_novel_parser/output/novel_analysis.json
+```
+
+---
+
+# 测试
+
+测试样例：
+
+```text
+01_novel_parser/input/novel.txt.example
+```
+
+测试清单：
+
+```text
+01_novel_parser/tests/README.md
+```
+
+建议单模块测试：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 01_novel_parser
 ```
 
 ---
