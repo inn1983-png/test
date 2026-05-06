@@ -13,7 +13,7 @@ resource_manager = import_module("00_common.resource_manager")
 
 MODULE_NAME = "01_novel_parser"
 DISPLAY_NAME = "小说解析系统"
-DESCRIPTION = "负责通读小说、理解故事核心，并解析章节、事件图谱、冲突点、人物、场景、道具、音频/视频生产预判等基础信息。"
+DESCRIPTION = "负责通读小说、理解故事核心，并解析章节、事件图谱、冲突点、全部被提及的人物/地点/物件候选、音频/视频生产预判等基础信息。"
 KEY_OUTPUT = "novel_analysis.json"
 SCHEMA_VERSION = "1.1"
 
@@ -77,22 +77,27 @@ def build_story_understanding(novel_text: str) -> dict:
 
 def build_candidate_extraction_policy() -> dict:
     return {
-        "mode": "high_recall_first",
-        "principle": "候选角色、场景、道具提取宁可多，不可漏。01 不负责最终去重和压缩，03/04/05 负责合并、去重、标准化。",
-        "why": "后续角色库、场景库、道具库可以合并多余候选，但无法恢复 01 阶段漏掉的重要人物、地点、物件。",
+        "mode": "extract_every_mentioned_candidate",
+        "principle": "只要文章里提到过的人、地点、物件，都必须提取出来作为候选。01 不用重要性筛掉候选，重要性只作为评分字段。",
+        "high_recall_rule": "候选角色、场景、道具提取宁可多，不可漏。01 不负责最终去重和压缩，03/04/05 负责合并、去重、标准化。",
+        "why": "后续角色库、场景库、道具库可以合并多余候选，但无法恢复 01 阶段漏掉的人物、地点、物件。",
+        "importance_rule": "importance 只能表示后续优先级，不能作为是否提取的门槛。importance=0 或 confidence 很低的对象，只要原文提到，也要作为候选输出。",
         "character_policy": {
             "extract_all_mentions": True,
             "include_minor_roles": True,
             "include_unnamed_roles": True,
             "include_group_roles": True,
-            "examples": ["主角", "有名角色", "只出现一次的人", "称谓角色", "路人", "地痞", "衙役们", "围观百姓"],
+            "include_title_only_roles": True,
+            "include_background_roles": True,
+            "examples": ["主角", "有名角色", "只出现一次的人", "称谓角色", "路人", "地痞", "衙役们", "围观百姓", "丫鬟", "老仆", "某个孩子"],
             "do_not_merge_in_01": "01 可给 possible_same_as / merge_hint，但不得直接把候选删掉。",
         },
         "scene_policy": {
             "extract_all_locations": True,
             "include_implied_scenes": True,
             "include_transition_locations": True,
-            "examples": ["街道", "衙门", "房间", "院子", "牢房", "门口", "回忆中的地点", "只出现一句的地点"],
+            "include_mentioned_but_not_entered_locations": True,
+            "examples": ["街道", "衙门", "房间", "院子", "牢房", "门口", "回忆中的地点", "只出现一句的地点", "被提到但未真正进入的地点"],
             "do_not_merge_in_01": "01 可给 possible_same_as / continuity_note，但不得直接删除相近场景候选。",
         },
         "prop_policy": {
@@ -100,11 +105,13 @@ def build_candidate_extraction_policy() -> dict:
             "include_minor_props": True,
             "include_clothing_and_symbols": True,
             "include_documents_and_money": True,
-            "examples": ["武器", "令牌", "信件", "钱袋", "衣服", "案卷", "惊堂木", "摊位", "碎饼", "灯笼", "桌椅"],
-            "do_not_filter_in_01": "只要可能影响画面、剧情、身份、动作或后续镜头连续性，就先提取。",
+            "include_food_furniture_lamps_tools": True,
+            "include_mentioned_but_not_used_objects": True,
+            "examples": ["武器", "令牌", "信件", "钱袋", "衣服", "案卷", "惊堂木", "摊位", "碎饼", "灯笼", "桌椅", "茶杯", "包袱", "门", "窗"],
+            "do_not_filter_in_01": "只要文章提到，就先提取；是否重要、是否入库、是否出图，交给 05 和后续模块判断。",
         },
         "candidate_confidence_rule": "不确定也要输出，但 confidence 可低，并在 risk_notes 写明不确定原因。",
-        "downstream_rule": "03/04/05 必须基于这些高召回候选进行合并、去重、筛选，不得要求 01 只输出少量精简候选。",
+        "downstream_rule": "03/04/05 必须基于这些全量候选进行合并、去重、筛选，不得要求 01 只输出少量精简候选。",
     }
 
 
@@ -179,6 +186,7 @@ def build_candidate_characters() -> list[dict]:
             "name": "待识别角色候选",
             "aliases": [],
             "candidate_type": "placeholder",
+            "mention_type": "explicit_or_implicit",
             "first_appearance_paragraph": None,
             "appearance_paragraphs": [],
             "role_hint": "待真实解析：主角 / 配角 / 反派 / 导师 / 路人 / 群体角色。",
@@ -194,7 +202,7 @@ def build_candidate_characters() -> list[dict]:
             "raw_mentions": [],
             "possible_same_as": [],
             "merge_hint": "01 不直接合并删除候选，只给 03 角色库提供合并线索。",
-            "risk_notes": ["真实解析时采用高召回策略：宁可多提角色候选，不可漏掉。"],
+            "risk_notes": ["真实解析时采用全量提取策略：只要文章里提到的人，都必须作为角色候选输出。"],
         }
     ]
 
@@ -206,6 +214,7 @@ def build_candidate_scenes() -> list[dict]:
             "name": "待识别场景候选",
             "aliases": [],
             "candidate_type": "placeholder",
+            "mention_type": "explicit_or_implicit",
             "first_appearance_paragraph": None,
             "appearance_paragraphs": [],
             "scene_type": "待真实解析：街道 / 衙门 / 室内 / 庭院 / 山林 / 战场 / 过渡地点。",
@@ -219,7 +228,7 @@ def build_candidate_scenes() -> list[dict]:
             "confidence": 0.0,
             "possible_same_as": [],
             "continuity_note": "01 不直接合并删除场景候选，只给 04 场景库提供合并与连续性线索。",
-            "risk_notes": ["真实解析时采用高召回策略：宁可多提场景候选，不可漏掉。"],
+            "risk_notes": ["真实解析时采用全量提取策略：只要文章里提到的地点，都必须作为场景候选输出。"],
         }
     ]
 
@@ -231,6 +240,7 @@ def build_candidate_props() -> list[dict]:
             "name": "待识别道具候选",
             "aliases": [],
             "candidate_type": "placeholder",
+            "mention_type": "explicit_or_implicit",
             "first_appearance_paragraph": None,
             "appearance_paragraphs": [],
             "prop_type": "待真实解析：武器 / 文件 / 钱财 / 衣物 / 身份标志 / 家具 / 摊位 / 食物 / 灯具等。",
@@ -240,7 +250,7 @@ def build_candidate_props() -> list[dict]:
             "reuse_potential": 0,
             "confidence": 0.0,
             "possible_same_as": [],
-            "risk_notes": ["真实解析时采用高召回策略：只要可能影响画面、剧情、身份、动作或连续性，就先提取。"],
+            "risk_notes": ["真实解析时采用全量提取策略：只要文章里提到的物件，都必须作为道具候选输出。"],
         }
     ]
 
@@ -311,7 +321,7 @@ def build_visual_risk_report() -> dict:
         "too_many_characters_events": [],
         "unclear_actor_count_events": [],
         "prop_confusion_risk": [],
-        "candidate_over_extraction_note": "角色/场景/道具候选多不是问题，遗漏才是问题。后续 03/04/05 负责筛选合并。",
+        "candidate_over_extraction_note": "角色/场景/道具候选多不是问题，遗漏才是问题。只要文章提到过，就应进入候选。后续 03/04/05 负责筛选合并。",
         "style_risk": [
             "真实解析时必须识别现代物品、现代服饰、错误时代、欧美脸、卡通/3D 风格等风险。"
         ],
@@ -422,8 +432,8 @@ def build_scaffold_analysis(config: dict) -> dict:
             "has_video_unit_candidates": True,
             "has_visual_risk_report": True,
             "has_evidence_index": True,
-            "candidate_extraction_mode": "high_recall_first",
-            "asset_candidate_review_policy": "候选过多不算错误，候选遗漏才需要返工。",
+            "candidate_extraction_mode": "extract_every_mentioned_candidate",
+            "asset_candidate_review_policy": "候选过多不算错误；只要文章提到过的人、地点、物件没有进入候选，就需要返工。",
             "story_understanding_score": 0.0 if source_status == "placeholder_input" else 0.1,
             "event_graph_score": 0.0 if source_status == "placeholder_input" else 0.1,
             "visual_readiness_score": 0.0,
@@ -436,12 +446,13 @@ def build_scaffold_analysis(config: dict) -> dict:
         "warnings": [
             "当前为 scaffold 输出，story_understanding / event_graph / voice_line_candidates 尚未调用真实 LLM。",
             "当前 voice_line 和 video_unit 仅为生产预判结构，不代表最终剧本或视频 JSON。",
-            "当前候选角色/场景/道具为占位样例；真实解析时必须高召回提取，宁可多，不可漏。",
+            "当前候选角色/场景/道具为占位样例；真实解析时必须提取文章里提到过的全部人、地点、物件。",
         ],
         "notes": [
             "01 必须先通读全文，理解故事核心，再提取结构信息。",
             "01 只提出角色、场景、道具候选，不直接写入 shared_assets。",
-            "01 的候选提取策略是高召回优先：越详细越好，不怕多，怕遗漏。",
+            "01 的候选提取策略是全量提取：只要文章里提到过的人、地点、物件，都必须作为候选。",
+            "重要性只影响后续优先级，不影响是否提取。",
             "01 可以给改编建议和生产预判，但不能直接写剧本、分镜、图片提示词或视频提示词。",
             "真实解析逻辑后续逐步接入。",
         ],
@@ -457,7 +468,7 @@ def main() -> int:
             MODULE_NAME,
             KEY_OUTPUT,
             data,
-            description="小说解析关键输出：全局故事理解、事件图谱、生产预判、候选资产与原文证据链。",
+            description="小说解析关键输出：全局故事理解、事件图谱、生产预判、全量候选资产与原文证据链。",
         )
         base_module.write_placeholder_output(MODULE_NAME, {
             "module": MODULE_NAME,
