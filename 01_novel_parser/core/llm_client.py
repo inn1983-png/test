@@ -7,13 +7,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-
 JSON_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
 
 
 @dataclass
 class LLMConfig:
-    enabled: bool
     base_url: str
     model: str
     api_key: str
@@ -22,10 +20,16 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
+        base_url = os.getenv("AI_DRAMA_LLM_BASE_URL", "").strip()
+        model = os.getenv("AI_DRAMA_LLM_MODEL", "").strip()
+        if not base_url or not model:
+            raise RuntimeError(
+                "01_novel_parser requires a real local LLM. "
+                "Please set AI_DRAMA_LLM_BASE_URL and AI_DRAMA_LLM_MODEL."
+            )
         return cls(
-            enabled=os.getenv("AI_DRAMA_01_USE_LLM", "0") == "1",
-            base_url=os.getenv("AI_DRAMA_LLM_BASE_URL", "http://127.0.0.1:8000/v1/chat/completions"),
-            model=os.getenv("AI_DRAMA_LLM_MODEL", "local-model"),
+            base_url=base_url,
+            model=model,
             api_key=os.getenv("AI_DRAMA_LLM_API_KEY", ""),
             timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "180")),
             temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.2")),
@@ -35,6 +39,7 @@ class LLMConfig:
 class LLMClient:
     """Minimal OpenAI-compatible local LLM client.
 
+    01_novel_parser must use a real LLM for all stages.
     Expected endpoint: POST /v1/chat/completions
     The returned assistant content must contain a JSON object.
     """
@@ -42,13 +47,7 @@ class LLMClient:
     def __init__(self, config: LLMConfig | None = None) -> None:
         self.config = config or LLMConfig.from_env()
 
-    def is_enabled(self) -> bool:
-        return self.config.enabled
-
     def complete_text(self, system_prompt: str, user_prompt: str) -> str:
-        if not self.config.enabled:
-            raise RuntimeError("AI_DRAMA_01_USE_LLM is not enabled")
-
         payload = {
             "model": self.config.model,
             "temperature": self.config.temperature,
