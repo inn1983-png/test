@@ -19,6 +19,8 @@
 9. 提供安全清理工具
 10. 提供产物查询工具
 11. 提供 pipeline 配置校验工具
+12. 提供空流程自检工具
+13. 提供本地模型释放命令配置
 
 ---
 
@@ -111,6 +113,7 @@ workspace/books/book_001/global_memory/
 ```text
 00_main_controller/run_pipeline.py       # 总控入口
 00_main_controller/validate_pipeline.py  # pipeline 配置校验
+00_main_controller/self_check.py         # 00 空流程自检
 00_main_controller/cleanup_workspace.py  # 安全清理工具
 00_main_controller/query_artifacts.py    # 产物查询工具
 00_common/workspace_manager.py           # 项目目录 / 长篇目录管理
@@ -119,7 +122,8 @@ workspace/books/book_001/global_memory/
 00_common/artifact_db.py                 # SQLite 产物数据库
 00_common/artifact_registry.py           # 产物登记器
 00_common/artifact_resolver.py           # 后续模块查找上一步资产
-00_common/resource_manager.py            # 本地模型显存释放
+00_common/resource_manager.py            # 本地模型显存释放 / 外部释放命令配置
+configs/local_resource_release.json      # 本地资源释放命令配置
 ```
 
 ---
@@ -156,6 +160,142 @@ pipeline 是否为空
 是否有重复模块
 是否误把 00_* 放进 pipeline
 是否偏离推荐 01→10 顺序（strict-order 时提示）
+```
+
+---
+
+# 空流程自检
+
+00 总控层必须先能独立跑通，才能进入 01 小说解析系统。
+
+## 只初始化短篇运行目录，不运行任何模块
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id self_check_project --empty-pipeline
+```
+
+会生成：
+
+```text
+workspace/projects/self_check_project/runtime_context.json
+workspace/projects/self_check_project/manifest.json
+workspace/projects/self_check_project/artifacts.db
+```
+
+## 只初始化长篇章节目录，不运行任何模块
+
+```bash
+python 00_main_controller/run_pipeline.py --mode book_chapter --book-id self_check_book --chapter-id chapter_001 --empty-pipeline
+```
+
+会生成：
+
+```text
+workspace/books/self_check_book/chapters/chapter_001/runtime_context.json
+workspace/books/self_check_book/chapters/chapter_001/manifest.json
+workspace/books/self_check_book/chapters/chapter_001/artifacts.db
+workspace/books/self_check_book/shared_assets/
+workspace/books/self_check_book/global_memory/
+```
+
+## 一键自检 00 总控
+
+```bash
+python 00_main_controller/self_check.py
+```
+
+它会自动检查：
+
+```text
+pipeline.json 是否能通过严格顺序校验
+短篇 project 空流程是否能初始化
+长篇 book_chapter 空流程是否能初始化
+runtime_context.json 是否存在
+manifest.json 是否存在
+artifacts.db 是否存在
+shared_assets 默认文件是否存在
+global_memory 默认文件是否存在
+```
+
+默认自检结束后会删除临时目录。
+
+如果要保留自检目录：
+
+```bash
+python 00_main_controller/self_check.py --keep
+```
+
+---
+
+# 本地模型释放配置
+
+每个模块仍然必须在 `finally` 中调用：
+
+```python
+resource_manager.release_local_resources(MODULE_NAME)
+```
+
+默认行为：
+
+```text
+1. gc.collect()
+2. torch.cuda.empty_cache()
+3. torch.cuda.ipc_collect()
+```
+
+外部释放命令通过下面文件配置：
+
+```text
+configs/local_resource_release.json
+```
+
+默认配置是关闭的：
+
+```json
+{
+  "enabled": false,
+  "global_commands": [],
+  "module_commands": {
+    "09_video": []
+  }
+}
+```
+
+这样做是为了避免误停 ComfyUI、本地 LLM、TTS 服务或其他用户正在使用的进程。
+
+需要启用外部释放命令时，可以把：
+
+```json
+"enabled": true
+```
+
+或者在运行前设置环境变量：
+
+```bash
+set AI_DRAMA_ENABLE_RESOURCE_COMMANDS=1
+```
+
+也可以指定其他配置文件：
+
+```bash
+set AI_DRAMA_RESOURCE_RELEASE_CONFIG=configs/local_resource_release.json
+```
+
+配置示例：
+
+```json
+{
+  "enabled": true,
+  "global_commands": [],
+  "module_commands": {
+    "09_video": [
+      "python scripts/unload_video_model.py"
+    ],
+    "08_audio": [
+      "python scripts/unload_tts_model.py"
+    ]
+  }
+}
 ```
 
 ---
@@ -374,6 +514,6 @@ workspace/books/{book_id}/chapters/{chapter_id}/{module_name}/
 
 # 当前 00 后续待做
 
-1. 增加本地模型释放命令配置
-2. 增加空流程自检命令
-3. 进入 01 小说解析系统前，先确保 00 可以跑通空流程
+1. 在真实本地环境执行 `python 00_main_controller/self_check.py`
+2. 确认空流程通过后，进入 01 小说解析系统
+3. 后续根据本地 ComfyUI / LLM / TTS 实际卸载方式，再逐步补充 `configs/local_resource_release.json`
