@@ -8,23 +8,23 @@ STAGE_THRESHOLDS = {
     "02B": 88,
     "02C": 90,
     "02D": 92,
-    "02E": 88,
+    "02E": 90,
     "02F": 92,
 }
 
 REQUIRED_KEYS = {
-    "02A": ["adaptation_blueprint", "coverage_plan", "tone_plan", "compression_guardrails", "length_strategy"],
-    "02B": ["script_structure", "scene_beats", "event_coverage_map", "retention_design", "character_name_usage"],
+    "02A": ["adaptation_blueprint", "coverage_plan", "tone_plan", "compression_guardrails", "length_strategy", "episode_split_plan", "script_version_strategy"],
+    "02B": ["script_structure", "scene_beats", "event_coverage_map", "retention_design", "character_name_usage", "script_emotion_curve"],
     "02C": ["voice_line_plan", "script_video_unit_candidates", "duration_risk_report"],
-    "02D": ["script", "segments", "script_text", "source_line_usage"],
-    "02E": ["production_annotations", "audio_cues", "visual_dramatic_units", "storyboard_hints", "risk_report"],
-    "02F": ["quality_report", "evidence_index", "warnings", "revision_plan"],
+    "02D": ["script", "segments", "script_text", "source_line_usage", "script_versions", "selected_version_id", "tts_readability_report"],
+    "02E": ["production_annotations", "audio_cues", "visual_dramatic_units", "storyboard_hints", "risk_report", "visual_executability_report", "character_load_report", "continuity_chain"],
+    "02F": ["quality_report", "evidence_index", "warnings", "revision_plan", "failure_learning_notes"],
 }
 
 
 def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
     missing = [key for key in REQUIRED_KEYS.get(stage_id, []) if key not in data]
-    score = 100 - len(missing) * 12
+    score = 100 - len(missing) * 10
     issues: list[str] = []
     suggestions: list[str] = []
 
@@ -73,13 +73,23 @@ def _evaluate_blueprint(data: dict[str, Any], score: int, issues: list[str], sug
     guardrails = data.get("compression_guardrails") or {}
     if not guardrails:
         score -= 16
-        issues.append("compression_guardrails 为空，容易把 3000 字内容压成过短剧本。")
+        issues.append("compression_guardrails 为空，容易把长文案压成过短剧本。")
         suggestions.append("明确不得过度压缩、不得把多个关键事件合并成一句话的规则。")
     length_strategy = data.get("length_strategy") or {}
     if not length_strategy:
         score -= 18
         issues.append("length_strategy 为空，无法控制长文案不要被压成固定 2 分钟。")
         suggestions.append("补充 adaptation_mode、minimum_scene_beat_count、minimum_voice_line_count、allow_multi_episode_split。")
+    episode_plan = data.get("episode_split_plan") or []
+    if not isinstance(episode_plan, list) or not episode_plan:
+        score -= 12
+        issues.append("episode_split_plan 为空，长篇章节无法判断是否需要拆集/拆段。")
+        suggestions.append("按故事容量输出 episode_split_plan，即使只有一集也要说明。")
+    version_strategy = data.get("script_version_strategy") or {}
+    if not isinstance(version_strategy, dict) or not version_strategy:
+        score -= 10
+        issues.append("script_version_strategy 为空，后续无法做多版本剧本选择。")
+        suggestions.append("说明后续 script_versions 应包含忠于原文、短剧刺激、音频驱动等版本策略。")
     return score, issues, suggestions
 
 
@@ -99,6 +109,11 @@ def _evaluate_structure(data: dict[str, Any], score: int, issues: list[str], sug
         score -= 12
         issues.append("character_name_usage 为空，后续角色一致性风险较高。")
         suggestions.append("列出 canonical_name、aliases_used、dialogue_speaker_names，禁止新造年龄前缀角色名。")
+    curve = data.get("script_emotion_curve") or []
+    if not isinstance(curve, list) or len(curve) < 3:
+        score -= 12
+        issues.append("script_emotion_curve 不完整，剧本情绪可能发平。")
+        suggestions.append("至少输出 opening / midpoint / payoff / ending_hook 等情绪节点和强度。")
     return score, issues, suggestions
 
 
@@ -155,6 +170,16 @@ def _evaluate_script(data: dict[str, Any], score: int, issues: list[str], sugges
         suggestions.append("生成包含 OS、对白、动作、留白的 segments 数组。")
         return score, issues, suggestions
 
+    versions = data.get("script_versions") or []
+    if not isinstance(versions, list) or len(versions) < 2:
+        score -= 12
+        issues.append("script_versions 少于 2 个，无法比较忠于原文/短剧刺激/音频驱动等版本。")
+        suggestions.append("至少输出两个剧本版本，并说明 selected_version_id 的选择理由。")
+    if not data.get("selected_version_id"):
+        score -= 8
+        issues.append("selected_version_id 为空。")
+        suggestions.append("从 script_versions 中选择一个最终版本并给出选择理由。")
+
     types = {str(item.get("type")) for item in segments if isinstance(item, dict)}
     if "os" not in types:
         score -= 12
@@ -191,6 +216,10 @@ def _evaluate_script(data: dict[str, Any], score: int, issues: list[str], sugges
         score -= 12
         issues.append("source_line_usage 为空，无法确认原文关键句是否继承。")
         suggestions.append("列出 01 golden_lines / 高刺激原文句子的 direct/adapted/omitted 使用情况。")
+    if not data.get("tts_readability_report"):
+        score -= 10
+        issues.append("tts_readability_report 为空，无法判断口播节奏和 TTS 可读性。")
+        suggestions.append("检查长句、书面语、连续 OS、TTS 拗口段落。")
     return score, issues, suggestions
 
 
@@ -207,6 +236,18 @@ def _evaluate_annotations(data: dict[str, Any], score: int, issues: list[str], s
         score -= 10
         issues.append("storyboard_hints 为空，06 分镜难以获得剧本层面的画面锚点。")
         suggestions.append("补充 segment_id / voice_line_id 对应的 visual_anchor、action_chain、shot_intent。")
+    if not data.get("visual_executability_report"):
+        score -= 10
+        issues.append("visual_executability_report 为空，无法提前发现抽象画面动作。")
+        suggestions.append("标记抽象、不可画、缺动作链的 segment/visual_unit。")
+    if not data.get("character_load_report"):
+        score -= 10
+        issues.append("character_load_report 为空，无法提前发现单帧人物过多风险。")
+        suggestions.append("标记同时上场人物过多的视频单元或视觉单元，并给出拆分建议。")
+    if not data.get("continuity_chain"):
+        score -= 10
+        issues.append("continuity_chain 为空，后续单帧连续性缺少链表约束。")
+        suggestions.append("输出 from_visual_unit_id / to_visual_unit_id / must_keep / can_change。")
     return score, issues, suggestions
 
 
@@ -216,6 +257,10 @@ def _evaluate_final_check(data: dict[str, Any], score: int, issues: list[str], s
         score -= 30
         issues.append("02F 总检要求重跑阶段。")
         suggestions.append("按 quality_report.retry_stages 和 revision_instructions 从最早问题阶段重跑。")
+    if not data.get("failure_learning_notes"):
+        score -= 8
+        issues.append("failure_learning_notes 为空，真实测试后难以回灌失败样本。")
+        suggestions.append("输出可写入 prompt_tuning_notes.md 的失败类型、观察点、修复策略。")
     return score, issues, suggestions
 
 
