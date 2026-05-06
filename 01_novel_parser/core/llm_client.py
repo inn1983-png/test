@@ -5,7 +5,7 @@ import os
 import re
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 JSON_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
 
@@ -67,10 +67,20 @@ class LLMClient:
         result = json.loads(raw)
         return result["choices"][0]["message"]["content"]
 
-    def complete_json(self, system_prompt: str, user_payload: dict[str, Any]) -> dict[str, Any]:
+    def complete_json(
+        self,
+        system_prompt: str,
+        user_payload: dict[str, Any],
+        repair_callback: Callable[[str, str], dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         user_prompt = json.dumps(user_payload, ensure_ascii=False, indent=2)
         text = self.complete_text(system_prompt, user_prompt)
-        return parse_json_from_text(text)
+        try:
+            return parse_json_from_text(text)
+        except Exception as exc:
+            if repair_callback is None:
+                raise
+            return repair_callback(text, str(exc))
 
 
 def parse_json_from_text(text: str) -> dict[str, Any]:
