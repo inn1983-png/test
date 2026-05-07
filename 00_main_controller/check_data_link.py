@@ -31,8 +31,8 @@ CORE_FILES_BY_MODULE: dict[str, list[str]] = {
     "05_prop_system": ["run_staged.py", "core/stage_runner.py", "core/llm_client.py", "core/json_repair.py", "core/quality_checker.py", "core/schema_validator.py"],
     "06_storyboard": ["run_staged.py", "core/stage_runner.py", "core/llm_client.py", "core/json_repair.py", "core/quality_checker.py", "core/schema_validator.py"],
     "07_storyboard_image": ["run_staged.py", "core/stage_runner.py", "core/comfyui_client.py", "core/quality_checker.py", "core/schema_validator.py"],
-    "08_audio": ["run_staged.py", "core/stage_runner.py", "core/tts_client.py", "core/quality_checker.py", "core/schema_validator.py"],
-    "09_video": ["run_staged.py", "core/stage_runner.py", "core/ltx_client.py", "core/quality_checker.py", "core/schema_validator.py"],
+    "08_audio": ["run_staged.py", "core/stage_runner.py", "core/indextts_client.py", "core/voice_library.py", "core/timeline_builder.py", "core/quality_checker.py", "core/schema_validator.py"],
+    "09_video": ["run_staged.py", "core/stage_runner.py", "core/workflow_adapter.py", "core/comfyui_client.py", "core/quality_checker.py", "core/schema_validator.py"],
     "10_final_assembly": ["run_staged.py", "core/stage_runner.py", "core/ffmpeg_client.py", "core/quality_checker.py", "core/schema_validator.py"],
 }
 
@@ -116,6 +116,7 @@ def check_files(results: list[dict[str, Any]]) -> None:
         "00_main_controller/run_pipeline.py",
         "00_main_controller/validate_pipeline.py",
         "00_main_controller/self_check.py",
+        "00_main_controller/check_data_link.py",
         "00_common/module_runner.py",
         "00_common/module_contracts.py",
         "00_common/workspace_manager.py",
