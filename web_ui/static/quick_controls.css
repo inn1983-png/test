@@ -1,0 +1,83 @@
+.single-module-runner {
+  margin: 18px 0;
+  padding: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.single-module-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.single-module-head h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+
+.single-module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 12px;
+}
+
+.module-run-btn {
+  width: 100%;
+  min-height: 112px;
+  padding: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.055);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.module-run-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(120, 180, 255, 0.55);
+  background: rgba(120, 180, 255, 0.10);
+}
+
+.module-run-btn.primary-module {
+  border-color: rgba(120, 220, 180, 0.65);
+  background: rgba(120, 220, 180, 0.10);
+}
+
+.module-run-title {
+  display: block;
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 8px;
+}
+
+.module-run-meta,
+.module-run-desc {
+  display: block;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.quick-range-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.quick-config-note {
+  margin-top: 12px;
+  color: rgba(255, 255, 255, 0.64);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.hidden-by-quick-controls {
+  display: none !important;
+}
