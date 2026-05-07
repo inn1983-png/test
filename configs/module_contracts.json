@@ -58,7 +58,10 @@
         {"module": "08_audio", "name": "final_audio.wav"},
         {"module": "08_audio", "name": "audio_timeline.json"}
       ],
-      "produces": [{"module": "09_video", "name": "video_manifest.json", "type": "json"}]
+      "produces": [
+        {"module": "09_video", "name": "video_manifest.json", "type": "json"},
+        {"module": "09_video", "name": "final_video.mp4", "type": "video"}
+      ]
     },
     "10_final_assembly": {
       "requires": [{"module": "09_video", "name": "video_manifest.json"}],
