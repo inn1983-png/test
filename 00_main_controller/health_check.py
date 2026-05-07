@@ -12,6 +12,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 PIPELINE_ORDER = [
     "01_novel_parser",
     "02_script_writer",
@@ -53,7 +56,7 @@ def _check_python(checks: list[dict[str, Any]]) -> None:
 
 
 def _check_pipeline(checks: list[dict[str, Any]]) -> None:
-    pipeline_json = ROOT / "00_main_controller" / "pipeline.json"
+    pipeline_json = ROOT / "pipeline.json"
     checks.append({
         "group": "Pipeline",
         "check_id": "pipeline_json_exists",
@@ -92,6 +95,10 @@ def _check_contracts(checks: list[dict[str, Any]]) -> None:
             return
         for module_name in PIPELINE_ORDER:
             contract = data.get(module_name)
+            if not isinstance(contract, dict):
+                modules = data.get("modules", {})
+                if isinstance(modules, dict):
+                    contract = modules.get(module_name)
             if not isinstance(contract, dict):
                 checks.append({"group": "Contracts", "check_id": f"contract_{module_name}", "status": "warning", "message": f"{module_name} 无 contract 定义", "fix_hint": ""})
                 continue
@@ -136,7 +143,7 @@ def _check_llm(checks: list[dict[str, Any]]) -> None:
         checks.append({
             "group": "LLM",
             "check_id": "llm_api_key",
-            "status": "passed" if api_key else "failed",
+            "status": "passed" if api_key else "warning",
             "message": f"AI_DRAMA_LLM_API_KEY={'已设置' if api_key else '未设置'}（云端模式需要）",
             "fix_hint": "" if api_key else "使用云端 LLM 需要设置 AI_DRAMA_LLM_API_KEY；如使用本地模型，请设置 AI_DRAMA_LLM_BASE_URL",
         })

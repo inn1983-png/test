@@ -767,8 +767,23 @@ class Handler(SimpleHTTPRequestHandler):
         if not path.exists() or not path.is_file() or ROOT_DIR.resolve() not in path.parents:
             return self.send_json({"error": "file not found"}, status=404)
         suffix = path.suffix.lower()
+        max_preview_bytes = 2 * 1024 * 1024
         if suffix == ".json":
-            return self.send_json({"path": rel, "type": "json", "content": read_json(path, {})})
+            file_size = path.stat().st_size
+            truncated = file_size > max_preview_bytes
+            if truncated:
+                raw_bytes = path.read_bytes()[:max_preview_bytes]
+                try:
+                    content = json.loads(raw_bytes.decode("utf-8", errors="replace"))
+                except Exception:
+                    content = raw_bytes.decode("utf-8", errors="replace")
+            else:
+                content = read_json(path, {})
+            result = {"path": rel, "type": "json", "content": content}
+            if truncated:
+                result["truncated"] = True
+                result["original_size"] = file_size
+            return self.send_json(result)
         if suffix in {".txt", ".md", ".log", ".srt", ".ass"}:
             content = ""
             for encoding in ("utf-8", "utf-8-sig", "gb18030"):
@@ -777,7 +792,11 @@ class Handler(SimpleHTTPRequestHandler):
                     break
                 except Exception:
                     pass
-            return self.send_json({"path": rel, "type": "text", "content": repair_mojibake_text(content)[-200000:]})
+            truncated = len(content) > 200000
+            result = {"path": rel, "type": "text", "content": repair_mojibake_text(content)[-200000:]}
+            if truncated:
+                result["truncated"] = True
+            return self.send_json(result)
         if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
             return self.send_json({"path": rel, "type": "image", "url": "/media/" + rel})
         if suffix in {".wav", ".mp4"}:
@@ -787,7 +806,8 @@ class Handler(SimpleHTTPRequestHandler):
     def serve_media(self, path: str) -> None:
         rel = path.replace("/media/", "", 1)
         file_path = (ROOT_DIR / safe_rel_path(rel)).resolve()
-        if not file_path.exists() or not file_path.is_file() or ROOT_DIR.resolve() not in file_path.parents:
+        workspace_resolved = WORKSPACE_DIR.resolve()
+        if not file_path.exists() or not file_path.is_file() or (workspace_resolved != file_path and workspace_resolved not in file_path.parents):
             return self.send_json({"error": "media not found"}, status=404)
         raw = file_path.read_bytes()
         self.send_response(200)

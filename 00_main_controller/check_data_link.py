@@ -23,6 +23,49 @@ EXPECTED_MODULES = [
 ]
 EXPECTED_DISPLAY_PIPELINE = ["00_main_controller", *EXPECTED_MODULES]
 
+MODULE_DATA_LINK: dict[str, dict[str, Any]] = {
+    "01_novel_parser": {
+        "expected_inputs": [],
+        "expected_outputs": ["01_novel_parser/novel_analysis.json"],
+    },
+    "02_script_writer": {
+        "expected_inputs": ["01_novel_parser/novel_analysis.json"],
+        "expected_outputs": ["02_script_writer/script.json"],
+    },
+    "03_character_system": {
+        "expected_inputs": ["01_novel_parser/novel_analysis.json", "02_script_writer/script.json"],
+        "expected_outputs": ["03_character_system/characters.json"],
+    },
+    "04_scene_system": {
+        "expected_inputs": ["01_novel_parser/novel_analysis.json", "02_script_writer/script.json"],
+        "expected_outputs": ["04_scene_system/scenes.json"],
+    },
+    "05_prop_system": {
+        "expected_inputs": ["01_novel_parser/novel_analysis.json", "02_script_writer/script.json"],
+        "expected_outputs": ["05_prop_system/props.json"],
+    },
+    "06_storyboard": {
+        "expected_inputs": ["02_script_writer/script.json", "03_character_system/characters.json", "04_scene_system/scenes.json", "05_prop_system/props.json"],
+        "expected_outputs": ["06_storyboard/storyboard.json"],
+    },
+    "07_storyboard_image": {
+        "expected_inputs": ["06_storyboard/storyboard.json"],
+        "expected_outputs": ["07_storyboard_image/image_manifest.json"],
+    },
+    "08_audio": {
+        "expected_inputs": ["02_script_writer/script.json"],
+        "expected_outputs": ["08_audio/final_audio.wav", "08_audio/audio_timeline.json", "08_audio/subtitle.srt", "08_audio/subtitle.ass"],
+    },
+    "09_video": {
+        "expected_inputs": ["07_storyboard_image/image_manifest.json", "08_audio/final_audio.wav", "08_audio/audio_timeline.json"],
+        "expected_outputs": ["09_video/video_manifest.json"],
+    },
+    "10_final_assembly": {
+        "expected_inputs": ["09_video/video_manifest.json", "08_audio/final_audio.wav"],
+        "expected_outputs": ["10_final_assembly/final_manifest.json", "10_final_assembly/final_meta.json"],
+    },
+}
+
 CORE_FILES_BY_MODULE: dict[str, list[str]] = {
     "01_novel_parser": ["run_staged.py", "core/stage_runner.py", "core/llm_client.py", "core/json_repair.py", "core/quality_checker.py", "core/schema_validator.py"],
     "02_script_writer": ["run_staged.py", "core/stage_runner.py", "core/llm_client.py", "core/json_repair.py", "core/quality_checker.py", "core/schema_validator.py"],
@@ -141,6 +184,44 @@ def check_files(results: list[dict[str, Any]]) -> None:
                 add_result(results, "fail", rel, "缺失", rel)
 
 
+def check_project_data_link(results: list[dict[str, Any]], project_id: str) -> None:
+    run_dir = ROOT_DIR / "workspace" / "projects" / project_id
+    if not run_dir.exists():
+        add_result(results, "warn", "project_data_link", f"项目目录不存在: {project_id}")
+        return
+
+    for module_name, link_info in MODULE_DATA_LINK.items():
+        expected_inputs = link_info.get("expected_inputs", [])
+        expected_outputs = link_info.get("expected_outputs", [])
+
+        found_inputs: list[str] = []
+        missing_inputs: list[str] = []
+        for inp in expected_inputs:
+            if (run_dir / inp).exists():
+                found_inputs.append(inp)
+            else:
+                missing_inputs.append(inp)
+
+        found_outputs: list[str] = []
+        missing_outputs: list[str] = []
+        for out in expected_outputs:
+            if (run_dir / out).exists():
+                found_outputs.append(out)
+            else:
+                missing_outputs.append(out)
+
+        if missing_inputs or missing_outputs:
+            status = "fail" if missing_inputs else "warn"
+            parts = []
+            if missing_inputs:
+                parts.append(f"缺失输入: {missing_inputs}")
+            if missing_outputs:
+                parts.append(f"缺失输出: {missing_outputs}")
+            add_result(results, status, f"data_link_{module_name}", "; ".join(parts))
+        else:
+            add_result(results, "pass", f"data_link_{module_name}", f"输入{len(found_inputs)}项, 输出{len(found_outputs)}项均存在")
+
+
 def check_controller_commands(results: list[dict[str, Any]], project_id: str) -> None:
     commands = [
         [sys.executable, "00_main_controller/validate_pipeline.py", "--pipeline", "pipeline.json", "--strict-order"],
@@ -195,6 +276,7 @@ def main() -> int:
     check_pipeline(results)
     check_contracts(results)
     check_files(results)
+    check_project_data_link(results, args.project_id)
     check_controller_commands(results, args.project_id)
     report_path = write_report(args.project_id, results)
     failed = [item for item in results if item["status"] == "fail"]

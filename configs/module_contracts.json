@@ -75,7 +75,7 @@
         {"module": "08_audio", "name": "subtitle.ass", "type": "subtitle", "optional": true}
       ],
       "produces": [
-        {"module": "10_final_assembly", "name": "final.mp4", "type": "video"},
+        {"module": "10_final_assembly", "name": "final.mp4", "type": "video", "optional": true},
         {"module": "10_final_assembly", "name": "final_manifest.json", "type": "json"},
         {"module": "10_final_assembly", "name": "final_meta.json", "type": "json"}
       ]
