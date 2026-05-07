@@ -58,8 +58,9 @@ def use_cuda_kernel() -> bool:
     return os.getenv("AI_DRAMA_TTS_CUDA_KERNEL", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _resolve_inside(root: Path, value: str) -> Path:
-    p = Path(value)
+def _resolve_inside(root: Path, value: str | None) -> Path:
+    raw = (value or get_default_voice_prompt()).strip()
+    p = Path(raw)
     if p.is_absolute():
         return p
     return root / p
@@ -96,18 +97,29 @@ def build_segment_plan(queue: list[dict[str, Any]], output_dir: str | Path) -> d
     for index, line in enumerate(queue, start=1):
         segment_id = f"audio_seg_{index:04d}"
         text = str(line.get("text") or "").strip()
-        duration = wav_utils.estimate_speech_duration(text)
+        line_type = str(line.get("line_type") or "dialogue")
+        if line_type.upper() in {"S", "SILENCE", "留白"}:
+            duration = float(line.get("pause_after_seconds") or 1.0)
+            pause_after = 0.0
+        else:
+            duration = wav_utils.estimate_speech_duration(text)
+            pause_after = float(line.get("pause_after_seconds") or 0.15)
         output_path = segment_dir / f"{segment_id}.wav"
+        emotion_mapping = line.get("emotion_mapping", {}) if isinstance(line.get("emotion_mapping"), dict) else {}
         segments.append(
             {
                 "segment_id": segment_id,
                 "audio_line_id": line.get("audio_line_id"),
                 "speaker": line.get("speaker") or "Narrator",
-                "line_type": line.get("line_type") or "dialogue",
+                "line_type": line_type,
                 "text": text,
                 "emotion": line.get("emotion") or "calm",
+                "emotion_mapping": emotion_mapping,
+                "voice_id": line.get("voice_id"),
+                "spk_audio_prompt": line.get("spk_audio_prompt") or get_default_voice_prompt(),
+                "voice_bind_type": line.get("voice_bind_type"),
                 "estimated_duration_seconds": duration,
-                "pause_after_seconds": float(line.get("pause_after_seconds") or 0.15),
+                "pause_after_seconds": pause_after,
                 "output_path": str(output_path),
                 "status": "planned",
             }
@@ -127,14 +139,16 @@ def build_segment_plan(queue: list[dict[str, Any]], output_dir: str | Path) -> d
 
 def _script_for_index_tts(segment: dict[str, Any], output_path: Path, root: Path) -> str:
     text = json.dumps(segment.get("text") or "", ensure_ascii=False)
-    voice = json.dumps(str(_resolve_inside(root, get_default_voice_prompt())), ensure_ascii=False)
+    voice = json.dumps(str(_resolve_inside(root, str(segment.get("spk_audio_prompt") or get_default_voice_prompt()))), ensure_ascii=False)
     out = json.dumps(str(output_path), ensure_ascii=False)
     root_json = json.dumps(str(root), ensure_ascii=False)
     emo_audio = get_default_emo_audio()
     emo_audio_arg = "None"
     if emo_audio:
         emo_audio_arg = json.dumps(str(_resolve_inside(root, emo_audio)), ensure_ascii=False)
-    emo_text = json.dumps(str(segment.get("emotion") or "calm"), ensure_ascii=False)
+    mapping = segment.get("emotion_mapping", {}) if isinstance(segment.get("emotion_mapping"), dict) else {}
+    emo_text = json.dumps(str(mapping.get("emo_text") or segment.get("emotion") or "calm"), ensure_ascii=False)
+    emo_alpha = float(mapping.get("emo_alpha") if mapping.get("emo_alpha") is not None else get_emo_alpha())
     return textwrap.dedent(
         f"""
         import os
@@ -154,7 +168,7 @@ def _script_for_index_tts(segment: dict[str, Any], output_path: Path, root: Path
             text={text},
             output_path={out},
             emo_audio_prompt={emo_audio_arg},
-            emo_alpha={get_emo_alpha()!r},
+            emo_alpha={emo_alpha!r},
             use_emo_text=True,
             emo_text={emo_text},
             use_random=False,
@@ -173,9 +187,14 @@ def synthesize_segments(plan: dict[str, Any], output_dir: str | Path) -> dict[st
             continue
         out_path = Path(segment["output_path"])
         try:
-            if mode == "execute":
+            if str(segment.get("line_type") or "").upper() in {"S", "SILENCE", "留白"}:
+                wav_utils.write_silence_wav(out_path, float(segment.get("estimated_duration_seconds") or 1.0))
+            elif mode == "execute":
                 env = diagnose_environment()
-                missing = [key for key in ("root_exists", "checkpoints_exists", "config_yaml_exists", "default_voice_prompt_exists", "uv_available") if not env.get(key)]
+                voice_path = _resolve_inside(root, str(segment.get("spk_audio_prompt") or get_default_voice_prompt()))
+                missing = [key for key in ("root_exists", "checkpoints_exists", "config_yaml_exists", "uv_available") if not env.get(key)]
+                if not voice_path.exists():
+                    missing.append(f"voice_prompt_missing:{voice_path}")
                 if missing:
                     raise RuntimeError(f"IndexTTS environment is not ready: missing {missing}")
                 code = _script_for_index_tts(segment, out_path, root)
