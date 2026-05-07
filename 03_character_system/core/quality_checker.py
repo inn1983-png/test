@@ -16,9 +16,15 @@ REQUIRED_PRESENT_BY_STAGE = {
 
 REQUIRED_CHARACTER_FIELDS = [
     "character_id", "canonical_name", "aliases", "gender", "age_range", "identity",
-    "appearance", "costume", "temperament", "role_function", "source_evidence", "usage_in_script",
+    "appearance", "costume", "default_costume_id", "costume_variants", "temperament", "role_function", "source_evidence", "usage_in_script",
     "asset_level", "needs_fixed_face", "reference_image_priority", "reference_image_plan",
     "asset_importance_score", "importance_reason", "source_understanding_basis"
+]
+REQUIRED_COSTUME_FIELDS = [
+    "costume_id", "costume_name", "stage_label", "is_default", "appearance_state",
+    "hair_style", "headwear", "upper_garment", "lower_garment", "footwear",
+    "outerwear", "color_palette", "integrated_wearable_props", "script_usage_refs",
+    "continuity_notes", "reference_image_priority"
 ]
 
 VALID_ASSET_LEVELS = {"main", "supporting", "extra_group", "mentioned_only"}
@@ -28,6 +34,50 @@ VALID_RETRY_STAGES = {"03A", "03B", "03C", "03D"}
 
 def _non_empty(value: Any) -> bool:
     return value not in (None, "", [], {})
+
+
+def _check_costume_variants(item: dict[str, Any], issues: list[str]) -> int:
+    score_delta = 0
+    name = str(item.get("canonical_name", ""))
+    asset_level = item.get("asset_level")
+    variants = item.get("costume_variants")
+    default_id = str(item.get("default_costume_id", "")).strip()
+    if asset_level in {"main", "supporting"}:
+        if not isinstance(variants, list) or not variants:
+            issues.append(f"主/配角必须输出 costume_variants：{name}")
+            return -20
+        ids: set[str] = set()
+        default_count = 0
+        for idx, variant in enumerate(variants):
+            if not isinstance(variant, dict):
+                issues.append(f"角色 {name} costume_variants[{idx}] 不是对象")
+                score_delta -= 8
+                continue
+            for field in REQUIRED_COSTUME_FIELDS:
+                if field not in variant or variant.get(field) in (None, "", []):
+                    issues.append(f"角色 {name} 服装版本缺少字段：{field}")
+                    score_delta -= 3
+            cid = str(variant.get("costume_id", "")).strip()
+            if cid in ids:
+                issues.append(f"角色 {name} costume_id 重复：{cid}")
+                score_delta -= 8
+            if cid:
+                ids.add(cid)
+            if variant.get("is_default") is True:
+                default_count += 1
+            if not isinstance(variant.get("integrated_wearable_props", []), list):
+                issues.append(f"角色 {name} integrated_wearable_props 必须为数组")
+                score_delta -= 5
+        if not default_id:
+            issues.append(f"角色 {name} 缺少 default_costume_id")
+            score_delta -= 10
+        elif default_id not in ids:
+            issues.append(f"角色 {name} default_costume_id 不存在于 costume_variants：{default_id}")
+            score_delta -= 12
+        if default_count != 1:
+            issues.append(f"角色 {name} costume_variants 必须且只能有一个 is_default=true")
+            score_delta -= 8
+    return score_delta
 
 
 def _check_review_report(stage_id: str, data: dict[str, Any], issues: list[str]) -> int:
@@ -41,6 +91,9 @@ def _check_review_report(stage_id: str, data: dict[str, Any], issues: list[str])
         if field not in report:
             issues.append(f"{stage_id}.review_report 缺少字段：{field}")
             score_delta -= 5
+    if "costume_variant_check" not in report:
+        issues.append(f"{stage_id}.review_report 缺少字段：costume_variant_check")
+        score_delta -= 5
     retry_stages = report.get("retry_stages", []) or []
     for retry_stage in retry_stages:
         if retry_stage not in VALID_RETRY_STAGES:
@@ -107,6 +160,7 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(importance, (int, float)) or importance < 0 or importance > 100:
                 issues.append(f"角色 {name or idx} asset_importance_score 必须为 0-100")
                 score -= 8
+            score += _check_costume_variants(item, issues)
     if stage_id == "03D":
         qr = data.get("quality_report", {}) if isinstance(data.get("quality_report"), dict) else {}
         if qr.get("needs_retry") and not qr.get("retry_stages"):
