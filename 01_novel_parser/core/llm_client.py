@@ -6,6 +6,9 @@ import re
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable
+from importlib import import_module
+
+prompt_guard = import_module("00_common.llm_prompt_guard")
 
 JSON_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
 
@@ -32,7 +35,7 @@ class LLMConfig:
             model=model,
             api_key=os.getenv("AI_DRAMA_LLM_API_KEY", ""),
             timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "180")),
-            temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.2")),
+            temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.1")),
         )
 
 
@@ -73,8 +76,10 @@ class LLMClient:
         user_payload: dict[str, Any],
         repair_callback: Callable[[str, str], dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        user_prompt = json.dumps(user_payload, ensure_ascii=False, indent=2)
-        text = self.complete_text(system_prompt, user_prompt)
+        guarded_prompt = prompt_guard.apply_json_guard(system_prompt)
+        guarded_payload = prompt_guard.compact_payload_hint(user_payload)
+        user_prompt = json.dumps(guarded_payload, ensure_ascii=False, indent=2)
+        text = self.complete_text(guarded_prompt, user_prompt)
         try:
             return parse_json_from_text(text)
         except Exception as exc:
