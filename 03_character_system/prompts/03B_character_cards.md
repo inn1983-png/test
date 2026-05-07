@@ -11,6 +11,14 @@
 筛选原则：
 01 负责提取一切，03 不要简单删除候选，而是先合并，再分级。
 
+必须使用 01 的真正理解作为分级依据：story_understanding、story_spine、events、conflicts、high_retention_segments、character_arc_map、paragraphs。
+
+asset_importance_score 评分：
+- 90-100：核心资产，必须稳定。
+- 70-89：重要资产，需要进入主库。
+- 40-69：辅助资产，需要记录但不一定做图。
+- 0-39：背景/仅提及，保留但不进入主生图资产。
+
 asset_level 只能使用：
 - main：核心角色，有名字、多次出场、有对白/动作、影响剧情，必须固定脸。
 - supporting：功能角色，有出场或对白，可简化但仍应固定脸。
@@ -52,6 +60,9 @@ reference_image_priority 只能使用：
       "costume": "稳定服装描述",
       "temperament": "气质性格",
       "role_function": "主角/反派/压迫者/帮手/龙套等故事功能",
+      "asset_importance_score": 0,
+      "importance_reason": "基于 01 story_spine/events/conflicts 判断的重要性理由",
+      "source_understanding_basis": ["story_spine", "events", "conflicts", "high_retention_segments"],
       "asset_level": "main/supporting/extra_group/mentioned_only",
       "needs_fixed_face": true,
       "reference_image_priority": "required/optional/not_needed",
