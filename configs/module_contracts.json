@@ -3,176 +3,60 @@
   "modules": {
     "01_novel_parser": {
       "requires": [],
-      "produces": [
-        {
-          "module": "01_novel_parser",
-          "name": "novel_analysis.json",
-          "type": "json"
-        }
-      ]
+      "produces": [{"module": "01_novel_parser", "name": "novel_analysis.json", "type": "json"}]
     },
     "02_script_writer": {
-      "requires": [
-        {
-          "module": "01_novel_parser",
-          "name": "novel_analysis.json"
-        }
-      ],
-      "produces": [
-        {
-          "module": "02_script_writer",
-          "name": "script.json",
-          "type": "json"
-        }
-      ]
+      "requires": [{"module": "01_novel_parser", "name": "novel_analysis.json"}],
+      "produces": [{"module": "02_script_writer", "name": "script.json", "type": "json"}]
     },
-    "03_character_library": {
+    "03_character_system": {
       "requires": [
-        {
-          "module": "01_novel_parser",
-          "name": "novel_analysis.json"
-        },
-        {
-          "module": "02_script_writer",
-          "name": "script.json"
-        }
+        {"module": "01_novel_parser", "name": "novel_analysis.json"},
+        {"module": "02_script_writer", "name": "script.json"}
       ],
-      "produces": [
-        {
-          "module": "03_character_library",
-          "name": "characters.json",
-          "type": "json"
-        }
-      ]
+      "produces": [{"module": "03_character_system", "name": "characters.json", "type": "json"}]
     },
-    "04_scene_library": {
+    "04_scene_system": {
       "requires": [
-        {
-          "module": "01_novel_parser",
-          "name": "novel_analysis.json"
-        },
-        {
-          "module": "02_script_writer",
-          "name": "script.json"
-        }
+        {"module": "01_novel_parser", "name": "novel_analysis.json"},
+        {"module": "02_script_writer", "name": "script.json"}
       ],
-      "produces": [
-        {
-          "module": "04_scene_library",
-          "name": "scenes.json",
-          "type": "json"
-        }
-      ]
+      "produces": [{"module": "04_scene_system", "name": "scenes.json", "type": "json"}]
     },
-    "05_prop_library": {
+    "05_prop_system": {
       "requires": [
-        {
-          "module": "01_novel_parser",
-          "name": "novel_analysis.json"
-        },
-        {
-          "module": "02_script_writer",
-          "name": "script.json"
-        }
+        {"module": "01_novel_parser", "name": "novel_analysis.json"},
+        {"module": "02_script_writer", "name": "script.json"}
       ],
-      "produces": [
-        {
-          "module": "05_prop_library",
-          "name": "props.json",
-          "type": "json"
-        }
-      ]
+      "produces": [{"module": "05_prop_system", "name": "props.json", "type": "json"}]
     },
     "06_storyboard": {
       "requires": [
-        {
-          "module": "02_script_writer",
-          "name": "script.json"
-        },
-        {
-          "module": "03_character_library",
-          "name": "characters.json"
-        },
-        {
-          "module": "04_scene_library",
-          "name": "scenes.json"
-        },
-        {
-          "module": "05_prop_library",
-          "name": "props.json"
-        }
+        {"module": "02_script_writer", "name": "script.json"},
+        {"module": "03_character_system", "name": "characters.json"},
+        {"module": "04_scene_system", "name": "scenes.json"},
+        {"module": "05_prop_system", "name": "props.json"}
       ],
-      "produces": [
-        {
-          "module": "06_storyboard",
-          "name": "storyboard.json",
-          "type": "json"
-        }
-      ]
+      "produces": [{"module": "06_storyboard", "name": "storyboard.json", "type": "json"}]
     },
     "07_storyboard_image": {
-      "requires": [
-        {
-          "module": "06_storyboard",
-          "name": "storyboard.json"
-        }
-      ],
-      "produces": [
-        {
-          "module": "07_storyboard_image",
-          "name": "image_manifest.json",
-          "type": "json"
-        }
-      ]
+      "requires": [{"module": "06_storyboard", "name": "storyboard.json"}],
+      "produces": [{"module": "07_storyboard_image", "name": "image_manifest.json", "type": "json"}]
     },
     "08_audio": {
-      "requires": [
-        {
-          "module": "02_script_writer",
-          "name": "script.json"
-        }
-      ],
-      "produces": [
-        {
-          "module": "08_audio",
-          "name": "final_audio.wav",
-          "type": "audio"
-        }
-      ]
+      "requires": [{"module": "02_script_writer", "name": "script.json"}],
+      "produces": [{"module": "08_audio", "name": "final_audio.wav", "type": "audio"}]
     },
     "09_video": {
       "requires": [
-        {
-          "module": "07_storyboard_image",
-          "name": "image_manifest.json"
-        },
-        {
-          "module": "08_audio",
-          "name": "final_audio.wav"
-        }
+        {"module": "07_storyboard_image", "name": "image_manifest.json"},
+        {"module": "08_audio", "name": "final_audio.wav"}
       ],
-      "produces": [
-        {
-          "module": "09_video",
-          "name": "video_manifest.json",
-          "type": "json"
-        }
-      ]
+      "produces": [{"module": "09_video", "name": "video_manifest.json", "type": "json"}]
     },
     "10_final_assembly": {
-      "requires": [
-        {
-          "module": "09_video",
-          "name": "video_manifest.json"
-        }
-      ],
-      "produces": [
-        {
-          "module": "10_final_assembly",
-          "name": "final.mp4",
-          "type": "video"
-        }
-      ]
+      "requires": [{"module": "09_video", "name": "video_manifest.json"}],
+      "produces": [{"module": "10_final_assembly", "name": "final.mp4", "type": "video"}]
     }
   }
 }
