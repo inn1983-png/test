@@ -44,6 +44,7 @@
     const target = document.getElementById('systemWorkbenchRoot');
     if (!target) return;
     target.innerHTML = `
+      <div id="operatorConsole"></div>
       <div class="system-workbench-hero">
         <div class="panel">
           <div class="panel-header"><div><h2>${system.title}</h2><p>${system.desc}</p></div></div>
@@ -71,6 +72,7 @@
       </div>
       ${renderExecutionCards(system)}
     `;
+    if (window.renderOperatorConsole) window.renderOperatorConsole();
     if (window.renderLiveStageBoard) window.renderLiveStageBoard();
     refreshExecutionCards(system);
   }
@@ -181,6 +183,7 @@
     });
     es.addEventListener('snapshot', () => {
       if (window.refreshCurrentExecutionCards) window.refreshCurrentExecutionCards();
+      if (window.renderOperatorConsole) window.renderOperatorConsole();
       if (window.renderLiveStageBoard) window.renderLiveStageBoard();
     });
   };
