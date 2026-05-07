@@ -21,9 +21,10 @@
 02 剧本改编系统已升级到 schema 1.2，成为音频驱动、单帧分镜友好、多版本评估、失败样本回灌的真实 LLM 子系统。
 03/04/05 已从旧 scaffold library 目录切换为真实资产 system：03_character_system、04_scene_system、05_prop_system。
 03/04/05 已升级为五阶段真实资产系统：A 合并、B 资产卡、C 剧本绑定、D 模块总检、E 面向 06 的资产复核。
-01/02/03/04/05 已移除 write_placeholder_output，不再生成占位 result.json。
-01/02/03/04/05 已统一接入本地 Gemma JSON 输出护栏，适配 Gemma 4 31B Q4 等本地量化模型。
-01/02/03/04/05 的 parse_json_from_text 与 repair fallback 已统一清理 analysis / reasoning / chain_of_thought / _local_model_output_contract 等内部字段。
+06_storyboard 已升级为五阶段真实 LLM 单帧分镜系统：A 资产闸门、B 分镜规划、C 单帧分镜、D 连续性绑定、E 总检。
+01/02/03/04/05/06 已移除 write_placeholder_output，不再生成占位 result.json。
+01/02/03/04/05/06 已统一接入本地 Gemma JSON 输出护栏，适配 Gemma 4 31B Q4 等本地量化模型。
+01/02/03/04/05/06 的 parse_json_from_text 与 repair fallback 已统一清理 analysis / reasoning / chain_of_thought / _local_model_output_contract 等内部字段。
 00 validate_pipeline.py 已修正为识别 run_staged.py，并使用新的 03/04/05 system 模块顺序。
 00 resource_manager.py 已改成阶段感知资源释放：01–06 LLM 常驻，06→07 才释放 LLM。
 configs/local_resource_release.json 已从旧 library 模块名切换为 system 模块名，并新增 phase_commands。
@@ -87,7 +88,7 @@ run_pipeline.py 会在模型阶段边界调用 resource_manager 的专用释放�
 00_common/llm_prompt_guard.py
 ```
 
-01/02/03/04/05 的 LLMClient.complete_json 都会自动套用：
+01/02/03/04/05/06 的 LLMClient.complete_json 都会自动套用：
 
 ```text
 只输出一个 JSON object
@@ -112,7 +113,7 @@ complete_json 的 repair_callback 返回后也必须再次调用 remove_internal
 ```text
 01：0.1
 02：0.15
-03/04/05：0.1
+03/04/05/06：0.1
 ```
 
 如果需要统一覆盖，可以设置：
@@ -312,7 +313,7 @@ importance_reason
 source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / scene_value_map / visual_risk_report / paragraphs
 asset_level = main_scene / sub_scene / temporary / background
 needs_reference_image = true / false
-parent_scene：字段必须存在；只有 sub_scene 必须非空绑定主场景，main_scene/temporary/background 可为空或 self
+parent_scene：字段必须存在；只有 sub_scene 必须非空绑定主场景，main_scene/temporary/background 可为空但字段需存在
 reference_image_plan
 ```
 
@@ -385,7 +386,64 @@ reference_image_plan
 
 ---
 
-# 03/04/05 共同真实执行机制
+# 06 单帧分镜系统
+
+正式入口：
+
+```text
+06_storyboard/run_staged.py
+```
+
+阶段：
+
+```text
+06A asset_gate
+06B storyboard_plan
+06C single_frame_storyboard
+06D continuity_binding
+06E quality_check
+```
+
+06 输入：
+
+```text
+02_script_writer/script.json
+03_character_system/characters.json
+04_scene_system/scenes.json
+05_prop_system/props.json
+```
+
+06 输出：
+
+```text
+06_storyboard/storyboard.json
+06_storyboard/storyboard_meta.json
+```
+
+06 核心规则：
+
+```text
+只生成单帧分镜 JSON。
+不生成图片、不调用 ComfyUI、不生成最终视频。
+不得输出 prompt / image_prompt / desc_prompt / desc_promopt / negative_prompt / video_prompt / comfyui_prompt。
+只能输出 reference_requirements / composition_notes / continuity_notes。
+每帧角色必须引用 03 canonical_name。
+每帧场景必须引用 04 canonical_scene_name。
+每帧道具必须引用 05 canonical_prop_name。
+不允许新增不存在于资产库的主角色、主场景、关键道具。
+如发现资产缺失，写入 upstream_blocking_issues，建议 03/04/05 对应阶段重跑。
+```
+
+06 四宫格规则：
+
+```text
+四宫格只是连续性预览 / 检查单位，不是一次性生成四宫格图。
+four_grid_preview_groups 可按 1-4、4-7、7-10 重叠组织。
+```
+
+---
+
+# 03/04/05/06 共同真实执行机制
 
 ## 阶段评分与修改意见重跑
 
@@ -397,7 +455,7 @@ reference_image_plan
 ## 总检/复核连锁重跑
 
 ```text
-03D/03E、04D/04E、05D/05E 输出 needs_retry=true 和 retry_stages 时，stage_runner.py 会从最早问题阶段开始，连同后续阶段再跑一轮。
+03D/03E、04D/04E、05D/05E、06D/06E 输出 needs_retry=true 和 retry_stages 时，stage_runner.py 会从最早问题阶段开始，连同后续阶段再跑一轮。
 ```
 
 ## JSON 修复机制
@@ -412,6 +470,7 @@ LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原
 
 ```text
 03/04/05 最终 schema_validator.py 不只查字段，还会检查 asset_importance_score、source_understanding_basis、asset_review_report、downstream_readiness_for_06、main/optional/do_not_reference 清单。
+06 最终 schema_validator.py 会检查 frames、sequence_index 连续性、稳定资产名引用、allowed_asset_names 与 03/04/05 一致性、禁止图像提示词字段、资产不可用时必须有 upstream_blocking_issues。
 注意：schema_validation 不再作为预校验必填字段，避免校验前必然失败。
 03E/04E/05E 的 optional_assets_for_06 和 do_not_reference_as_main_asset 允许为空数组。
 ```
@@ -449,15 +508,16 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 03_character_system
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 04_scene_system
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 05_prop_system
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 06_storyboard
 ```
 
-完整测试到 05：
+完整测试到 06：
 
 ```bash
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 01_novel_parser
 ```
 
-如果只想验证 00–05，不加载后续模型，可以先逐个跑到 05，或临时用 `--only-module` 分段测试。
+如果只想验证 00–06，不加载后续模型，可以先逐个跑到 06，或临时用 `--only-module` 分段测试。
 
 ---
 
@@ -471,6 +531,11 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 复核发现遗漏不能直接在 E 阶段硬补，必须通过 retry_stages 触发前置阶段重跑；如果 01 自己也漏提，则写 upstream_blocking_issues。
 03/04/05 形成稳定资产库，让 06 单帧分镜可以直接引用稳定角色名、稳定场景名、稳定道具名，避免角色串脸、场景漂移、道具混乱。
 03/04/05 不生成图片，只写参考图计划；图片由 07 根据 06 实际分镜需求统一生成。
-用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05 需要强 JSON 护栏、低温度默认值、输出控制字段清理。
+06 必须读取 02_script_writer/script.json、03_character_system/characters.json、04_scene_system/scenes.json、05_prop_system/props.json。
+06 只生成单帧分镜 JSON，不生成图片、不调用 ComfyUI、不生成最终视频。
+06 必须严格引用 03/04/05 稳定资产名，不允许新增不存在于资产库的主角色、主场景、关键道具。
+06 如发现资产缺失，不能自己硬补，要输出 upstream_blocking_issues，建议 03/04/05 对应阶段重跑。
+06 为 07 图片生成服务，但不能直接写图像提示词；只能输出 reference_requirements / composition_notes / continuity_notes。
+用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05/06 需要强 JSON 护栏、低温度默认值、输出控制字段清理。
 00–06 都属于 LLM 文本阶段，不应每个模块结束就释放 LLM；06→07 才释放 LLM 显存。
 ```
