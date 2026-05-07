@@ -19,9 +19,9 @@ MODULES = ["01_novel_parser", "02_script_writer", "03_character_system", "04_sce
 OUTPUTS = {
     "01_novel_parser": ["novel_analysis.json", "novel_meta.json"],
     "02_script_writer": ["script.json", "script.txt", "script_meta.json"],
-    "03_character_system": ["characters.json", "characters_meta.json"],
-    "04_scene_system": ["scenes.json", "scenes_meta.json"],
-    "05_prop_system": ["props.json", "props_meta.json"],
+    "03_character_system": ["characters.json", "character_meta.json"],
+    "04_scene_system": ["scenes.json", "scene_meta.json"],
+    "05_prop_system": ["props.json", "prop_meta.json"],
     "06_storyboard": ["storyboard.json", "storyboard_meta.json"],
 }
 STATE_LOCK = threading.Lock()
@@ -223,7 +223,7 @@ body{margin:0;background:#0b1220;color:#e5e7eb;font-family:system-ui,"Segoe UI",
 <div class="cols"><div class="card"><h2>结果摘要</h2><div id="summary">点击上面的模块查看。</div></div><div class="card"><h2>原始输出</h2><div class="row"><select id="rawMod" onchange="fillFiles()"></select><select id="rawFile"></select><button onclick="loadRaw()">查看原始文件</button></div><pre id="raw">等待选择文件...</pre></div></div>
 </main><script>
 const modules=['01_novel_parser','02_script_writer','03_character_system','04_scene_system','05_prop_system','06_storyboard'];
-const files={'01_novel_parser':['novel_analysis.json','novel_meta.json'],'02_script_writer':['script.json','script.txt','script_meta.json'],'03_character_system':['characters.json','characters_meta.json'],'04_scene_system':['scenes.json','scenes_meta.json'],'05_prop_system':['props.json','props_meta.json'],'06_storyboard':['storyboard.json','storyboard_meta.json']};
+const files={'01_novel_parser':['novel_analysis.json','novel_meta.json'],'02_script_writer':['script.json','script.txt','script_meta.json'],'03_character_system':['characters.json','character_meta.json'],'04_scene_system':['scenes.json','scene_meta.json'],'05_prop_system':['props.json','prop_meta.json'],'06_storyboard':['storyboard.json','storyboard_meta.json']};
 function pid(){return document.getElementById('pid').value||'project_test_001'}
 async function api(u,o){let r=await fetch(u,o);return await r.json()}
 function init(){let a=document.getElementById('modSel'),b=document.getElementById('rawMod');modules.forEach(m=>{a.innerHTML+=`<option>${m}</option>`;b.innerHTML+=`<option>${m}</option>`});fillFiles();refresh();setInterval(refresh,2000)}
