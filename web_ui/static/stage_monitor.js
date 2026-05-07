@@ -18,11 +18,7 @@
     "01C": ["故事理解", "冲突梳理", "story understanding"],
     "01D": ["视觉风险", "高留存", "visual"],
     "01E": ["小说解析总检", "总检"],
-    "02A": ["剧情拆解"],
-    "02B": ["剧本初稿"],
-    "02C": ["对白", "OS", "留白"],
-    "02D": ["视觉动作链"],
-    "02E": ["剧本总检"],
+    "02A": ["剧情拆解"], "02B": ["剧本初稿"], "02C": ["对白", "OS", "留白"], "02D": ["视觉动作链"], "02E": ["剧本总检"],
     "03A": ["角色归并"], "03B": ["角色资产卡"], "03C": ["剧本使用绑定"], "03D": ["角色库总检"], "03E": ["面向分镜复核"],
     "04A": ["场景归并"], "04B": ["场景资产卡"], "04C": ["剧本使用绑定"], "04D": ["场景库总检"], "04E": ["面向分镜复核"],
     "05A": ["道具归并"], "05B": ["道具资产卡"], "05C": ["剧本使用绑定"], "05D": ["道具库总检"], "05E": ["面向分镜复核"],
@@ -33,29 +29,25 @@
     "10A": ["输入检查"], "10B": ["视频准备"], "10C": ["音频字幕对齐"], "10D": ["最终导出"],
   };
 
-  const stageRuntime = {
-    activeStageId: "",
-    activeModule: "",
-    lastLogByStage: {},
-    outputCache: {},
-  };
-
+  const stageRuntime = { activeStageId: "", activeModule: "", lastLogByStage: {}, outputCache: {} };
   const q = (id) => document.getElementById(id);
   const htmlEscape = (value) => String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
   const attrEscape = (value) => htmlEscape(value).replace(/'/g, "&#39;");
 
+  function getAppState() {
+    try { return state || {}; } catch (_) { return window.state || {}; }
+  }
+
   function getStageName(stageId) {
-    if (typeof window.stageName === "function") return window.stageName(stageId);
+    try { if (typeof stageName === "function") return stageName(stageId); } catch (_) {}
     return stageId;
   }
-
   function getModuleName(moduleName) {
-    if (typeof window.moduleName === "function") return window.moduleName(moduleName);
+    try { if (typeof moduleName === "function") return moduleName(moduleName); } catch (_) {}
     return moduleName;
   }
-
   function getStatusLabel(status) {
-    if (typeof window.statusLabel === "function") return window.statusLabel(status);
+    try { if (typeof statusLabel === "function") return statusLabel(status); } catch (_) {}
     return status || "等待";
   }
 
@@ -63,17 +55,12 @@
     const text = String(line || "");
     const direct = text.match(/\b(0[1-9]|10)[A-E]\b/i);
     if (direct) return direct[0].toUpperCase();
-
-    for (const [stageId, hints] of Object.entries(STAGE_HINTS)) {
-      if (hints.some((hint) => text.includes(hint))) return stageId;
-    }
+    for (const [stageId, hints] of Object.entries(STAGE_HINTS)) if (hints.some((hint) => text.includes(hint))) return stageId;
     return "";
   }
 
   function moduleForStage(stageId) {
-    for (const [moduleName, stages] of Object.entries(MODULE_STAGES)) {
-      if (stages.includes(stageId)) return moduleName;
-    }
+    for (const [moduleName, stages] of Object.entries(MODULE_STAGES)) if (stages.includes(stageId)) return moduleName;
     return "";
   }
 
@@ -81,7 +68,6 @@
     const logBox = q("liveLog");
     if (!logBox || logBox.dataset.stageMonitorInstalled === "1") return;
     logBox.dataset.stageMonitorInstalled = "1";
-
     const observer = new MutationObserver(() => {
       const lines = String(logBox.textContent || "").split(/\r?\n/).filter(Boolean).slice(-30);
       for (const line of lines) {
@@ -97,16 +83,17 @@
   }
 
   function knownModules() {
-    const fromSnapshot = window.state?.currentSnapshot?.modules?.map((m) => m.name).filter(Boolean) || [];
+    const appState = getAppState();
+    const fromSnapshot = appState.currentSnapshot?.modules?.map((m) => m.name).filter(Boolean) || [];
     if (fromSnapshot.length) return fromSnapshot.filter((name) => MODULE_STAGES[name]);
     return Object.keys(MODULE_STAGES);
   }
 
   function stageOutputFromSnapshot(moduleName, stageId) {
-    const modules = window.state?.currentSnapshot?.modules || [];
+    const appState = getAppState();
+    const modules = appState.currentSnapshot?.modules || [];
     const module = modules.find((item) => item.name === moduleName);
-    const stage = (module?.stages || []).find((item) => String(item.stage_id || item.name || "").startsWith(stageId));
-    return stage || null;
+    return (module?.stages || []).find((item) => String(item.stage_id || item.name || "").startsWith(stageId)) || null;
   }
 
   async function fetchStageOutputText(path) {
@@ -116,14 +103,10 @@
       const response = await fetch(`/api/file?path=${encodeURIComponent(path)}`);
       if (!response.ok) return "";
       const data = await response.json();
-      let text = "";
-      if (data.type === "json") text = summarizeJson(data.content);
-      else if (data.type === "text") text = String(data.content || "").slice(0, 600);
+      const text = data.type === "json" ? summarizeJson(data.content) : String(data.content || "").slice(0, 600);
       stageRuntime.outputCache[path] = text;
       return text;
-    } catch (_) {
-      return "";
-    }
+    } catch (_) { return ""; }
   }
 
   function summarizeJson(content) {
@@ -148,8 +131,9 @@
   }
 
   function getStageClass(moduleName, stageId) {
+    const appState = getAppState();
     const stage = stageOutputFromSnapshot(moduleName, stageId);
-    const module = (window.state?.currentSnapshot?.modules || []).find((item) => item.name === moduleName);
+    const module = (appState.currentSnapshot?.modules || []).find((item) => item.name === moduleName);
     if (stageRuntime.activeStageId === stageId) return "stage-active";
     if (stage?.passed === false || module?.status === "failed") return "stage-failed";
     if (stage?.passed === true || stage?.path) return "stage-done";
@@ -159,73 +143,50 @@
   function renderLiveStageBoard() {
     const board = q("liveStageBoard");
     if (!board) return;
-    const modules = knownModules();
-    board.innerHTML = modules.map((moduleName) => {
-      const module = (window.state?.currentSnapshot?.modules || []).find((item) => item.name === moduleName) || {};
+    const appState = getAppState();
+    board.innerHTML = knownModules().map((moduleName) => {
+      const module = (appState.currentSnapshot?.modules || []).find((item) => item.name === moduleName) || {};
       const stages = MODULE_STAGES[moduleName] || [];
-      return `<div class="live-stage-module">
-        <div class="live-stage-module-title">
-          <div><strong>${htmlEscape(getModuleName(moduleName))}</strong><div class="muted">${htmlEscape(moduleName)}</div></div>
-          <span class="badge ${htmlEscape(module.status || "pending")}">${htmlEscape(getStatusLabel(module.status || "pending"))}</span>
-        </div>
-        <div class="live-stage-cards">
-          ${stages.map((stageId) => renderStage(moduleName, stageId)).join("")}
-        </div>
-      </div>`;
+      return `<div class="live-stage-module"><div class="live-stage-module-title"><div><strong>${htmlEscape(getModuleName(moduleName))}</strong><div class="muted">${htmlEscape(moduleName)}</div></div><span class="badge ${htmlEscape(module.status || "pending")}">${htmlEscape(getStatusLabel(module.status || "pending"))}</span></div><div class="live-stage-cards">${stages.map((stageId) => renderStage(moduleName, stageId)).join("")}</div></div>`;
     }).join("");
     hydrateStageOutputs();
   }
 
   function renderStage(moduleName, stageId) {
     const stage = stageOutputFromSnapshot(moduleName, stageId);
-    const outputId = `live-stage-output-${stageId}`;
     const cls = getStageClass(moduleName, stageId);
     const score = stage?.score ?? "-";
     const issues = stage?.issues_count ?? 0;
     const lastLog = stageRuntime.lastLogByStage[stageId] || "";
-    const output = stage?.path ? `<div id="${outputId}" class="live-stage-output live-stage-empty" data-stage-path="${attrEscape(stage.path)}">读取阶段输出中...</div>` : `<div class="live-stage-output ${lastLog ? "" : "live-stage-empty"}">${htmlEscape(lastLog || "等待该阶段输出")}</div>`;
-    return `<div class="live-stage-card ${cls}" data-stage-id="${stageId}">
-      <div class="live-stage-id">${stageId}</div>
-      <div class="live-stage-name">${htmlEscape(getStageName(stageId))}</div>
-      <div class="live-stage-meta">
-        <span class="live-stage-pill">评分 ${htmlEscape(score)}</span>
-        <span class="live-stage-pill">问题 ${htmlEscape(issues)}</span>
-        <span class="live-stage-pill">${cls === "stage-active" ? "正在运行" : cls === "stage-done" ? "已有输出" : cls === "stage-failed" ? "需处理" : "等待"}</span>
-      </div>
-      <div class="live-stage-output-title">阶段输出</div>
-      ${output}
-      ${stage?.path ? `<button class="btn small" onclick="previewFile('${attrEscape(stage.path)}')">打开完整输出</button>` : ""}
-    </div>`;
+    const output = stage?.path ? `<div class="live-stage-output live-stage-empty" data-stage-path="${attrEscape(stage.path)}">读取阶段输出中...</div>` : `<div class="live-stage-output ${lastLog ? "" : "live-stage-empty"}">${htmlEscape(lastLog || "等待该阶段输出")}</div>`;
+    return `<div class="live-stage-card ${cls}" data-stage-id="${stageId}"><div class="live-stage-id">${stageId}</div><div class="live-stage-name">${htmlEscape(getStageName(stageId))}</div><div class="live-stage-meta"><span class="live-stage-pill">评分 ${htmlEscape(score)}</span><span class="live-stage-pill">问题 ${htmlEscape(issues)}</span><span class="live-stage-pill">${cls === "stage-active" ? "正在运行" : cls === "stage-done" ? "已有输出" : cls === "stage-failed" ? "需处理" : "等待"}</span></div><div class="live-stage-output-title">阶段输出</div>${output}${stage?.path ? `<button class="btn small" onclick="previewFile('${attrEscape(stage.path)}')">打开完整输出</button>` : ""}</div>`;
   }
 
   async function hydrateStageOutputs() {
     const nodes = Array.from(document.querySelectorAll("[data-stage-path]"));
     for (const node of nodes) {
-      const path = node.dataset.stagePath;
-      const text = await fetchStageOutputText(path);
+      const text = await fetchStageOutputText(node.dataset.stagePath);
       node.textContent = text || "该阶段文件已生成，但没有可摘要内容。";
       node.classList.toggle("live-stage-empty", !text);
     }
   }
 
   function patchRenderSnapshot() {
-    const original = window.renderSnapshot;
-    if (typeof original !== "function" || original.stageMonitorPatched) return;
-    const patched = async function (...args) {
-      const result = await original.apply(this, args);
-      renderLiveStageBoard();
-      return result;
-    };
-    patched.stageMonitorPatched = true;
-    window.renderSnapshot = patched;
+    try {
+      const original = renderSnapshot;
+      if (typeof original !== "function" || original.stageMonitorPatched) return;
+      const patched = async function (...args) {
+        const result = await original.apply(this, args);
+        renderLiveStageBoard();
+        return result;
+      };
+      patched.stageMonitorPatched = true;
+      window.renderSnapshot = patched;
+      renderSnapshot = patched;
+    } catch (_) {}
   }
 
-  function boot() {
-    installLogHook();
-    patchRenderSnapshot();
-    renderLiveStageBoard();
-  }
-
+  function boot() { installLogHook(); patchRenderSnapshot(); renderLiveStageBoard(); }
   window.addEventListener("DOMContentLoaded", boot);
   window.renderLiveStageBoard = renderLiveStageBoard;
 })();
