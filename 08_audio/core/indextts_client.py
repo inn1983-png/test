@@ -129,6 +129,7 @@ def _script_for_index_tts(segment: dict[str, Any], output_path: Path, root: Path
     text = json.dumps(segment.get("text") or "", ensure_ascii=False)
     voice = json.dumps(str(_resolve_inside(root, get_default_voice_prompt())), ensure_ascii=False)
     out = json.dumps(str(output_path), ensure_ascii=False)
+    root_json = json.dumps(str(root), ensure_ascii=False)
     emo_audio = get_default_emo_audio()
     emo_audio_arg = "None"
     if emo_audio:
@@ -136,6 +137,10 @@ def _script_for_index_tts(segment: dict[str, Any], output_path: Path, root: Path
     emo_text = json.dumps(str(segment.get("emotion") or "calm"), ensure_ascii=False)
     return textwrap.dedent(
         f"""
+        import os
+        import sys
+        sys.path.insert(0, {root_json})
+        os.chdir({root_json})
         from indextts.infer_v2 import IndexTTS2
         tts = IndexTTS2(
             cfg_path="checkpoints/config.yaml",
