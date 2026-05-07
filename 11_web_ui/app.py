@@ -14,7 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 HOST = "127.0.0.1"
-PORT = int(os.getenv("AI_DRAMA_UI_PORT", "7860"))
+PORT = int(os.getenv("AI_DRAMA_UI_PORT", "1144"))
 MODULES_00_06 = [
     "01_novel_parser",
     "02_script_writer",
