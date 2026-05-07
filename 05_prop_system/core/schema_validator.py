@@ -9,12 +9,14 @@ REQUIRED_TOP = [
     "quality_report"
 ]
 REQUIRED_PROP_FIELDS = [
-    "prop_id", "canonical_prop_name", "aliases", "prop_type", "owner_character",
-    "usage_function", "appearance", "material", "risk_notes", "source_evidence", "usage_in_script",
-    "asset_level", "needs_reference_image", "reference_image_plan",
-    "asset_importance_score", "importance_reason", "source_understanding_basis"
+    "prop_id", "canonical_prop_name", "aliases", "prop_type", "wearable_type", "wearable_policy",
+    "bound_character_names", "bound_costume_ids", "owner_character", "usage_function", "appearance", "material",
+    "risk_notes", "source_evidence", "usage_in_script", "asset_level", "needs_reference_image",
+    "reference_image_plan", "asset_importance_score", "importance_reason", "source_understanding_basis"
 ]
 VALID_ASSET_LEVELS = {"key_prop", "action_prop", "background_object", "mentioned_only"}
+VALID_WEARABLE_TYPES = {"none", "accessory", "headwear", "outerwear", "symbolic_item", "mask", "jewelry", "weapon_attached"}
+VALID_WEARABLE_POLICIES = {"not_wearable", "merge_into_appearance_asset", "independent_prop_reference", "both"}
 
 
 def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
@@ -37,7 +39,7 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             issues.append(f"props[{idx}] 不是对象")
             continue
         for field in REQUIRED_PROP_FIELDS:
-            if item.get(field) in (None, "", [], {}):
+            if item.get(field) in (None, "", {}):
                 issues.append(f"道具 {item.get('canonical_prop_name', idx)} 缺少必要字段：{field}")
         if "prompt" in item or "image_prompt" in item or "desc_prompt" in item:
             issues.append(f"道具含图像提示词字段，越界：{item.get('canonical_prop_name', idx)}")
@@ -59,6 +61,18 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
         asset_level = item.get("asset_level")
         if asset_level not in VALID_ASSET_LEVELS:
             issues.append(f"道具 asset_level 非法：{name or pid} -> {asset_level}")
+        wearable_type = item.get("wearable_type")
+        wearable_policy = item.get("wearable_policy")
+        if wearable_type not in VALID_WEARABLE_TYPES:
+            issues.append(f"wearable_type 非法：{name or pid} -> {wearable_type}")
+        if wearable_policy not in VALID_WEARABLE_POLICIES:
+            issues.append(f"wearable_policy 非法：{name or pid} -> {wearable_policy}")
+        if wearable_type == "none" and wearable_policy != "not_wearable":
+            issues.append(f"非穿戴道具 wearable_policy 必须为 not_wearable：{name or pid}")
+        if not isinstance(item.get("bound_character_names", []), list):
+            issues.append(f"bound_character_names 必须为数组：{name or pid}")
+        if not isinstance(item.get("bound_costume_ids", []), list):
+            issues.append(f"bound_costume_ids 必须为数组：{name or pid}")
         if asset_level == "key_prop" and item.get("needs_reference_image") is not True:
             issues.append(f"关键道具必须 needs_reference_image=true：{name or pid}")
         plan = item.get("reference_image_plan")
