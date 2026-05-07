@@ -23,7 +23,10 @@
 03/04/05 已升级为五阶段真实资产系统：A 合并、B 资产卡、C 剧本绑定、D 模块总检、E 面向 06 的资产复核。
 01/02/03/04/05 已移除 write_placeholder_output，不再生成占位 result.json。
 01/02/03/04/05 已统一接入本地 Gemma JSON 输出护栏，适配 Gemma 4 31B Q4 等本地量化模型。
+01/02/03/04/05 的 parse_json_from_text 与 repair fallback 已统一清理 analysis / reasoning / chain_of_thought / _local_model_output_contract 等内部字段。
 00 validate_pipeline.py 已修正为识别 run_staged.py，并使用新的 03/04/05 system 模块顺序。
+00 resource_manager.py 已改成阶段感知资源释放：01–06 LLM 常驻，06→07 才释放 LLM。
+configs/local_resource_release.json 已从旧 library 模块名切换为 system 模块名，并新增 phase_commands。
 ```
 
 ---
@@ -61,6 +64,7 @@ validate_pipeline.py 不再只检查 run.py，也会接受 run_staged.py。
 DEFAULT_MODULE_ORDER 已从旧 03_character_library / 04_scene_library / 05_prop_library 改为 03_character_system / 04_scene_system / 05_prop_system。
 validate_pipeline.py 会拦截旧 library 模块，避免重新混入 pipeline。
 run_pipeline.py 依赖检查通过 manifest key_outputs、artifacts.db、run_dir/module/file fallback 三路解析上游产物。
+run_pipeline.py 会在模型阶段边界调用 resource_manager 的专用释放函数。
 ```
 
 旧 scaffold 目录已移除：
@@ -75,7 +79,7 @@ run_pipeline.py 依赖检查通过 manifest key_outputs、artifacts.db、run_dir
 
 # 本地 Gemma 4 31B Q4 适配规则
 
-新增统一文件：
+统一文件：
 
 ```text
 00_common/llm_prompt_guard.py
@@ -92,7 +96,16 @@ run_pipeline.py 依赖检查通过 manifest key_outputs、artifacts.db、run_dir
 输出前自检能被 json.loads 解析
 ```
 
-默认 temperature 调整：
+输出清理硬规则：
+
+```text
+parse_json_from_text 在 json.loads 后必须调用 remove_internal_output_fields(value)。
+complete_json 的 repair_callback 返回后也必须再次调用 remove_internal_output_fields(value)。
+清理字段包括：_local_model_output_contract、analysis、reasoning、chain_of_thought、scratchpad、thoughts、thinking、internal_reasoning、internal_notes、debug、debug_notes，以及 _local_model_ 前缀字段。
+清理是递归的，防止本地模型把控制字段复制到嵌套业务 JSON。
+```
+
+默认 temperature：
 
 ```text
 01：0.1
@@ -104,6 +117,52 @@ run_pipeline.py 依赖检查通过 manifest key_outputs、artifacts.db、run_dir
 
 ```bash
 set AI_DRAMA_LLM_TEMPERATURE=0.1
+```
+
+---
+
+# 本地模型资源释放规则
+
+统一文件：
+
+```text
+00_common/resource_manager.py
+configs/local_resource_release.json
+```
+
+阶段规则：
+
+```text
+01–06：LLM_TEXT_PHASE，Gemma/本地 LLM 常驻，不在每个模块结束后主动卸载。
+06 → 07：进入图片阶段前 release_llm_resources，释放 LLM 显存。
+07：图片生成 / ComfyUI 阶段，完成后按需 release_image_resources。
+08：TTS / CosyVoice2 阶段，按显存情况 release_audio_resources。
+09：视频模型 LTX2.3 阶段，加载前释放其他大模型，完成后 release_video_resources。
+10：普通合成阶段，不默认加载大模型。
+```
+
+模块仍然可以在 finally 中调用：
+
+```python
+resource_manager.release_local_resources(MODULE_NAME)
+```
+
+但 01–06 的该调用只做轻量清理：
+
+```text
+gc.collect()
+不主动 torch.cuda.empty_cache()
+不执行外部卸载命令
+不卸载 LLM / Gemma
+```
+
+阶段边界释放由 00_main_controller/run_pipeline.py 统一处理：
+
+```text
+06_storyboard -> 07_storyboard_image：release_llm_resources()
+07_storyboard_image -> 08_audio：release_image_resources()
+08_audio -> 09_video：release_audio_resources() + release_image_resources()
+09_video -> 10_final_assembly：release_video_resources()
 ```
 
 ---
@@ -122,6 +181,7 @@ set AI_DRAMA_LLM_TEMPERATURE=0.1
 run_staged.py 已从旧 run_scaffold_stages 改为 run_llm_stages。
 已移除 write_placeholder_output。
 新增 novel_meta.json 真实元信息输出。
+LLM 输出已接入 JSON guard + 内部控制字段递归清理。
 ```
 
 候选提取最高规则：
@@ -148,6 +208,7 @@ run_staged.py 已从旧 run_scaffold_stages 改为 run_llm_stages。
 ```text
 已移除 write_placeholder_output。
 script.json 顶层已补回 event_coverage_map，修复 schema_validator 检查事件覆盖但 merge_stage_outputs 未输出的问题。
+LLM 输出已接入 JSON guard + 内部控制字段递归清理。
 ```
 
 02 单帧分镜路线：
@@ -341,6 +402,7 @@ reference_image_plan
 ```text
 LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原因发回 LLM。
 该机制只修复 JSON 格式，不新增业务内容。
+修复后的 JSON 也会再次进入内部控制字段清理。
 ```
 
 ## 最终 schema 硬校验
@@ -386,11 +448,13 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 05_prop_system
 ```
 
-完整测试：
+完整测试到 05：
 
 ```bash
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 01_novel_parser
 ```
+
+如果只想验证 00–05，不加载后续模型，可以先逐个跑到 05，或临时用 `--only-module` 分段测试。
 
 ---
 
@@ -404,5 +468,6 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 复核发现遗漏不能直接在 E 阶段硬补，必须通过 retry_stages 触发前置阶段重跑；如果 01 自己也漏提，则写 upstream_blocking_issues。
 03/04/05 形成稳定资产库，让 06 单帧分镜可以直接引用稳定角色名、稳定场景名、稳定道具名，避免角色串脸、场景漂移、道具混乱。
 03/04/05 不生成图片，只写参考图计划；图片由 07 根据 06 实际分镜需求统一生成。
-用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05 需要强 JSON 护栏和低温度默认值。
+用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05 需要强 JSON 护栏、低温度默认值、输出控制字段清理。
+00–06 都属于 LLM 文本阶段，不应每个模块结束就释放 LLM；06→07 才释放 LLM 显存。
 ```
