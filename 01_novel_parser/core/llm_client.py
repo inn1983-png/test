@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -65,8 +66,19 @@ class LLMClient:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
 
         request = urllib.request.Request(self.config.base_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(request, timeout=self.config.timeout_sec) as response:
-            raw = response.read().decode("utf-8")
+        try:
+            with urllib.request.urlopen(request, timeout=self.config.timeout_sec) as response:
+                raw = response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+            raise RuntimeError(
+                "Local LLM HTTP error:\n"
+                f"  status={exc.code} {exc.reason}\n"
+                f"  url={self.config.base_url}\n"
+                f"  model={self.config.model}\n"
+                f"  request_bytes={len(data)}\n"
+                f"  response_body={body}"
+            ) from exc
         result = json.loads(raw)
         return result["choices"][0]["message"]["content"]
 
