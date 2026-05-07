@@ -6,7 +6,7 @@ REQUIRED_TOP = [
     "schema_version", "module", "status", "stage_mode", "scenes", "scene_alias_index",
     "scene_script_usage", "asset_review_report", "downstream_readiness_for_06",
     "main_assets_for_06", "optional_assets_for_06", "do_not_reference_as_main_asset",
-    "quality_report", "schema_validation"
+    "quality_report"
 ]
 REQUIRED_SCENE_FIELDS = [
     "scene_id", "canonical_scene_name", "aliases", "scene_type", "time_period",
@@ -23,6 +23,9 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
     for field in REQUIRED_TOP:
         if field not in data:
             issues.append(f"缺少顶层字段：{field}")
+    for list_field in ["main_assets_for_06", "optional_assets_for_06", "do_not_reference_as_main_asset"]:
+        if list_field in data and not isinstance(data.get(list_field), list):
+            issues.append(f"{list_field} 必须为数组。")
     scenes = data.get("scenes", [])
     if not isinstance(scenes, list) or not scenes:
         issues.append("scenes 为空或不是数组")
