@@ -17,11 +17,13 @@
 
 ```text
 00 + 01–10 子系统框架已能闭环。
-01 小说解析系统已具备真实 LLM 分阶段解析、评分、JSON 修复、总检重跑和 schema 硬校验。
+01 小说解析系统已修正为真实 LLM 分阶段入口 run_llm_stages，不再调用旧 scaffold。
 02 剧本改编系统已升级到 schema 1.2，成为音频驱动、单帧分镜友好、多版本评估、失败样本回灌的真实 LLM 子系统。
 03/04/05 已从旧 scaffold library 目录切换为真实资产 system：03_character_system、04_scene_system、05_prop_system。
 03/04/05 已升级为五阶段真实资产系统：A 合并、B 资产卡、C 剧本绑定、D 模块总检、E 面向 06 的资产复核。
-03/04/05 已移除 run_staged.py 中的 write_placeholder_output，不再生成占位 result.json。
+01/02/03/04/05 已移除 write_placeholder_output，不再生成占位 result.json。
+01/02/03/04/05 已统一接入本地 Gemma JSON 输出护栏，适配 Gemma 4 31B Q4 等本地量化模型。
+00 validate_pipeline.py 已修正为识别 run_staged.py，并使用新的 03/04/05 system 模块顺序。
 ```
 
 ---
@@ -52,6 +54,15 @@
 10_final_assembly
 ```
 
+00 当前关键修正：
+
+```text
+validate_pipeline.py 不再只检查 run.py，也会接受 run_staged.py。
+DEFAULT_MODULE_ORDER 已从旧 03_character_library / 04_scene_library / 05_prop_library 改为 03_character_system / 04_scene_system / 05_prop_system。
+validate_pipeline.py 会拦截旧 library 模块，避免重新混入 pipeline。
+run_pipeline.py 依赖检查通过 manifest key_outputs、artifacts.db、run_dir/module/file fallback 三路解析上游产物。
+```
+
 旧 scaffold 目录已移除：
 
 ```text
@@ -62,12 +73,55 @@
 
 ---
 
+# 本地 Gemma 4 31B Q4 适配规则
+
+新增统一文件：
+
+```text
+00_common/llm_prompt_guard.py
+```
+
+01/02/03/04/05 的 LLMClient.complete_json 都会自动套用：
+
+```text
+只输出一个 JSON object
+禁止 Markdown / ```json / 前言 / 后记
+必须使用 JSON null/true/false
+必填字段不能省略
+顶层必须是 object，不能是 array
+输出前自检能被 json.loads 解析
+```
+
+默认 temperature 调整：
+
+```text
+01：0.1
+02：0.15
+03/04/05：0.1
+```
+
+如果需要统一覆盖，可以设置：
+
+```bash
+set AI_DRAMA_LLM_TEMPERATURE=0.1
+```
+
+---
+
 # 01 小说解析系统
 
 正式入口：
 
 ```text
 01_novel_parser/run_staged.py
+```
+
+当前修正：
+
+```text
+run_staged.py 已从旧 run_scaffold_stages 改为 run_llm_stages。
+已移除 write_placeholder_output。
+新增 novel_meta.json 真实元信息输出。
 ```
 
 候选提取最高规则：
@@ -87,6 +141,13 @@
 
 ```text
 02_script_writer/run_staged.py
+```
+
+当前修正：
+
+```text
+已移除 write_placeholder_output。
+script.json 顶层已补回 event_coverage_map，修复 schema_validator 检查事件覆盖但 merge_stage_outputs 未输出的问题。
 ```
 
 02 单帧分镜路线：
@@ -130,15 +191,6 @@ ComfyUI 调用
 03E asset_review
 ```
 
-03 最高规则：
-
-```text
-合并同一角色的不同称呼。
-禁止按年龄段拆角色。
-禁止把身份称谓、昵称、职务称谓拆成新角色。
-角色描述必须稳定、清晰、不可互相污染，服务 06 单帧分镜引用稳定角色名。
-```
-
 03 资产分级：
 
 ```text
@@ -160,24 +212,12 @@ reference_image_plan
 如果 03 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
 ```
 
-03 输出新增：
-
-```text
-asset_review_report
-downstream_readiness_for_06
-main_assets_for_06
-optional_assets_for_06
-do_not_reference_as_main_asset
-upstream_blocking_issues
-```
-
 03 图像资产最高规则：
 
 ```text
 03 不生成图片，只写参考图计划。
 先单视图稳定，不要一开始做三视图。
 不要把正面/侧面/背面拼成一张三视图图板。
-如后续确实需要三视图，必须拆成 front / side / back 多张独立图。
 图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
@@ -201,14 +241,6 @@ upstream_blocking_issues
 04E asset_review
 ```
 
-04 最高规则：
-
-```text
-合并同一场景的不同说法。
-区分主场景、子场景、临时地点。
-场景描述要适合后续 06 单帧分镜引用，但不要写图像提示词。
-```
-
 04 资产分级：
 
 ```text
@@ -230,23 +262,11 @@ reference_image_plan
 如果 04 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
 ```
 
-04 输出新增：
-
-```text
-asset_review_report
-downstream_readiness_for_06
-main_assets_for_06
-optional_assets_for_06
-do_not_reference_as_main_asset
-upstream_blocking_issues
-```
-
 04 图像资产最高规则：
 
 ```text
 04 不生成图片，只写参考图计划。
 场景优先全景图，不要一开始做大量多角度。
-先主场景全景，再根据 06/07 失败情况补子区域局部图。
 图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
@@ -270,14 +290,6 @@ upstream_blocking_issues
 05E asset_review
 ```
 
-05 最高规则：
-
-```text
-合并同一道具的不同说法。
-区分关键道具、动作道具、背景物件、仅提及物件。
-道具描述要适合后续 06 单帧分镜引用，但不要写图像提示词。
-```
-
 05 资产分级：
 
 ```text
@@ -298,47 +310,18 @@ reference_image_plan
 如果 05 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
 ```
 
-05 输出新增：
-
-```text
-asset_review_report
-downstream_readiness_for_06
-main_assets_for_06
-optional_assets_for_06
-do_not_reference_as_main_asset
-upstream_blocking_issues
-```
-
 05 图像资产最高规则：
 
 ```text
 05 不生成图片，只写参考图计划。
 关键道具用单独干净图。
 普通道具和背景物件不要全部做图，否则资产库会爆炸。
-道具图不要和角色/场景混在一起。
 图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
 ---
 
 # 03/04/05 共同真实执行机制
-
-## 真实 LLM
-
-03/04/05 不支持正式流程使用 scaffold 占位结果。必须配置：
-
-```bash
-set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
-set AI_DRAMA_LLM_MODEL=你的本地模型名
-```
-
-可选：
-
-```bash
-set AI_DRAMA_LLM_API_KEY=你的 key
-set AI_DRAMA_LLM_TIMEOUT_SEC=180
-set AI_DRAMA_LLM_TEMPERATURE=0.2
-```
 
 ## 阶段评分与修改意见重跑
 
@@ -364,6 +347,8 @@ LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原
 
 ```text
 03/04/05 最终 schema_validator.py 不只查字段，还会检查 asset_importance_score、source_understanding_basis、asset_review_report、downstream_readiness_for_06、main/optional/do_not_reference 清单。
+注意：schema_validation 不再作为预校验必填字段，避免校验前必然失败。
+03E/04E/05E 的 optional_assets_for_06 和 do_not_reference_as_main_asset 允许为空数组。
 ```
 
 ---
@@ -380,7 +365,15 @@ workspace/projects/project_test_001/input/novel.txt
 
 ```bash
 set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
-set AI_DRAMA_LLM_MODEL=你的本地模型名
+set AI_DRAMA_LLM_MODEL=你的 Gemma 模型名
+set AI_DRAMA_LLM_TEMPERATURE=0.1
+set AI_DRAMA_LLM_TIMEOUT_SEC=240
+```
+
+先校验 pipeline：
+
+```bash
+python 00_main_controller/validate_pipeline.py --pipeline pipeline.json --strict-order
 ```
 
 建议依次测试：
@@ -411,4 +404,5 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 复核发现遗漏不能直接在 E 阶段硬补，必须通过 retry_stages 触发前置阶段重跑；如果 01 自己也漏提，则写 upstream_blocking_issues。
 03/04/05 形成稳定资产库，让 06 单帧分镜可以直接引用稳定角色名、稳定场景名、稳定道具名，避免角色串脸、场景漂移、道具混乱。
 03/04/05 不生成图片，只写参考图计划；图片由 07 根据 06 实际分镜需求统一生成。
+用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05 需要强 JSON 护栏和低温度默认值。
 ```
