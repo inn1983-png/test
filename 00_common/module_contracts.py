@@ -62,7 +62,13 @@ def check_module_requires(
     module_name: str,
     contracts: dict[str, Any] | None = None,
 ) -> tuple[bool, list[str]]:
-    """Check whether a module's required upstream artifacts exist."""
+    """Check whether a module's required upstream artifacts exist.
+
+    Contract items may include optional=true. Optional artifacts are reported
+    when present, but they do not block the module when missing. This is needed
+    for 10_final_assembly, where 09_video/final_video.mp4 and subtitle files are
+    preferred inputs, but clips/subtitles can be absent depending on the mode.
+    """
     contract = get_module_contract(module_name, contracts)
     requires = contract.get("requires", [])
     if not isinstance(requires, list):
@@ -78,12 +84,17 @@ def check_module_requires(
 
         upstream_module = required.get("module")
         artifact_name = required.get("name")
+        optional = bool(required.get("optional", False))
         resolved = _resolve_required_file(run_dir, required)
+        label = "optional artifact" if optional else "required artifact"
         if resolved is None:
-            ok = False
-            messages.append(f"Missing required artifact for {module_name}: {upstream_module}.{artifact_name}")
+            if optional:
+                messages.append(f"Missing optional artifact for {module_name}: {upstream_module}.{artifact_name}")
+            else:
+                ok = False
+                messages.append(f"Missing required artifact for {module_name}: {upstream_module}.{artifact_name}")
         else:
-            messages.append(f"Found required artifact for {module_name}: {upstream_module}.{artifact_name} -> {resolved}")
+            messages.append(f"Found {label} for {module_name}: {upstream_module}.{artifact_name} -> {resolved}")
 
     return ok, messages
 
