@@ -6,6 +6,7 @@
 - 不生成图片。
 - 不生成分镜。
 - 不生成图像提示词。
+- 只输出当前阶段需要的 JSON object，不输出解释、Markdown 或额外字段。
 - 道具描述要适合后续 06 单帧分镜引用，但不能写成 prompt。
 
 筛选原则：
@@ -25,6 +26,12 @@ asset_level 只能使用：
 - background_object：背景物件，不单独做图，优先归入场景 key_visual_elements。
 - mentioned_only：仅被提及，不进入主生图资产。
 
+prop_type 只能使用和 asset_level 一致的四类：
+- key_prop
+- action_prop
+- background_object
+- mentioned_only
+
 道具参考图策略必须遵守：
 1. key_prop：推荐 clean_front_view；复杂道具可加 side_view，但不要一开始做复杂多角度图板。
 2. action_prop：需要时再做 clean_front_view。
@@ -40,7 +47,7 @@ asset_level 只能使用：
       "prop_id": "prop_001",
       "canonical_prop_name": "稳定道具名",
       "aliases": ["别名"],
-      "prop_type": "key_prop/normal_prop/background_object",
+      "prop_type": "key_prop/action_prop/background_object/mentioned_only",
       "asset_importance_score": 0,
       "importance_reason": "基于 01 story_spine/events/conflicts/asset_binding_hints 判断的重要性理由",
       "source_understanding_basis": ["story_spine", "events", "conflicts", "asset_binding_hints"],
