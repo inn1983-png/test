@@ -31,7 +31,11 @@ TEXT_MIME = {
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
+    ".wav": "audio/wav",
+    ".mp4": "video/mp4",
 }
+
+DISPLAY_PIPELINE_PREFIX = "00_main_controller"
 
 
 def now_iso() -> str:
@@ -52,20 +56,25 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def safe_project_id(raw: str | None) -> str:
+def safe_id(raw: str | None, prefix: str = "project") -> str:
     raw = (raw or "").strip()
     if not raw:
-        return "project_" + datetime.now().strftime("%Y%m%d_%H%M%S")
-    allowed = []
-    for ch in raw:
-        allowed.append(ch if ch.isalnum() or ch in "_-" else "_")
-    return "".join(allowed).strip("_") or "project_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        return prefix + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    value = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in raw).strip("_")
+    return value or prefix + "_" + datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
 def safe_rel_path(raw: str) -> Path:
     raw = unquote(raw).replace("\\", "/")
     parts = [part for part in raw.split("/") if part and part not in {".", ".."}]
     return Path(*parts) if parts else Path()
+
+
+def rel_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(ROOT_DIR)).replace("\\", "/")
+    except ValueError:
+        return str(path).replace("\\", "/")
 
 
 @dataclass
@@ -77,6 +86,7 @@ class Job:
     chapter_id: str | None
     command: list[str]
     run_dir: Path
+    kind: str = "pipeline"
     created_at: str = field(default_factory=now_iso)
     updated_at: str = field(default_factory=now_iso)
     status: str = "queued"
@@ -91,8 +101,7 @@ class Job:
         with self.lock:
             self.updated_at = event["time"]
             self.events.append(event)
-            if len(self.events) > 2000:
-                self.events = self.events[-2000:]
+            self.events = self.events[-2000:]
             subscribers = list(self.subscribers)
         for subscriber in subscribers:
             try:
@@ -123,7 +132,11 @@ JOBS = JobStore()
 
 
 def load_pipeline() -> dict[str, Any]:
-    return read_json(PIPELINE_FILE, {"pipeline": []})
+    data = read_json(PIPELINE_FILE, {"pipeline": []})
+    pipeline = data.get("pipeline", []) if isinstance(data, dict) else []
+    if isinstance(pipeline, list):
+        data["display_pipeline"] = [DISPLAY_PIPELINE_PREFIX, *pipeline]
+    return data
 
 
 def project_run_dir(project_id: str) -> Path:
@@ -132,26 +145,6 @@ def project_run_dir(project_id: str) -> Path:
 
 def book_chapter_run_dir(book_id: str, chapter_id: str) -> Path:
     return WORKSPACE_DIR / "books" / book_id / "chapters" / chapter_id
-
-
-def discover_projects() -> list[dict[str, Any]]:
-    base = WORKSPACE_DIR / "projects"
-    if not base.exists():
-        return []
-    rows: list[dict[str, Any]] = []
-    for item in sorted(base.iterdir(), key=lambda path: path.stat().st_mtime, reverse=True):
-        if not item.is_dir():
-            continue
-        status = read_json(item / "run_status.json", {})
-        rows.append(
-            {
-                "project_id": item.name,
-                "run_dir": str(item.relative_to(ROOT_DIR)),
-                "updated_at": datetime.fromtimestamp(item.stat().st_mtime).isoformat(timespec="seconds"),
-                "status": summarize_run_status(status),
-            }
-        )
-    return rows[:100]
 
 
 def summarize_run_status(status: dict[str, Any]) -> str:
@@ -170,43 +163,43 @@ def summarize_run_status(status: dict[str, Any]) -> str:
     return "pending"
 
 
-def discover_run_snapshot(run_dir: Path) -> dict[str, Any]:
-    status = read_json(run_dir / "run_status.json", {})
-    pipeline = load_pipeline().get("pipeline", [])
-    modules: list[dict[str, Any]] = []
-    for module_name in pipeline:
-        module_dir = run_dir / module_name
-        module_status = (status.get("modules", {}) or {}).get(module_name, {}) if isinstance(status, dict) else {}
-        modules.append(
-            {
-                "name": module_name,
-                "status": module_status.get("status", "pending") if isinstance(module_status, dict) else "pending",
-                "message": module_status.get("message", "") if isinstance(module_status, dict) else "",
-                "start_time": module_status.get("start_time") if isinstance(module_status, dict) else None,
-                "end_time": module_status.get("end_time") if isinstance(module_status, dict) else None,
-                "duration_seconds": module_status.get("duration_seconds") if isinstance(module_status, dict) else None,
-                "return_code": module_status.get("return_code") if isinstance(module_status, dict) else None,
-                "exists": module_dir.exists(),
-                "outputs": discover_module_outputs(module_dir),
-                "stages": discover_stage_outputs(module_dir),
-                "quality": discover_quality(module_dir),
-            }
-        )
+def discover_projects() -> list[dict[str, Any]]:
+    base = WORKSPACE_DIR / "projects"
+    if not base.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    for item in sorted(base.iterdir(), key=lambda path: path.stat().st_mtime, reverse=True):
+        if not item.is_dir():
+            continue
+        status = read_json(item / "run_status.json", {})
+        link_report = read_json(item / "00_data_link_check_report.json", {})
+        rows.append({
+            "project_id": item.name,
+            "run_dir": rel_path(item),
+            "updated_at": datetime.fromtimestamp(item.stat().st_mtime).isoformat(timespec="seconds"),
+            "status": summarize_run_status(status),
+            "data_link_check": link_report.get("summary", {}) if isinstance(link_report, dict) else {},
+        })
+    return rows[:100]
+
+
+def file_row(path: Path) -> dict[str, Any]:
     return {
-        "run_dir": str(run_dir.relative_to(ROOT_DIR)) if run_dir.exists() or ROOT_DIR in run_dir.parents else str(run_dir),
-        "run_status": status,
-        "summary_status": summarize_run_status(status),
-        "modules": modules,
-        "important_outputs": discover_important_outputs(run_dir),
+        "name": path.name,
+        "path": rel_path(path),
+        "size": path.stat().st_size if path.exists() else 0,
+        "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds") if path.exists() else None,
     }
 
 
 def discover_module_outputs(module_dir: Path) -> list[dict[str, Any]]:
     if not module_dir.exists():
         return []
-    rows: list[dict[str, Any]] = []
-    for path in sorted(module_dir.glob("*.json")):
-        rows.append(file_row(path))
+    rows = [file_row(path) for path in sorted(module_dir.glob("*.json"))]
+    for subdir in ["images", "segments", "clips"]:
+        folder = module_dir / subdir
+        if folder.exists():
+            rows.extend(file_row(path) for path in sorted(folder.glob("*"))[:60] if path.is_file())
     return rows
 
 
@@ -214,34 +207,37 @@ def discover_stage_outputs(module_dir: Path) -> list[dict[str, Any]]:
     inter = module_dir / "intermediate"
     if not inter.exists():
         return []
-    rows = [file_row(path) for path in sorted(inter.glob("*.json"))]
-    for row in rows:
-        data = read_json(ROOT_DIR / row["path"], {})
+    rows: list[dict[str, Any]] = []
+    for path in sorted(inter.glob("*.json")):
+        row = file_row(path)
+        data = read_json(path, {})
         if isinstance(data, dict):
-            quality = data.get("stage_quality") or {}
-            row["stage_id"] = data.get("stage") or data.get("stage_id") or row["name"].split("_")[0]
+            quality = data.get("stage_quality") or data.get("quality_report") or {}
+            row["stage_id"] = data.get("stage") or data.get("stage_id") or path.name.split("_")[0]
             row["score"] = quality.get("score") if isinstance(quality, dict) else None
             row["passed"] = quality.get("passed") if isinstance(quality, dict) else None
             row["issues_count"] = len(quality.get("issues", [])) if isinstance(quality, dict) and isinstance(quality.get("issues"), list) else 0
-        else:
-            row["stage_id"] = row["name"].split("_")[0]
+        rows.append(row)
     return rows
 
 
 def discover_quality(module_dir: Path) -> dict[str, Any]:
-    for name in ["image_manifest.json", "storyboard.json", "characters.json", "scenes.json", "props.json", "script.json", "novel_analysis.json"]:
-        data = read_json(module_dir / name, {})
-        if isinstance(data, dict) and isinstance(data.get("quality_report"), dict):
-            return data["quality_report"]
-    for path in module_dir.glob("*.json"):
+    for path in sorted(module_dir.glob("*.json")):
         data = read_json(path, {})
-        if isinstance(data, dict) and isinstance(data.get("quality_report"), dict):
-            return data["quality_report"]
+        if isinstance(data, dict):
+            if isinstance(data.get("quality_report"), dict):
+                return data["quality_report"]
+            if isinstance(data.get("stage_quality"), dict):
+                return data["stage_quality"]
     return {}
 
 
 def discover_important_outputs(run_dir: Path) -> list[dict[str, Any]]:
     names = [
+        "00_data_link_check_report.json",
+        "runtime_context.json",
+        "manifest.json",
+        "run_status.json",
         "01_novel_parser/novel_analysis.json",
         "02_script_writer/script.json",
         "03_character_system/characters.json",
@@ -249,59 +245,85 @@ def discover_important_outputs(run_dir: Path) -> list[dict[str, Any]]:
         "05_prop_system/props.json",
         "06_storyboard/storyboard.json",
         "06_storyboard/storyboard_meta.json",
-        "07_storyboard_image/character_lock_manifest.json",
-        "07_storyboard_image/appearance_manifest.json",
-        "07_storyboard_image/reference_asset_manifest.json",
-        "07_storyboard_image/dependency_index.json",
-        "07_storyboard_image/asset_image_registry.json",
-        "07_storyboard_image/storyboard_image_meta.json",
         "07_storyboard_image/image_manifest.json",
         "08_audio/final_audio.wav",
+        "08_audio/audio_timeline.json",
+        "08_audio/subtitle.srt",
+        "08_audio/subtitle.ass",
         "09_video/video_manifest.json",
+        "09_video/final_video.mp4",
         "10_final_assembly/final.mp4",
+        "10_final_assembly/final_manifest.json",
+        "10_final_assembly/final_meta.json",
     ]
-    rows = []
-    for name in names:
-        path = run_dir / name
-        if path.exists():
-            rows.append(file_row(path))
-    return rows
+    return [file_row(run_dir / name) for name in names if (run_dir / name).exists()]
 
 
-def file_row(path: Path) -> dict[str, Any]:
-    try:
-        rel = path.relative_to(ROOT_DIR)
-    except ValueError:
-        rel = path
+def discover_run_snapshot(run_dir: Path) -> dict[str, Any]:
+    pipeline = load_pipeline().get("pipeline", [])
+    status = read_json(run_dir / "run_status.json", {})
+    modules = [{
+        "name": "00_main_controller",
+        "status": "success" if (run_dir / "runtime_context.json").exists() or (run_dir / "00_data_link_check_report.json").exists() else "pending",
+        "message": "运行上下文 / 数据链路检查",
+        "exists": (ROOT_DIR / "00_main_controller").exists(),
+        "outputs": [file_row(path) for path in [run_dir / "runtime_context.json", run_dir / "manifest.json", run_dir / "run_status.json", run_dir / "00_data_link_check_report.json"] if path.exists()],
+        "stages": [],
+        "quality": read_json(run_dir / "00_data_link_check_report.json", {}).get("summary", {}),
+    }]
+    for module_name in pipeline:
+        module_dir = run_dir / module_name
+        module_status = (status.get("modules", {}) or {}).get(module_name, {}) if isinstance(status, dict) else {}
+        modules.append({
+            "name": module_name,
+            "status": module_status.get("status", "pending") if isinstance(module_status, dict) else "pending",
+            "message": module_status.get("message", "") if isinstance(module_status, dict) else "",
+            "start_time": module_status.get("start_time") if isinstance(module_status, dict) else None,
+            "end_time": module_status.get("end_time") if isinstance(module_status, dict) else None,
+            "duration_seconds": module_status.get("duration_seconds") if isinstance(module_status, dict) else None,
+            "return_code": module_status.get("return_code") if isinstance(module_status, dict) else None,
+            "exists": module_dir.exists(),
+            "outputs": discover_module_outputs(module_dir),
+            "stages": discover_stage_outputs(module_dir),
+            "quality": discover_quality(module_dir),
+        })
     return {
-        "name": path.name,
-        "path": str(rel).replace("\\", "/"),
-        "size": path.stat().st_size if path.exists() else 0,
-        "updated_at": datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds") if path.exists() else None,
+        "run_dir": rel_path(run_dir),
+        "run_status": status,
+        "summary_status": summarize_run_status(status),
+        "modules": modules,
+        "important_outputs": discover_important_outputs(run_dir),
+        "data_link_check": read_json(run_dir / "00_data_link_check_report.json", {}),
     }
 
 
-def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], dict[str, str]]:
+def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], dict[str, str], str]:
+    env = os.environ.copy()
+    job_kind = str(payload.get("job_kind") or "pipeline")
+
+    if job_kind == "data_link_check":
+        project_id = safe_id(payload.get("project_id"), "ui_data_link_check")
+        return [sys.executable, str(ROOT_DIR / "00_main_controller" / "check_data_link.py"), "--project-id", project_id], env, job_kind
+    if job_kind == "controller_self_check":
+        cmd = [sys.executable, str(ROOT_DIR / "00_main_controller" / "self_check.py")]
+        if payload.get("keep_self_check"):
+            cmd.append("--keep")
+        return cmd, env, job_kind
+
     mode = payload.get("mode") or "project"
     cmd = [sys.executable, str(ROOT_DIR / "00_main_controller" / "run_pipeline.py"), "--mode", mode]
-    env = os.environ.copy()
-
     if mode == "book_chapter":
-        book_id = safe_project_id(payload.get("book_id") or "book_demo")
-        chapter_id = safe_project_id(payload.get("chapter_id") or "chapter_001")
-        cmd.extend(["--book-id", book_id, "--chapter-id", chapter_id])
+        cmd.extend(["--book-id", safe_id(payload.get("book_id"), "book"), "--chapter-id", safe_id(payload.get("chapter_id"), "chapter")])
     else:
-        project_id = safe_project_id(payload.get("project_id"))
-        cmd.extend(["--project-id", project_id])
+        cmd.extend(["--project-id", safe_id(payload.get("project_id"), "project")])
 
-    if payload.get("from_module"):
-        cmd.extend(["--from-module", str(payload["from_module"])])
-    if payload.get("only_module"):
-        cmd.extend(["--only-module", str(payload["only_module"])])
-    if payload.get("skip_validation"):
-        cmd.append("--skip-validation")
-    if payload.get("skip_dependency_check"):
-        cmd.append("--skip-dependency-check")
+    for key, flag in [("from_module", "--from-module"), ("only_module", "--only-module")]:
+        value = str(payload.get(key) or "").strip()
+        if value:
+            cmd.extend([flag, value])
+    for key, flag in [("skip_validation", "--skip-validation"), ("skip_dependency_check", "--skip-dependency-check"), ("dry_run", "--dry-run"), ("empty_pipeline", "--empty-pipeline")]:
+        if payload.get(key):
+            cmd.append(flag)
     if payload.get("strict_order", True):
         cmd.append("--strict-order")
 
@@ -312,26 +334,30 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
         ("llm_timeout_sec", "AI_DRAMA_LLM_TIMEOUT_SEC"),
         ("image_execution_mode", "AI_DRAMA_IMAGE_EXECUTION_MODE"),
         ("comfyui_base_url", "AI_DRAMA_COMFYUI_BASE_URL"),
+        ("comfyui_workflow", "AI_DRAMA_COMFYUI_WORKFLOW"),
         ("comfyui_workflow_mapping", "AI_DRAMA_COMFYUI_WORKFLOW_MAPPING"),
         ("image_style_suffix", "AI_DRAMA_IMAGE_STYLE_SUFFIX"),
         ("image_negative_prompt", "AI_DRAMA_IMAGE_NEGATIVE_PROMPT"),
+        ("audio_execution_mode", "AI_DRAMA_AUDIO_EXECUTION_MODE"),
+        ("index_tts_root", "AI_DRAMA_INDEX_TTS_ROOT"),
+        ("video_execution_mode", "AI_DRAMA_VIDEO_EXECUTION_MODE"),
+        ("ffmpeg_bin", "AI_DRAMA_FFMPEG_BIN"),
     ]:
         value = str(payload.get(source_key) or "").strip()
         if value:
             env[env_key] = value
-
-    return cmd, env
+    return cmd, env, job_kind
 
 
 def start_job(payload: dict[str, Any]) -> Job:
     mode = payload.get("mode") or "project"
     if mode == "book_chapter":
-        book_id = safe_project_id(payload.get("book_id") or "book_demo")
-        chapter_id = safe_project_id(payload.get("chapter_id") or "chapter_001")
+        book_id = safe_id(payload.get("book_id"), "book")
+        chapter_id = safe_id(payload.get("chapter_id"), "chapter")
         run_dir = book_chapter_run_dir(book_id, chapter_id)
         project_id = None
     else:
-        project_id = safe_project_id(payload.get("project_id"))
+        project_id = safe_id(payload.get("project_id"), "project")
         book_id = None
         chapter_id = None
         run_dir = project_run_dir(project_id)
@@ -340,37 +366,18 @@ def start_job(payload: dict[str, Any]) -> Job:
     if novel_text:
         write_text(run_dir / "input" / "novel.txt", novel_text)
 
-    cmd, env = build_command(payload, run_dir)
-    job = Job(
-        id=uuid.uuid4().hex[:12],
-        mode=mode,
-        project_id=project_id,
-        book_id=book_id,
-        chapter_id=chapter_id,
-        command=cmd,
-        run_dir=run_dir,
-    )
+    cmd, env, kind = build_command(payload, run_dir)
+    job = Job(id=uuid.uuid4().hex[:12], mode=mode, project_id=project_id, book_id=book_id, chapter_id=chapter_id, command=cmd, run_dir=run_dir, kind=kind)
     JOBS.add(job)
-    thread = threading.Thread(target=run_job_thread, args=(job, env), daemon=True)
-    thread.start()
+    threading.Thread(target=run_job_thread, args=(job, env), daemon=True).start()
     return job
 
 
 def run_job_thread(job: Job, env: dict[str, str]) -> None:
     job.status = "running"
-    job.publish("job_started", {"command": job.command, "run_dir": str(job.run_dir.relative_to(ROOT_DIR))})
+    job.publish("job_started", {"command": job.command, "run_dir": rel_path(job.run_dir), "kind": job.kind})
     try:
-        process = subprocess.Popen(
-            job.command,
-            cwd=str(ROOT_DIR),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            bufsize=1,
-        )
+        process = subprocess.Popen(job.command, cwd=str(ROOT_DIR), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", bufsize=1)
         job.process = process
         assert process.stdout is not None
         last_snapshot = 0.0
@@ -378,7 +385,7 @@ def run_job_thread(job: Job, env: dict[str, str]) -> None:
             clean = line.rstrip("\n")
             if clean:
                 job.publish("log", {"line": clean})
-            if time.time() - last_snapshot > 2.0:
+            if time.time() - last_snapshot > 1.5:
                 job.publish("snapshot", discover_run_snapshot(job.run_dir))
                 last_snapshot = time.time()
         return_code = process.wait()
@@ -390,6 +397,23 @@ def run_job_thread(job: Job, env: dict[str, str]) -> None:
         job.status = "failed"
         job.return_code = 1
         job.publish("job_error", {"error": str(exc)})
+
+
+def job_summary(job: Job) -> dict[str, Any]:
+    return {
+        "id": job.id,
+        "kind": job.kind,
+        "mode": job.mode,
+        "project_id": job.project_id,
+        "book_id": job.book_id,
+        "chapter_id": job.chapter_id,
+        "run_dir": rel_path(job.run_dir),
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "status": job.status,
+        "return_code": job.return_code,
+        "command": job.command,
+    }
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -405,12 +429,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"projects": discover_projects()})
         if path == "/api/jobs":
             return self.send_json({"jobs": [job_summary(job) for job in JOBS.list()]})
+        if path == "/api/system/snapshot":
+            return self.send_json({"pipeline": load_pipeline(), "projects": discover_projects()})
         if path.startswith("/api/jobs/") and path.endswith("/events"):
-            job_id = path.split("/")[3]
-            return self.stream_events(job_id)
+            return self.stream_events(path.split("/")[3])
         if path.startswith("/api/jobs/") and path.endswith("/snapshot"):
-            job_id = path.split("/")[3]
-            job = JOBS.get(job_id)
+            job = JOBS.get(path.split("/")[3])
             if not job:
                 return self.send_json({"error": "job not found"}, status=404)
             return self.send_json({"job": job_summary(job), "snapshot": discover_run_snapshot(job.run_dir)})
@@ -423,12 +447,17 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path == "/api/jobs/start":
+            return self.send_json({"job": job_summary(start_job(self.read_body_json()))})
+        if parsed.path == "/api/system/check-data-link":
             payload = self.read_body_json()
-            job = start_job(payload)
-            return self.send_json({"job": job_summary(job)})
+            payload["job_kind"] = "data_link_check"
+            return self.send_json({"job": job_summary(start_job(payload))})
+        if parsed.path == "/api/system/self-check":
+            payload = self.read_body_json()
+            payload["job_kind"] = "controller_self_check"
+            return self.send_json({"job": job_summary(start_job(payload))})
         if parsed.path.startswith("/api/jobs/") and parsed.path.endswith("/stop"):
-            job_id = parsed.path.split("/")[3]
-            job = JOBS.get(job_id)
+            job = JOBS.get(parsed.path.split("/")[3])
             if not job:
                 return self.send_json({"error": "job not found"}, status=404)
             if job.process and job.process.poll() is None:
@@ -473,8 +502,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self.write_sse(event)
             while True:
                 try:
-                    event = subscriber.get(timeout=15)
-                    self.write_sse(event)
+                    self.write_sse(subscriber.get(timeout=15))
                 except queue.Empty:
                     self.wfile.write(b"event: ping\ndata: {}\n\n")
                     self.wfile.flush()
@@ -491,25 +519,25 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.flush()
 
     def send_file_preview(self, query: str) -> None:
-        params = parse_qs(query)
-        rel = params.get("path", [""])[0]
-        path = ROOT_DIR / safe_rel_path(rel)
-        if not path.exists() or not path.is_file() or ROOT_DIR not in path.resolve().parents:
+        rel = parse_qs(query).get("path", [""])[0]
+        path = (ROOT_DIR / safe_rel_path(rel)).resolve()
+        if not path.exists() or not path.is_file() or ROOT_DIR.resolve() not in path.parents:
             return self.send_json({"error": "file not found"}, status=404)
         suffix = path.suffix.lower()
         if suffix == ".json":
             return self.send_json({"path": rel, "type": "json", "content": read_json(path, {})})
-        if suffix in {".txt", ".md", ".log"}:
-            text = path.read_text(encoding="utf-8", errors="replace")
-            return self.send_json({"path": rel, "type": "text", "content": text[-200000:]})
+        if suffix in {".txt", ".md", ".log", ".srt", ".ass"}:
+            return self.send_json({"path": rel, "type": "text", "content": path.read_text(encoding="utf-8", errors="replace")[-200000:]})
         if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
             return self.send_json({"path": rel, "type": "image", "url": "/media/" + rel})
+        if suffix in {".wav", ".mp4"}:
+            return self.send_json({"path": rel, "type": "media", "url": "/media/" + rel, "size": path.stat().st_size})
         return self.send_json({"path": rel, "type": "binary", "size": path.stat().st_size})
 
     def serve_media(self, path: str) -> None:
         rel = path.replace("/media/", "", 1)
-        file_path = ROOT_DIR / safe_rel_path(rel)
-        if not file_path.exists() or not file_path.is_file() or ROOT_DIR not in file_path.resolve().parents:
+        file_path = (ROOT_DIR / safe_rel_path(rel)).resolve()
+        if not file_path.exists() or not file_path.is_file() or ROOT_DIR.resolve() not in file_path.parents:
             return self.send_json({"error": "media not found"}, status=404)
         raw = file_path.read_bytes()
         self.send_response(200)
@@ -531,30 +559,14 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(raw)
 
 
-def job_summary(job: Job) -> dict[str, Any]:
-    return {
-        "id": job.id,
-        "mode": job.mode,
-        "project_id": job.project_id,
-        "book_id": job.book_id,
-        "chapter_id": job.chapter_id,
-        "run_dir": str(job.run_dir.relative_to(ROOT_DIR)) if ROOT_DIR in job.run_dir.parents else str(job.run_dir),
-        "created_at": job.created_at,
-        "updated_at": job.updated_at,
-        "status": job.status,
-        "return_code": job.return_code,
-        "command": job.command,
-    }
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="AI Short Drama final Web UI")
+    parser = argparse.ArgumentParser(description="AI Short Drama 00-10 Web UI")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=1144)
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Web UI running: http://{args.host}:{args.port}")
-    print("Press Ctrl+C to stop.")
+    print("00-10 controller, data-link check, pipeline runner, artifacts preview are enabled.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
