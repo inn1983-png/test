@@ -34,7 +34,7 @@ class LLMConfig:
             base_url=base_url,
             model=model,
             api_key=os.getenv("AI_DRAMA_LLM_API_KEY", ""),
-            timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "180")),
+            timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "6000")),
             temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.1")),
         )
 
