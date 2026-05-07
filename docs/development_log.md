@@ -22,6 +22,7 @@
 03/04/05 已从旧 scaffold library 目录切换为真实资产 system：03_character_system、04_scene_system、05_prop_system。
 03/04/05 已升级为五阶段真实资产系统：A 合并、B 资产卡、C 剧本绑定、D 模块总检、E 面向 06 的资产复核。
 06_storyboard 已升级为五阶段真实 LLM 单帧分镜系统：A 资产闸门、B 分镜规划、C 单帧分镜、D 连续性绑定、E 总检。
+07_storyboard_image 已升级为四阶段图片执行系统：A 参考资产准备、B 分镜图片任务构建、C ComfyUI/dry_run 执行、D manifest 总检。
 01/02/03/04/05/06 已统一接入本地 Gemma JSON 输出护栏，适配 Gemma 4 31B Q4 等本地量化模型。
 01/02/03/04/05/06 的 parse_json_from_text 与 repair fallback 已统一清理 analysis / reasoning / chain_of_thought / _local_model_output_contract 等内部字段。
 00 validate_pipeline.py 已修正为识别 run_staged.py，并使用新的 03/04/05 system 模块顺序。
@@ -184,7 +185,7 @@ complete_json 的 repair_callback 返回后也必须再次调用 remove_internal
 03 建立角色稳定身份、定妆照需求、costume_variants，并直接读取 02 appearance_state_changes。
 05 只管理可独立强调的穿戴物/关键道具，并用 wearable_policy 标明是否并入造型。
 06 输出 character_lock_reference 与 appearance_asset_requirements，并直接读取 02 appearance_state_changes，只定义引用关系，不生成图片。
-07 后续先生成/引用角色定妆照锁脸，再基于定妆照图生图换衣服、加常驻穿戴物，生成角色造型照，最后正式分镜图引用角色造型照。
+07 先生成/引用角色定妆照锁脸，再基于定妆照图生图换衣服、加常驻穿戴物，生成角色造型照，最后正式分镜图引用角色造型照。
 ```
 
 核心原则：
@@ -196,7 +197,7 @@ complete_json 的 repair_callback 返回后也必须再次调用 remove_internal
 02 负责记录换装事件和外观状态变化，不负责生成资产。
 03 负责把外观状态变化转成 costume_variants，不生成图片。
 06 每帧引用 canonical_name + character_lock_reference + costume_id + appearance_asset_key + wearable_props。
-07 暂未实现，后续新开对话单独做。
+07 负责把 06 引用关系转成参考图任务和正式分镜图任务。
 ```
 
 ---
@@ -486,19 +487,89 @@ four_grid_preview_groups 可按 1-4、4-7、7-10 重叠组织。
 
 ---
 
-# 03/04/05/06 共同真实执行机制
+# 07 分镜图生成系统
+
+正式入口：
+
+```text
+07_storyboard_image/run_staged.py
+```
+
+阶段：
+
+```text
+07A reference_asset_prepare
+07B frame_image_task_build
+07C comfyui_execution
+07D manifest_quality_check
+```
+
+07 输入：
+
+```text
+06_storyboard/storyboard.json
+可选：03_character_system/characters.json
+可选：04_scene_system/scenes.json
+可选：05_prop_system/props.json
+```
+
+07 输出：
+
+```text
+07_storyboard_image/image_manifest.json
+07_storyboard_image/image_meta.json
+07_storyboard_image/intermediate/07A_reference_asset_prepare.json
+07_storyboard_image/intermediate/07B_frame_image_tasks.json
+07_storyboard_image/intermediate/07C_comfyui_execution.json
+07_storyboard_image/intermediate/07D_manifest_quality_check.json
+07_storyboard_image/images/shot_001.png ...
+```
+
+07 核心规则：
+
+```text
+07 是 IMAGE_PHASE，不是 LLM_TEXT_PHASE。
+07 入口会调用 release_llm_resources，作为 06→07 的模型族切换边界。
+默认 AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run，只生成任务清单、预期图片路径和 image_manifest，不真正调用 ComfyUI。
+execute 模式需要配置 AI_DRAMA_COMFYUI_BASE_URL、AI_DRAMA_COMFYUI_WORKFLOW 和节点注入环境变量。
+07 不重新理解剧情、不新增资产、不改变 06 frame 顺序。
+07 可以把 06 的 story_action / emotion / camera_plan / composition_notes / continuity_notes 转成图片执行 prompt。
+07 的 reference_images 必须来自 06 已绑定的 scene / appearance_asset_key / prop。
+07D 发现失败帧时输出 retry_plan，原则上只重跑 failed_frames，不重跑全部分镜。
+```
+
+ComfyUI 环境变量：
+
+```text
+AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run|execute
+AI_DRAMA_COMFYUI_BASE_URL=http://127.0.0.1:8188
+AI_DRAMA_COMFYUI_WORKFLOW=workflow_api.json
+AI_DRAMA_COMFYUI_POSITIVE_NODE_ID=...
+AI_DRAMA_COMFYUI_NEGATIVE_NODE_ID=...
+AI_DRAMA_COMFYUI_OUTPUT_PREFIX_NODE_ID=...
+AI_DRAMA_ASSET_IMAGE_BASE=shared_assets
+AI_DRAMA_REQUIRE_REFERENCE_IMAGES=0|1
+AI_DRAMA_IMAGE_STYLE_SUFFIX=...
+AI_DRAMA_IMAGE_NEGATIVE_PROMPT=...
+```
+
+---
+
+# 03/04/05/06/07 共同真实执行机制
 
 ## 阶段评分与修改意见重跑
 
 ```text
 每阶段生成后 quality_checker.py 评分。
 低于阈值时生成 revision_instructions，并把修改意见传回同阶段 LLM 自动重跑。
+07 不使用 LLM 自动重跑；07D 只输出 failed_frames retry_plan，后续由控制器或 UI 触发失败帧重跑。
 ```
 
 ## 总检/复核连锁重跑
 
 ```text
 03D/03E、04D/04E、05D/05E、06D/06E 输出 needs_retry=true 和 retry_stages 时，stage_runner.py 会从最早问题阶段开始，连同后续阶段再跑一轮。
+07D 输出 needs_retry=true 时，只建议重跑失败图片帧，不建议回滚 06，除非缺少 06 资产绑定或 reference_images。
 ```
 
 ## JSON 修复机制
@@ -507,6 +578,7 @@ four_grid_preview_groups 可按 1-4、4-7、7-10 重叠组织。
 LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原因发回 LLM。
 该机制只修复 JSON 格式，不新增业务内容。
 修复后的 JSON 也会再次进入内部控制字段清理。
+07 不依赖 LLM JSON 修复，因为 07 是确定性图片执行阶段。
 ```
 
 ## 最终 schema 硬校验
@@ -517,6 +589,7 @@ LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原
 04 最终 schema_validator.py 会检查场景层级、parent_scene、主场景参考图计划。
 05 最终 schema_validator.py 会检查道具分级、wearable_type、wearable_policy、bound_character_names、bound_costume_ids、禁止图像提示词字段。
 06 最终 schema_validator.py 会检查 frames、sequence_index 连续性、稳定资产名引用、costume_id 引用、appearance_asset_key 定义、allowed_asset_names 与 03/04/05 一致性、禁止图像提示词字段、资产不可用时必须有 upstream_blocking_issues。
+07 最终 schema_validator.py 会检查 frame_image_tasks、execution_results、images 的 frame_id 一致性，sequence_index 连续性，image_path、reference_images、retry_frames 与 execution_mode。
 ```
 
 ---
@@ -559,11 +632,14 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 04_scene_system
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 05_prop_system
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 06_storyboard
+set AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 07_storyboard_image
 ```
 
-完整测试到 06：
+完整测试到 07：
 
 ```bash
+set AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 01_novel_parser
 ```
 
@@ -581,7 +657,7 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 06 必须严格引用 03/04/05 稳定资产名和 03 costume_id，不允许新增不存在于资产库的主角色、服装版本、主场景、关键道具。
 06 如发现资产缺失，不能自己硬补，要输出 upstream_blocking_issues，建议 03/04/05 对应阶段重跑。
 06 为 07 图片生成服务，但不能直接写图像提示词；只能输出 character_lock_reference / appearance_asset_requirements / reference_requirements / composition_notes / continuity_notes。
-07 暂不改，等 01–06 全部完成后新开对话单独处理。
+07 已开始实现为图片执行阶段：默认 dry_run，后续接入真实 ComfyUI workflow 时通过环境变量注入节点 ID，避免节点名错误和工作流不可导入。
 用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05/06 需要强 JSON 护栏、低温度默认值、输出控制字段清理。
 00–06 都属于 LLM 文本阶段，不应每个模块结束就释放 LLM；06→07 才释放 LLM 显存。
 Web UI 不是测试用 UI，而是最终版 UI 设计：要让用户在界面里看到每一步发生了什么，阶段输出、评分、修改意见、返工、产物都要有对应显示区域。当前 web_ui 已按最终工作台骨架落地，后续 07/08/09/10 必须继续接入同一工作台。Web UI 默认端口使用 1144。
