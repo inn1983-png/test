@@ -48,7 +48,7 @@ def main() -> int:
             MODULE_NAME,
             KEY_OUTPUT,
             data,
-            description="角色库关键输出：稳定 canonical_name、aliases、外观、服装、性格、剧本使用与证据链。",
+            description="角色库关键输出：稳定 canonical_name、aliases、外观、服装、性格、剧本使用、资产分级、复核报告与证据链。",
         )
         base_module.write_json_key_output(
             MODULE_NAME,
@@ -60,21 +60,13 @@ def main() -> int:
                 "stage_mode": data.get("stage_mode"),
                 "stage_status": data.get("stage_status", []),
                 "final_revision_rounds": data.get("final_revision_rounds", []),
+                "asset_review_report": data.get("asset_review_report", {}),
+                "downstream_readiness_for_06": data.get("downstream_readiness_for_06", {}),
                 "quality_report": data.get("quality_report", {}),
                 "schema_validation": data.get("schema_validation", {}),
             },
-            description="角色库元信息：阶段状态、评分、重跑记录与 schema 校验。",
+            description="角色库元信息：阶段状态、评分、复核、重跑记录与 schema 校验。",
         )
-        base_module.write_placeholder_output(MODULE_NAME, {
-            "module": MODULE_NAME,
-            "status": data.get("status"),
-            "message": f"角色库系统已按 03A–03D 阶段运行，关键输出已生成：{KEY_OUTPUT}",
-            "key_output": KEY_OUTPUT,
-            "schema_version": SCHEMA_VERSION,
-            "stage_mode": stage_result["stage_mode"],
-            "stage_status": stage_result["stage_status"],
-            "config": config,
-        })
         print(f"{DISPLAY_NAME} finished. key output: {KEY_OUTPUT}")
         return 0
     finally:
