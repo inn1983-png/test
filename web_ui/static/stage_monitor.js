@@ -29,27 +29,15 @@
     "10A": ["输入检查"], "10B": ["视频准备"], "10C": ["音频字幕对齐"], "10D": ["最终导出"],
   };
 
-  const stageRuntime = { activeStageId: "", activeModule: "", lastLogByStage: {}, outputCache: {} };
+  const stageRuntime = { activeStageId: "", activeModule: "", selectedStageId: "", selectedModule: "", lastLogByStage: {}, outputCache: {} };
   const q = (id) => document.getElementById(id);
   const htmlEscape = (value) => String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
   const attrEscape = (value) => htmlEscape(value).replace(/'/g, "&#39;");
 
-  function getAppState() {
-    try { return state || {}; } catch (_) { return window.state || {}; }
-  }
-
-  function getStageName(stageId) {
-    try { if (typeof stageName === "function") return stageName(stageId); } catch (_) {}
-    return stageId;
-  }
-  function getModuleName(moduleName) {
-    try { if (typeof moduleName === "function") return moduleName(moduleName); } catch (_) {}
-    return moduleName;
-  }
-  function getStatusLabel(status) {
-    try { if (typeof statusLabel === "function") return statusLabel(status); } catch (_) {}
-    return status || "等待";
-  }
+  function getAppState() { try { return state || {}; } catch (_) { return window.state || {}; } }
+  function getStageName(stageId) { try { if (typeof stageName === "function") return stageName(stageId); } catch (_) {} return stageId; }
+  function getModuleName(moduleName) { try { if (typeof moduleName === "function") return moduleName(moduleName); } catch (_) {} return moduleName; }
+  function getStatusLabel(status) { try { if (typeof statusLabel === "function") return statusLabel(status); } catch (_) {} return status || "等待"; }
 
   function findStageFromLog(line) {
     const text = String(line || "");
@@ -59,10 +47,7 @@
     return "";
   }
 
-  function moduleForStage(stageId) {
-    for (const [moduleName, stages] of Object.entries(MODULE_STAGES)) if (stages.includes(stageId)) return moduleName;
-    return "";
-  }
+  function moduleForStage(stageId) { for (const [moduleName, stages] of Object.entries(MODULE_STAGES)) if (stages.includes(stageId)) return moduleName; return ""; }
 
   function installLogHook() {
     const logBox = q("liveLog");
@@ -91,9 +76,13 @@
 
   function stageOutputFromSnapshot(moduleName, stageId) {
     const appState = getAppState();
-    const modules = appState.currentSnapshot?.modules || [];
-    const module = modules.find((item) => item.name === moduleName);
+    const module = (appState.currentSnapshot?.modules || []).find((item) => item.name === moduleName);
     return (module?.stages || []).find((item) => String(item.stage_id || item.name || "").startsWith(stageId)) || null;
+  }
+
+  function moduleSnapshot(moduleName) {
+    const appState = getAppState();
+    return (appState.currentSnapshot?.modules || []).find((item) => item.name === moduleName) || {};
   }
 
   async function fetchStageOutputText(path) {
@@ -131,25 +120,53 @@
   }
 
   function getStageClass(moduleName, stageId) {
-    const appState = getAppState();
     const stage = stageOutputFromSnapshot(moduleName, stageId);
-    const module = (appState.currentSnapshot?.modules || []).find((item) => item.name === moduleName);
+    const module = moduleSnapshot(moduleName);
     if (stageRuntime.activeStageId === stageId) return "stage-active";
     if (stage?.passed === false || module?.status === "failed") return "stage-failed";
     if (stage?.passed === true || stage?.path) return "stage-done";
     return "stage-pending";
   }
 
+  function metrics() {
+    const modules = knownModules();
+    const allStages = modules.flatMap((m) => (MODULE_STAGES[m] || []).map((sid) => ({ moduleName: m, stageId: sid, stage: stageOutputFromSnapshot(m, sid) })));
+    const done = allStages.filter((x) => x.stage?.path || x.stage?.passed === true).length;
+    const failed = allStages.filter((x) => x.stage?.passed === false || moduleSnapshot(x.moduleName).status === "failed").length;
+    const issues = allStages.reduce((sum, x) => sum + Number(x.stage?.issues_count || 0), 0);
+    const outputs = (getAppState().currentSnapshot?.important_outputs || []).length;
+    return { total: allStages.length || 1, done, failed, issues, outputs, percent: Math.round((done / (allStages.length || 1)) * 100) };
+  }
+
+  function activeSelection() {
+    const stageId = stageRuntime.selectedStageId || stageRuntime.activeStageId || "01A";
+    const moduleName = stageRuntime.selectedModule || moduleForStage(stageId) || "01_novel_parser";
+    return { moduleName, stageId, stage: stageOutputFromSnapshot(moduleName, stageId) };
+  }
+
   function renderLiveStageBoard() {
     const board = q("liveStageBoard");
     if (!board) return;
-    const appState = getAppState();
-    board.innerHTML = knownModules().map((moduleName) => {
-      const module = (appState.currentSnapshot?.modules || []).find((item) => item.name === moduleName) || {};
+    const m = metrics();
+    board.innerHTML = `<div class="production-strip"><div class="production-strip-card"><span>阶段进度</span><strong>${m.done}/${m.total}</strong></div><div class="production-strip-card"><span>当前高亮</span><strong>${htmlEscape(stageRuntime.activeStageId || "等待")}</strong></div><div class="production-strip-card"><span>问题数量</span><strong>${m.issues + m.failed}</strong></div><div class="production-strip-card"><span>关键产物</span><strong>${m.outputs}</strong></div></div><div class="live-stage-layout"><div class="live-stage-board-inner">${renderModules()}</div>${renderInspector()}</div>`;
+    hydrateStageOutputs();
+    hydrateInspectorOutput();
+  }
+
+  function renderModules() {
+    return knownModules().map((moduleName) => {
+      const module = moduleSnapshot(moduleName);
       const stages = MODULE_STAGES[moduleName] || [];
       return `<div class="live-stage-module"><div class="live-stage-module-title"><div><strong>${htmlEscape(getModuleName(moduleName))}</strong><div class="muted">${htmlEscape(moduleName)}</div></div><span class="badge ${htmlEscape(module.status || "pending")}">${htmlEscape(getStatusLabel(module.status || "pending"))}</span></div><div class="live-stage-cards">${stages.map((stageId) => renderStage(moduleName, stageId)).join("")}</div></div>`;
     }).join("");
-    hydrateStageOutputs();
+  }
+
+  function renderInspector() {
+    const { moduleName, stageId, stage } = activeSelection();
+    const m = metrics();
+    const lastLog = stageRuntime.lastLogByStage[stageId] || "等待该阶段日志。";
+    const output = stage?.path ? `<div id="liveStageInspectorOutput" class="inspector-output live-stage-empty" data-inspector-path="${attrEscape(stage.path)}">读取当前阶段输出中...</div>` : `<div class="inspector-output">${htmlEscape(lastLog)}</div>`;
+    return `<aside class="live-stage-inspector"><div class="inspector-kicker">CURRENT NODE</div><div class="inspector-title">${htmlEscape(getStageName(stageId))}</div><div class="inspector-subtitle">${htmlEscape(getModuleName(moduleName))} · ${htmlEscape(stageId)}</div><div class="inspector-meter"><div class="inspector-meter-row"><span>全链路阶段完成度</span><strong>${m.percent}%</strong></div><div class="inspector-meter-track"><div class="inspector-meter-fill" style="width:${m.percent}%"></div></div></div><div class="step-meta-list"><span>评分：${htmlEscape(stage?.score ?? "-")}</span><span>问题：${htmlEscape(stage?.issues_count ?? 0)}</span><span>状态：${htmlEscape(stage?.passed === true ? "通过" : stage?.passed === false ? "需复核" : getStatusLabel(moduleSnapshot(moduleName).status || "pending"))}</span></div><div class="inspector-output-label">当前输出 / 摘要</div>${output}<div class="inspector-actions">${stage?.path ? `<button class="btn small primary" onclick="previewFile('${attrEscape(stage.path)}')">打开完整输出</button>` : ""}<button class="btn small" onclick="switchView('stages')">分步输出页</button><button class="btn small ghost" onclick="switchView('outputs')">产物中心</button></div></aside>`;
   }
 
   function renderStage(moduleName, stageId) {
@@ -159,7 +176,7 @@
     const issues = stage?.issues_count ?? 0;
     const lastLog = stageRuntime.lastLogByStage[stageId] || "";
     const output = stage?.path ? `<div class="live-stage-output live-stage-empty" data-stage-path="${attrEscape(stage.path)}">读取阶段输出中...</div>` : `<div class="live-stage-output ${lastLog ? "" : "live-stage-empty"}">${htmlEscape(lastLog || "等待该阶段输出")}</div>`;
-    return `<div class="live-stage-card ${cls}" data-stage-id="${stageId}"><div class="live-stage-id">${stageId}</div><div class="live-stage-name">${htmlEscape(getStageName(stageId))}</div><div class="live-stage-meta"><span class="live-stage-pill">评分 ${htmlEscape(score)}</span><span class="live-stage-pill">问题 ${htmlEscape(issues)}</span><span class="live-stage-pill">${cls === "stage-active" ? "正在运行" : cls === "stage-done" ? "已有输出" : cls === "stage-failed" ? "需处理" : "等待"}</span></div><div class="live-stage-output-title">阶段输出</div>${output}${stage?.path ? `<button class="btn small" onclick="previewFile('${attrEscape(stage.path)}')">打开完整输出</button>` : ""}</div>`;
+    return `<div class="live-stage-card ${cls}" data-stage-id="${stageId}" onclick="window.selectLiveStage && window.selectLiveStage('${attrEscape(moduleName)}','${attrEscape(stageId)}')"><div class="live-stage-id">${stageId}</div><div class="live-stage-name">${htmlEscape(getStageName(stageId))}</div><div class="live-stage-meta"><span class="live-stage-pill">评分 ${htmlEscape(score)}</span><span class="live-stage-pill">问题 ${htmlEscape(issues)}</span><span class="live-stage-pill">${cls === "stage-active" ? "正在运行" : cls === "stage-done" ? "已有输出" : cls === "stage-failed" ? "需处理" : "等待"}</span></div><div class="live-stage-output-title">阶段输出</div>${output}${stage?.path ? `<button class="btn small" onclick="event.stopPropagation(); previewFile('${attrEscape(stage.path)}')">打开完整输出</button>` : ""}</div>`;
   }
 
   async function hydrateStageOutputs() {
@@ -171,21 +188,26 @@
     }
   }
 
+  async function hydrateInspectorOutput() {
+    const node = document.querySelector("[data-inspector-path]");
+    if (!node) return;
+    const text = await fetchStageOutputText(node.dataset.inspectorPath);
+    node.textContent = text || "该阶段文件已生成，但没有可摘要内容。";
+    node.classList.toggle("live-stage-empty", !text);
+  }
+
   function patchRenderSnapshot() {
     try {
       const original = renderSnapshot;
       if (typeof original !== "function" || original.stageMonitorPatched) return;
-      const patched = async function (...args) {
-        const result = await original.apply(this, args);
-        renderLiveStageBoard();
-        return result;
-      };
+      const patched = async function (...args) { const result = await original.apply(this, args); renderLiveStageBoard(); return result; };
       patched.stageMonitorPatched = true;
       window.renderSnapshot = patched;
       renderSnapshot = patched;
     } catch (_) {}
   }
 
+  window.selectLiveStage = function (moduleName, stageId) { stageRuntime.selectedModule = moduleName; stageRuntime.selectedStageId = stageId; renderLiveStageBoard(); };
   function boot() { installLogHook(); patchRenderSnapshot(); renderLiveStageBoard(); }
   window.addEventListener("DOMContentLoaded", boot);
   window.renderLiveStageBoard = renderLiveStageBoard;
