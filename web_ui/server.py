@@ -519,7 +519,7 @@ def job_summary(job: Job) -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="AI Short Drama final Web UI")
     parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument("--port", type=int, default=1144)
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Web UI running: http://{args.host}:{args.port}")
