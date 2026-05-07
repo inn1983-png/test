@@ -48,6 +48,8 @@
       "produces": [
         {"module": "08_audio", "name": "final_audio.wav", "type": "audio"},
         {"module": "08_audio", "name": "audio_timeline.json", "type": "json"},
+        {"module": "08_audio", "name": "audio_timing_review.json", "type": "json"},
+        {"module": "08_audio", "name": "edit_rhythm.json", "type": "json"},
         {"module": "08_audio", "name": "subtitle.srt", "type": "subtitle"},
         {"module": "08_audio", "name": "subtitle.ass", "type": "subtitle"}
       ]
@@ -60,7 +62,7 @@
       ],
       "produces": [
         {"module": "09_video", "name": "video_manifest.json", "type": "json"},
-        {"module": "09_video", "name": "final_video.mp4", "type": "video"}
+        {"module": "09_video", "name": "final_video.mp4", "type": "video", "optional": true}
       ]
     },
     "10_final_assembly": {

@@ -112,10 +112,53 @@
   async function renderAudioCards(grid, runDir) {
     const manifest = await getJson(`${runDir}/08_audio/audio_manifest.json`);
     const timeline = await getJson(`${runDir}/08_audio/audio_timeline.json`);
-    const segments = manifest?.segments || manifest?.audio_segments || timeline?.segments || timeline?.items || [];
-    const base = [card('最终音频', '合成后的整章音频。', ['路径：08_audio/final_audio.wav', '字幕：subtitle.srt / subtitle.ass', '时间线：audio_timeline.json'], `${runDir}/08_audio/final_audio.wav`)];
-    const segCards = segments.slice(0, 80).map((seg, i) => card(`音频段 ${seg.segment_id || seg.voice_line_id || i + 1}`, seg.text || seg.content || seg.line_text || '配音段。', [`说话人：${seg.speaker || seg.character_name || seg.voice_id || '-'}`, `类型：${seg.line_type || seg.type || '-'}`, `时长：${seg.duration_sec || seg.duration || '-'} 秒`, `状态：${seg.status || '未知'}`], seg.audio_path || `${runDir}/08_audio/audio_timeline.json`));
-    grid.innerHTML = [...base, ...segCards].join('');
+    const timingReview = await getJson(`${runDir}/08_audio/audio_timing_review.json`);
+    const editRhythm = await getJson(`${runDir}/08_audio/edit_rhythm.json`);
+    const segments = timeline?.entries || manifest?.segments || manifest?.audio_segments || timeline?.segments || timeline?.items || [];
+    const longLines = timingReview?.long_voice_lines || [];
+    const rhythmBySegment = {};
+    (editRhythm?.segments || []).forEach((item) => {
+      if (!item) return;
+      if (item.segment_id) rhythmBySegment[item.segment_id] = item;
+      if (item.audio_line_id) rhythmBySegment[item.audio_line_id] = item;
+    });
+    const fmtSeconds = (value) => {
+      const number = Number(value);
+      return Number.isFinite(number) ? `${number.toFixed(2)} 秒` : '-';
+    };
+    const base = [
+      card('最终音频', '合成后的整章音频。', [
+        `路径：08_audio/final_audio.wav`,
+        `总时长：${fmtSeconds(manifest?.duration_seconds ?? timeline?.duration_seconds ?? timingReview?.total_duration_seconds)}`,
+        `字幕：subtitle.srt / subtitle.ass`,
+        `超长句：${longLines.length ? `${longLines.length} 条` : '暂无'}`,
+        `剪辑节奏：${editRhythm?.segment_count || 0} 段`,
+        `建议：${timingReview?.recommended_action || 'none'}`
+      ], `${runDir}/08_audio/final_audio.wav`)
+    ];
+    const reviewCards = longLines.slice(0, 30).map((line, i) => {
+      const split = Array.isArray(line.suggested_split) ? line.suggested_split.join(' / ') : (line.suggested_split || '-');
+      return card(`超长句 ${line.line_id || i + 1}`, line.text || '超长配音句。', [
+        `说话人：${line.speaker || '-'}`,
+        `类型：${line.line_type || '-'}`,
+        `时长：${fmtSeconds(line.duration)}`,
+        `级别：${line.severity || '-'}`,
+        `建议拆分：${split}`
+      ], `${runDir}/08_audio/audio_timing_review.json`);
+    });
+    const segCards = segments.slice(0, 80).map((seg, i) => {
+      const rhythm = rhythmBySegment[seg.segment_id] || rhythmBySegment[seg.audio_line_id] || {};
+      return card(`音频段 ${seg.segment_id || seg.voice_line_id || seg.audio_line_id || i + 1}`, seg.text || seg.content || seg.line_text || '配音段。', [
+        `说话人：${seg.speaker || seg.character_name || seg.voice_id || '-'}`,
+        `类型：${seg.line_type || seg.type || '-'}`,
+        `时长：${fmtSeconds(seg.duration_seconds ?? seg.actual_duration_seconds ?? seg.duration_sec ?? seg.duration)}`,
+        `视觉角色：${rhythm.suggested_visual_role || '-'}`,
+        `强度：${rhythm.intensity ?? '-'}`,
+        `视觉停顿：${rhythm.needs_visual_pause ? '需要' : '否'}`,
+        `状态：${seg.status || 'timeline'}`
+      ], seg.audio_path || `${runDir}/08_audio/audio_timeline.json`);
+    });
+    grid.innerHTML = [...base, ...reviewCards, ...segCards].join('');
   }
 
   async function renderVideoCards(grid, runDir) {

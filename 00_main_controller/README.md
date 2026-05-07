@@ -228,6 +228,7 @@ resource_manager.release_local_resources(MODULE_NAME)
 
 ```text
 run_status.json
+config_snapshot.json
 ```
 
 记录模块状态：
@@ -235,6 +236,18 @@ run_status.json
 ```text
 pending / running / success / failed / blocked / skipped
 start_time / end_time / duration_seconds / return_code / message
+```
+
+config_snapshot.json 包含：
+
+```text
+timestamp：运行时间戳
+platform：系统/Python 版本
+run_args：命令行参数
+selected_pipeline：实际执行的模块列表
+pipeline_config：pipeline.json 原始配置
+runtime_context：运行时上下文
+env_snapshot：关键环境变量（API Key 脱敏）
 ```
 
 ---

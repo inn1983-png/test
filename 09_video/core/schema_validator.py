@@ -76,12 +76,19 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             if float(seg.get("duration_seconds") or 0) > 12.5:
                 issues.append(f"video_segments[{idx}] duration_seconds exceeds 12.5 seconds")
 
+    final_video_ready = bool(data.get("final_video_ready"))
     final_video_path = data.get("final_video_path")
-    if final_video_path:
-        if data.get("merge_status") == "success" and not Path(str(final_video_path)).exists():
+    if final_video_ready:
+        if not final_video_path:
+            issues.append("final_video_path is required when final_video_ready=true")
+        elif not Path(str(final_video_path)).exists():
             issues.append(f"final_video_path does not exist: {final_video_path}")
+        probe = data.get("final_video_probe", {}) if isinstance(data.get("final_video_probe"), dict) else {}
+        if probe and not probe.get("valid"):
+            issues.append(f"final_video_probe invalid: {probe.get('error')}")
     else:
-        issues.append("final_video_path is required")
+        if data.get("execution_mode") == "execute" and not data.get("merge_error"):
+            issues.append("merge_error is required when execute final_video_ready=false")
 
     retry_plan = data.get("retry_plan")
     if not isinstance(retry_plan, dict):

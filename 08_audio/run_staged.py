@@ -79,6 +79,8 @@ def main() -> int:
             is_key_output=True,
         )
         _register_if_exists("audio_timeline.json", data.get("timeline_path"), "json", "08 关键输出：音频时间轴，供 09 按真实音频时长规划视频单元。")
+        _register_if_exists("audio_timing_review.json", data.get("audio_timing_review_path"), "json", "08 关键输出：音频时长复核，标记超长 voice_line 和拆句建议。")
+        _register_if_exists("edit_rhythm.json", data.get("edit_rhythm_path"), "json", "08 关键输出：剪辑节奏建议，供 09 辅助视频段规划。")
         _register_if_exists("subtitle.srt", data.get("subtitle_srt_path"), "subtitle", "08 关键输出：SRT 字幕。")
         _register_if_exists("subtitle.ass", data.get("subtitle_ass_path"), "subtitle", "08 关键输出：ASS 字幕。")
 
@@ -99,6 +101,10 @@ def main() -> int:
                 "final_audio_path": str(final_audio),
                 "duration_seconds": data.get("duration_seconds"),
                 "timeline_path": data.get("timeline_path"),
+                "audio_timing_review_path": data.get("audio_timing_review_path"),
+                "audio_timing_review": data.get("audio_timing_review", {}),
+                "edit_rhythm_path": data.get("edit_rhythm_path"),
+                "edit_rhythm": data.get("edit_rhythm", {}),
                 "subtitle_srt_path": data.get("subtitle_srt_path"),
                 "subtitle_ass_path": data.get("subtitle_ass_path"),
                 "voice_binding_summary": data.get("voice_binding_summary", {}),

@@ -6,6 +6,7 @@ from importlib import import_module
 
 io_utils = import_module("00_common.io_utils")
 stage_status_writer = import_module("00_common.stage_status")
+stage_cache = import_module("00_common.stage_cache")
 llm_client_module = import_module("06_storyboard.core.llm_client")
 quality_checker = import_module("06_storyboard.core.quality_checker")
 json_repair = import_module("06_storyboard.core.json_repair")
@@ -197,8 +198,8 @@ def build_stage_payload(
     return payload
 
 
-def _complete_json(client: Any, system_prompt: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return client.complete_json(system_prompt, payload, repair_callback=lambda broken, error: json_repair.repair_json_with_llm(client, broken, error))
+def _complete_json(client: Any, system_prompt: str, payload: dict[str, Any], trace_label: str) -> dict[str, Any]:
+    return client.complete_json(system_prompt, payload, repair_callback=lambda broken, error: json_repair.repair_json_with_llm(client, broken, error), trace_label=trace_label)
 
 
 def _run_one_stage(
@@ -212,8 +213,18 @@ def _run_one_stage(
     output_dir: str | Path,
     max_retries: int,
     final_revision_context: dict[str, Any] | None = None,
+    force: bool = False,
+    force_stages: list[str] | None = None,
 ) -> dict[str, Any]:
     stage_id = stage["stage_id"]
+    skip, cached = stage_cache.should_skip_stage(output_dir, stage_id, stage["output_file"], force=force, force_stages=force_stages)
+    if skip and cached is not None:
+        outputs[stage_id] = cached
+        quality = cached.get("stage_quality", {})
+        status = "success" if quality.get("passed") else "needs_review"
+        print(f"[RESUME] {stage_id} skipped (cached, score={quality.get('score', '?')})")
+        return {**stage, "status": status, "output_path": str(_intermediate_dir(output_dir) / stage["output_file"]), "quality": quality, "attempts": cached.get("stage_attempts", []), "final_revision_context": final_revision_context}
+
     stage_status_writer.mark_stage_started("06_storyboard", output_dir, stage_id, stage["name"], "stage started")
     system_prompt = _read_prompt(stage["prompt_file"])
     payload = build_stage_payload(stage_id, script, characters, scenes, props, outputs, final_revision_context)
@@ -221,8 +232,9 @@ def _run_one_stage(
     current_output: dict[str, Any] | None = None
     quality: dict[str, Any] | None = None
     for attempt in range(1, max_retries + 2):
+        trace_label = f"{stage_id}_attempt_{attempt}"
         revision_payload = payload if attempt == 1 else quality_checker.build_revision_payload(stage_id, payload, current_output or {}, quality or {})
-        current_output = _complete_json(client, system_prompt, revision_payload)
+        current_output = _complete_json(client, system_prompt, revision_payload, trace_label=trace_label)
         current_output.setdefault("schema_version", SCHEMA_VERSION)
         current_output.setdefault("stage", stage["name"])
         current_output["status"] = "llm"
@@ -261,9 +273,11 @@ def _run_stage_range(
     start_index: int,
     max_retries: int,
     final_revision_context: dict[str, Any] | None = None,
+    force: bool = False,
+    force_stages: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     return [
-        _run_one_stage(client, stage, script, characters, scenes, props, outputs, output_dir, max_retries, final_revision_context)
+        _run_one_stage(client, stage, script, characters, scenes, props, outputs, output_dir, max_retries, final_revision_context, force=force, force_stages=force_stages)
         for stage in STAGES[start_index:]
     ]
 
@@ -285,12 +299,27 @@ def run_llm_stages(
     output_dir: str | Path,
     max_retries: int = DEFAULT_MAX_RETRIES,
     max_final_revision_rounds: int = DEFAULT_MAX_FINAL_REVISION_ROUNDS,
+    resume: bool = False,
+    force: bool = False,
+    force_stages: list[str] | None = None,
 ) -> dict[str, Any]:
     if not script or not characters or not scenes or not props:
         raise RuntimeError("06_storyboard requires 02 script, 03 characters, 04 scenes and 05 props.")
     client = llm_client_module.LLMClient()
+    if hasattr(client, "set_trace_output_dir"):
+        client.set_trace_output_dir(output_dir)
     outputs = initial_context()
-    stage_status = _run_stage_range(client, script, characters, scenes, props, outputs, output_dir, 0, max_retries)
+
+    start_index = 0
+    if resume and not force:
+        cached = stage_cache.load_cached_outputs(output_dir, STAGES, force=force, force_stages=force_stages)
+        for sid, data in cached.items():
+            outputs[sid] = data
+        start_index = stage_cache.find_resume_start_index(STAGES, cached, STAGE_INDEX)
+        if start_index > 0:
+            print(f"[RESUME] 06_storyboard resuming from stage index {start_index} ({STAGES[start_index]['stage_id'] if start_index < len(STAGES) else 'done'})")
+
+    stage_status = _run_stage_range(client, script, characters, scenes, props, outputs, output_dir, start_index, max_retries, force=force, force_stages=force_stages)
     final_revision_rounds = []
     for round_index in range(1, max_final_revision_rounds + 1):
         retry_stage_ids = _extract_retry_stage_ids(outputs)
@@ -304,7 +333,7 @@ def run_llm_stages(
             "frame_transition_report": outputs.get("06D", {}).get("frame_transition_report", {}),
             "instruction": "06D/06E 要求重跑。请从最早问题阶段修正，并保持字段完整。不得新增资产或输出图像提示词。",
         }
-        rerun_status = _run_stage_range(client, script, characters, scenes, props, outputs, output_dir, start_index, max_retries, final_revision_context)
+        rerun_status = _run_stage_range(client, script, characters, scenes, props, outputs, output_dir, start_index, max_retries, final_revision_context, force=force, force_stages=force_stages)
         final_revision_rounds.append({"round": round_index, "retry_stage_ids": retry_stage_ids, "rerun_status": rerun_status})
         stage_status.extend(rerun_status)
     return {"schema_version": SCHEMA_VERSION, "stage_mode": "llm", "stage_status": stage_status, "final_revision_rounds": final_revision_rounds, "outputs": outputs}

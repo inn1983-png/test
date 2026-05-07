@@ -741,6 +741,80 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 
 ---
 
+# 阶段缓存 / Resume 机制
+
+01–06 模块已支持阶段缓存和断点续跑：
+
+```text
+--resume：跳过已通过质量检查的中间阶段，从第一个未完成阶段继续。
+--force：强制重跑所有阶段，忽略缓存。
+--force-stage 01C,01D：只强制重跑指定阶段，其余使用缓存。
+```
+
+环境变量：
+
+```text
+AI_DRAMA_RESUME=1 等同于 --resume
+```
+
+缓存判断逻辑：
+
+```text
+intermediate/{stage_id}_{name}.json 存在
+且 stage_quality.passed == true
+且 schema_version 非空
+```
+
+新增文件：
+
+```text
+00_common/stage_cache.py
+```
+
+---
+
+# 10 ffprobe 校验
+
+10B 和 10D 阶段导出视频后，自动调用 ffprobe 校验：
+
+```text
+检查视频流是否存在（has_video）
+检查音频流是否存在（has_audio）
+提取时长、分辨率、编码格式
+校验失败时标记 needs_review
+```
+
+新增函数：
+
+```text
+10_final_assembly/core/ffmpeg_client.py: ffprobe_validate()
+```
+
+环境变量：
+
+```text
+AI_DRAMA_FFPROBE=ffprobe（默认）
+```
+
+---
+
+# config_snapshot.json
+
+Pipeline 运行开始时自动保存配置快照到 `{run_dir}/config_snapshot.json`：
+
+```text
+snapshot_version: 快照版本
+timestamp: UTC 时间戳
+platform: 系统/Python 版本
+run_args: 命令行参数
+selected_pipeline: 实际执行的模块列表
+pipeline_config: pipeline.json 原始配置
+runtime_context: 运行时上下文
+env_snapshot: 关键环境变量（API Key 脱敏）
+```
+
+---
+
 # 用户最新明确要求
 
 ```text

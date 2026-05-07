@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import argparse
 from pathlib import Path
 from importlib import import_module
 from typing import Any
@@ -19,6 +20,22 @@ DISPLAY_NAME = "分镜图生成系统"
 DESCRIPTION = "负责把 06 单帧分镜转成可执行图片任务，调用本地 ComfyUI 生成分镜图，并输出 image_manifest.json。"
 KEY_OUTPUT = "image_manifest.json"
 SCHEMA_VERSION = "1.0"
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run 07 storyboard image stage.")
+    parser.add_argument("--retry-scope", choices=["all", "failed", "frame", "character_lock", "appearance", "reference_asset"], default=os.getenv("AI_DRAMA_IMAGE_RETRY_SCOPE", "all"))
+    parser.add_argument("--frame-id", default=os.getenv("AI_DRAMA_IMAGE_RETRY_FRAME_ID", ""))
+    parser.add_argument("--asset-key", default=os.getenv("AI_DRAMA_IMAGE_RETRY_ASSET_KEY", ""))
+    parser.add_argument("--force", action="store_true", default=_env_bool("AI_DRAMA_IMAGE_RETRY_FORCE", False))
+    return parser
 
 
 def _read_upstream(module_name: str, filename: str) -> dict[str, Any]:
@@ -42,7 +59,18 @@ def _read_optional_upstream(module_name: str, filename: str) -> dict[str, Any]:
         return {}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    if args.retry_scope == "frame" and not args.frame_id:
+        raise SystemExit("--retry-scope frame requires --frame-id")
+    if args.retry_scope in {"character_lock", "appearance", "reference_asset"} and not args.asset_key:
+        raise SystemExit(f"--retry-scope {args.retry_scope} requires --asset-key")
+    retry_options = {
+        "retry_scope": args.retry_scope,
+        "frame_id": args.frame_id,
+        "asset_key": args.asset_key,
+        "force": args.force,
+    }
     try:
         resource_manager.release_llm_resources()
         config = base_module.bootstrap_module(MODULE_NAME, DISPLAY_NAME, DESCRIPTION)
@@ -51,7 +79,7 @@ def main() -> int:
         scenes = _read_optional_upstream("04_scene_system", "scenes.json")
         props = _read_optional_upstream("05_prop_system", "props.json")
         _, output_dir = base_module.get_runtime_module_dirs(MODULE_NAME)
-        stage_result = stage_runner.run_image_stages(storyboard, characters, scenes, props, output_dir)
+        stage_result = stage_runner.run_image_stages(storyboard, characters, scenes, props, output_dir, retry_options=retry_options)
         data = stage_runner.merge_stage_outputs(storyboard, characters, scenes, props, config, stage_result, output_dir)
         base_module.write_json_key_output(
             MODULE_NAME,

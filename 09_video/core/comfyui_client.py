@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import time
 import urllib.request
+from datetime import datetime
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ class ComfyUIClient:
         self.client_id = os.getenv("AI_DRAMA_COMFYUI_CLIENT_ID", "ai_drama_09_video_ltx23")
         self.mode = os.getenv("AI_DRAMA_VIDEO_EXECUTION_MODE", "dry_run").strip().lower()
         self.ffmpeg = os.getenv("AI_DRAMA_FFMPEG", "ffmpeg")
+        self.comfyui_output_dir = os.getenv("AI_DRAMA_COMFYUI_OUTPUT_DIR", os.getenv("COMFYUI_OUTPUT_DIR", "")).strip()
 
     @property
     def dry_run(self) -> bool:
@@ -109,6 +111,75 @@ class ComfyUIClient:
         if not isinstance(value, dict):
             raise RuntimeError(f"ComfyUI {path} response must be object.")
         return value
+
+    def _extract_history_outputs(self, history_item: dict[str, Any]) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        outputs = history_item.get("outputs", {}) if isinstance(history_item, dict) else {}
+        if not isinstance(outputs, dict):
+            return rows
+        for node_id, node_output in outputs.items():
+            if not isinstance(node_output, dict):
+                continue
+            for key in ("videos", "gifs", "images"):
+                values = node_output.get(key, [])
+                if not isinstance(values, list):
+                    continue
+                for value in values:
+                    if not isinstance(value, dict):
+                        continue
+                    rows.append(
+                        {
+                            "node_id": str(node_id),
+                            "kind": key,
+                            "filename": value.get("filename"),
+                            "subfolder": value.get("subfolder", ""),
+                            "type": value.get("type", ""),
+                        }
+                    )
+        return rows
+
+    def _history_candidate_paths(self, history_outputs: list[dict[str, Any]]) -> list[Path]:
+        if not self.comfyui_output_dir:
+            return []
+        root = Path(self.comfyui_output_dir)
+        candidates: list[Path] = []
+        for item in history_outputs:
+            filename = item.get("filename")
+            if not isinstance(filename, str) or not filename:
+                continue
+            subfolder = item.get("subfolder")
+            if isinstance(subfolder, str) and subfolder:
+                candidates.append(root / subfolder / filename)
+            candidates.append(root / filename)
+        return candidates
+
+    def _find_latest_matching_clip(self, output_basename: str, submit_time: float, history_outputs: list[dict[str, Any]]) -> Path | None:
+        for candidate in self._history_candidate_paths(history_outputs):
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        if not self.comfyui_output_dir:
+            return None
+        root = Path(self.comfyui_output_dir)
+        if not root.exists():
+            return None
+        basename = Path(output_basename).stem
+        matches: list[Path] = []
+        for path in root.rglob("*"):
+            if not path.is_file():
+                continue
+            if path.suffix.lower() not in {".mp4", ".mov", ".webm", ".mkv", ".avi"}:
+                continue
+            if basename and basename not in path.stem:
+                continue
+            try:
+                if path.stat().st_mtime < submit_time - 5:
+                    continue
+            except OSError:
+                continue
+            matches.append(path)
+        if not matches:
+            return None
+        return max(matches, key=lambda item: item.stat().st_mtime)
 
     def _first_existing_image(self, segment: dict[str, Any]) -> Path | None:
         for image_path in segment.get("image_paths", []) or []:
@@ -199,6 +270,7 @@ class ComfyUIClient:
                 "note": "Dry run clip generated for one keyframe window. Set AI_DRAMA_VIDEO_EXECUTION_MODE=execute and workflow node mappings to run LTX2.3 ComfyUI.",
             }
         workflow = self.build_workflow(segment)
+        submit_time = time.time()
         response = self._post_json("/prompt", {"prompt": workflow, "client_id": self.client_id})
         prompt_id = response.get("prompt_id")
         if not prompt_id:
@@ -212,13 +284,43 @@ class ComfyUIClient:
             time.sleep(self.poll_interval_sec)
         if str(prompt_id) not in history:
             raise TimeoutError(f"ComfyUI prompt timeout: {prompt_id}")
+        history_item = history.get(str(prompt_id), {})
+        history_outputs = self._extract_history_outputs(history_item if isinstance(history_item, dict) else {})
+        resolved_from: str | None = None
+        if not output_path.exists():
+            output_basename = str(segment.get("output_basename") or output_path.stem)
+            found = self._find_latest_matching_clip(output_basename, submit_time, history_outputs)
+            if found:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(found, output_path)
+                resolved_from = str(found)
+        if not output_path.exists():
+            return {
+                "status": "failed",
+                "execution_mode": "execute",
+                "resume_hit": False,
+                "prompt_id": prompt_id,
+                "segment_id": segment.get("segment_id"),
+                "output_clip_path": str(output_path),
+                "history": history_item,
+                "history_outputs": history_outputs,
+                "error": "ComfyUI finished but clip not found",
+                "debug": {
+                    "expected_output_clip_path": str(output_path),
+                    "output_basename": str(segment.get("output_basename") or output_path.stem),
+                    "comfyui_output_dir": self.comfyui_output_dir,
+                    "submit_time": datetime.fromtimestamp(submit_time).isoformat(timespec="seconds"),
+                },
+            }
         return {
-            "status": "success" if output_path.exists() else "submitted",
+            "status": "success",
             "execution_mode": "execute",
             "resume_hit": False,
             "prompt_id": prompt_id,
             "segment_id": segment.get("segment_id"),
             "output_clip_path": str(output_path),
-            "history": history.get(str(prompt_id), {}),
+            "history": history_item,
+            "history_outputs": history_outputs,
+            "resolved_from": resolved_from,
             "note": "ComfyUI finished one keyframe-window segment.",
         }

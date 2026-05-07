@@ -2,8 +2,90 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from pathlib import Path
 from typing import Any
+
+ALLOWED_STABLE_MOTION = [
+    "slow push in",
+    "subtle breathing",
+    "slight cloth movement",
+    "candle flicker",
+    "snow/rain/fog movement",
+    "slow eye movement",
+    "slight head turn",
+    "hand grip close-up",
+    "static confrontation",
+    "reaction close-up",
+    "insert shot",
+]
+
+FORBIDDEN_DIRECT_MOTION = [
+    "running",
+    "fighting",
+    "hugging with body movement",
+    "spinning camera",
+    "large body turn",
+    "multi-person physical interaction",
+    "complex hand action",
+    "fast camera movement",
+]
+
+STABILIZATION_RULES = [
+    {
+        "source_action": "抓住手腕",
+        "keywords": ["抓住手腕", "抓腕", "攥住手腕", "grab wrist", "grabbing wrist", "wrist grab"],
+        "stabilized_action": "wrist close-up / static confrontation / fingers tightening (手腕特写 / 两人对峙 / 手指收紧)",
+        "forbidden_motion": ["complex hand action", "multi-person physical interaction"],
+        "reason": "Wrist grabbing is converted into close-up and confrontation beats to avoid complex hand/body contact.",
+    },
+    {
+        "source_action": "奔跑追逐",
+        "keywords": ["奔跑追逐", "追逐", "奔跑", "逃跑", "跑向", "chase", "pursuit", "running", "run after"],
+        "stabilized_action": "held wide shot + cloth moved by wind + slow push in (远景定格 + 衣摆风动 + 镜头缓推)",
+        "forbidden_motion": ["running", "fast camera movement"],
+        "reason": "Running or chasing is converted into a held wide composition with environmental motion and a slow camera move.",
+    },
+    {
+        "source_action": "打斗",
+        "keywords": ["打斗", "打架", "搏斗", "厮打", "交手", "fight", "fighting", "combat", "brawl"],
+        "stabilized_action": "weapon insert shot + eye contact + broken prop detail (武器特写 + 眼神 + 破碎道具)",
+        "forbidden_motion": ["fighting", "multi-person physical interaction", "complex hand action"],
+        "reason": "Fighting is converted into inserts and reaction details instead of direct physical action.",
+    },
+    {
+        "source_action": "拥抱",
+        "keywords": ["拥抱", "抱住", "相拥", "hug", "hugging", "embrace", "embracing"],
+        "stabilized_action": "static close-up + slight shoulder/back breathing (静态近景 + 肩背轻微起伏)",
+        "forbidden_motion": ["hugging with body movement", "multi-person physical interaction"],
+        "reason": "Hugging is converted into a mostly static close-up with minimal breathing movement.",
+    },
+    {
+        "source_action": "争吵",
+        "keywords": ["争吵", "吵架", "争执", "争辩", "怒吼", "argue", "arguing", "argument", "quarrel", "shout", "yell"],
+        "stabilized_action": "alternating close-ups + oppressive eye contact (交替特写 + 眼神压迫)",
+        "forbidden_motion": ["fast camera movement", "large body turn"],
+        "reason": "Arguing is converted into close-up reactions and eye pressure instead of broad body movement.",
+    },
+    {
+        "source_action": "转身离开",
+        "keywords": ["转身离开", "转身", "离开", "背过身", "turn away", "turns away", "walk away", "leaves"],
+        "stabilized_action": "held back view + slight cloth movement (背影定格 + 衣摆轻动)",
+        "forbidden_motion": ["large body turn", "fast camera movement"],
+        "reason": "Turning away is converted into a held back-view composition with only cloth movement.",
+    },
+]
+
+_FORBIDDEN_KEYWORDS = {
+    "running": ["running", "run", "奔跑", "追逐", "逃跑"],
+    "fighting": ["fighting", "fight", "打斗", "打架", "搏斗"],
+    "hugging with body movement": ["hugging", "hug", "拥抱", "抱住"],
+    "spinning camera": ["spinning camera", "camera spin", "旋转镜头", "镜头旋转"],
+    "large body turn": ["large body turn", "turn around", "转身", "大幅转身"],
+    "multi-person physical interaction": ["multi-person physical interaction", "physical interaction", "多人肢体互动", "肢体互动"],
+    "complex hand action": ["complex hand action", "hand action", "复杂手部动作", "抓住手腕", "抓腕"],
+    "fast camera movement": ["fast camera movement", "quick camera", "rapid camera", "快速镜头", "镜头快速"],
+}
 
 
 def _safe_float(value: Any, default: float) -> float:
@@ -118,6 +200,29 @@ def _timeline_text(entries: list[dict[str, Any]], start: float, end: float) -> s
     return " | ".join(parts)
 
 
+def _edit_rhythm_entries(edit_rhythm: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not isinstance(edit_rhythm, dict):
+        return []
+    entries = edit_rhythm.get("segments")
+    return [entry for entry in entries if isinstance(entry, dict)] if isinstance(entries, list) else []
+
+
+def _edit_rhythm_text(entries: list[dict[str, Any]], start: float, end: float) -> str:
+    parts: list[str] = []
+    for entry in entries:
+        e_start = _safe_float(entry.get("start"), 0.0)
+        e_end = _safe_float(entry.get("end"), e_start)
+        if e_end < start or e_start > end:
+            continue
+        role = str(entry.get("suggested_visual_role") or "").strip()
+        intensity = entry.get("intensity")
+        pause = "pause" if entry.get("needs_visual_pause") else "no_pause"
+        text = str(entry.get("text") or "").strip()
+        label = "/".join(part for part in [role, f"intensity={intensity}" if intensity is not None else "", pause] if part)
+        parts.append(f"[{max(e_start - start, 0):.1f}s] {label}: {text}" if label else f"[{max(e_start - start, 0):.1f}s] {text}")
+    return " | ".join(parts)
+
+
 def _frames_for_duration(duration: float, fps: float) -> int:
     raw = int(float(duration) * float(fps) / 8) * 8 + 1
     return max(raw, 9)
@@ -166,9 +271,89 @@ def build_negative_prompt() -> str:
     )
 
 
-def build_motion_policy(window_size: int, segment_role: str, is_padded_window: bool) -> dict[str, Any]:
+def _dedupe_text(values: list[Any]) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        output.append(text)
+    return output
+
+
+def _keyword_matches(text_lower: str, keyword: str) -> bool:
+    needle = str(keyword or "").strip().lower()
+    if not needle:
+        return False
+    if all(ord(ch) < 128 for ch in needle):
+        return re.search(rf"\b{re.escape(needle)}\b", text_lower) is not None
+    return needle in text_lower
+
+
+def stabilize_action(action: str) -> dict[str, Any]:
+    original = str(action or "").strip() or "hold the visual state shown in this keyframe"
+    text_lower = original.lower()
+    matched_rules = [
+        rule
+        for rule in STABILIZATION_RULES
+        if any(_keyword_matches(text_lower, keyword) for keyword in rule.get("keywords", []))
+    ]
+    if matched_rules:
+        return {
+            "original_action": original,
+            "stabilized_action": "; ".join(_dedupe_text([rule.get("stabilized_action") for rule in matched_rules])),
+            "stabilization_reason": " ".join(_dedupe_text([rule.get("reason") for rule in matched_rules])),
+            "matched_rules": [rule.get("source_action") for rule in matched_rules],
+            "forbidden_match": _dedupe_text(
+                [motion for rule in matched_rules for motion in (rule.get("forbidden_motion") or [])]
+            ),
+        }
+
+    forbidden_match = [
+        motion
+        for motion, keywords in _FORBIDDEN_KEYWORDS.items()
+        if any(_keyword_matches(text_lower, keyword) for keyword in keywords)
+    ]
+    if forbidden_match:
+        return {
+            "original_action": original,
+            "stabilized_action": "static confrontation / reaction close-up / insert shot with restrained motion",
+            "stabilization_reason": "Contains forbidden direct motion; converted into stable cinematic beats for LTX2.3.",
+            "matched_rules": [],
+            "forbidden_match": _dedupe_text(forbidden_match),
+        }
+
     return {
-        "policy": "window_keyframe_progression",
+        "original_action": original,
+        "stabilized_action": f"{original}; keep movement restrained with subtle breathing, slow eye movement, slight cloth movement, or a slow push in",
+        "stabilization_reason": "No high-risk direct motion detected; kept as a low-motion cinematic storyboard beat.",
+        "matched_rules": [],
+        "forbidden_match": [],
+    }
+
+
+def _translation_rules_for_policy() -> list[dict[str, str]]:
+    return [
+        {
+            "original_action": str(rule.get("source_action") or ""),
+            "stabilized_action": str(rule.get("stabilized_action") or ""),
+            "reason": str(rule.get("reason") or ""),
+        }
+        for rule in STABILIZATION_RULES
+    ]
+
+
+def build_motion_policy(
+    window_size: int,
+    segment_role: str,
+    is_padded_window: bool,
+    action_stabilization: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    applied = action_stabilization or []
+    return {
+        "policy": "stable_dynamic_storyboard",
         "segment_role": segment_role,
         "window_size": window_size,
         "motion_strength": os.getenv("AI_DRAMA_VIDEO_MOTION_STRENGTH", "low"),
@@ -180,8 +365,12 @@ def build_motion_policy(window_size: int, segment_role: str, is_padded_window: b
         "lighting_lock": True,
         "composition_lock": True,
         "is_padded_window": is_padded_window,
-        "allowed_motion": ["natural breathing", "subtle facial expression", "small hand movement", "cloth movement", "gentle camera push-in", "smooth transition between provided keyframes"],
-        "forbidden_changes": ["new characters", "face change", "costume change", "scene change", "new props", "subtitles", "watermark", "modern objects"],
+        "allowed_motion": ALLOWED_STABLE_MOTION,
+        "forbidden_direct_motion": FORBIDDEN_DIRECT_MOTION,
+        "forbidden_changes": ["new characters", "face change", "costume change", "scene change", "new props", "subtitles", "watermark", "modern objects", *FORBIDDEN_DIRECT_MOTION],
+        "translation_rules": _translation_rules_for_policy(),
+        "applied_stabilization": applied,
+        "instruction": "Translate high-motion story actions into stable dynamic storyboard beats before sending the prompt to LTX2.3.",
     }
 
 
@@ -197,33 +386,54 @@ def _role_prompt(segment_role: str, is_padded_window: bool) -> str:
     return "Play this single segment as a stable keyframe progression."
 
 
-def build_prompt_parts(frame_details: list[dict[str, Any]], timeline_text: str, segment_role: str, is_padded_window: bool) -> dict[str, str]:
+def build_prompt_parts(
+    frame_details: list[dict[str, Any]],
+    timeline_text: str,
+    segment_role: str,
+    is_padded_window: bool,
+    edit_rhythm_text: str = "",
+) -> dict[str, Any]:
     base = os.getenv(
         "AI_DRAMA_VIDEO_PROMPT_TEMPLATE",
-        "Use the provided storyboard keyframe image group as the exact visual anchor. Keep the same character identity, face, costume, scene, props, lighting, composition style, and historical era. Only allow subtle natural motion: breathing, small facial expression changes, slight hand movement, cloth movement, and gentle camera movement. Do not add new characters or props. Do not change face, costume, scene, layout, or era. No subtitles, no captions, no typography, no watermark.",
+        "Use the provided storyboard keyframe image group as the exact visual anchor. Keep the same character identity, face, costume, scene, props, lighting, composition style, and historical era. Only animate stable cinematic storyboard motion: slow push in, subtle breathing, slight cloth movement, candle flicker, snow/rain/fog movement, slow eye movement, slight head turn, hand grip close-up, static confrontation, reaction close-up, or insert shot. Do not directly animate running, fighting, body-moving hugs, spinning camera, large body turns, multi-person physical interaction, complex hand action, or fast camera movement. Do not add new characters or props. Do not change face, costume, scene, layout, or era. No subtitles, no captions, no typography, no watermark.",
     )
-    action_lines = ["Animate a smooth progression across the provided keyframes.", "Keyframe progression:"]
+    action_stabilization = [stabilize_action(str(frame.get("story_action") or "")) for frame in frame_details]
+    action_lines = [
+        "Animate a smooth progression across the provided keyframes as stable dynamic cinematic storyboard beats.",
+        "Use only the stabilized actions below; do not directly animate any forbidden high-motion original action.",
+        "Keyframe progression:",
+    ]
     for idx, frame in enumerate(frame_details, start=1):
-        action_lines.append(f"{idx}. {frame.get('story_action')} | emotion: {frame.get('emotion')} | camera: {frame.get('camera_plan')}")
+        stable = action_stabilization[idx - 1]
+        action_lines.append(f"{idx}. {stable.get('stabilized_action')} | emotion: {frame.get('emotion')} | camera: {frame.get('camera_plan')}")
     continuity = "; ".join(str(frame.get("continuity_notes") or "").strip() for frame in frame_details if frame.get("continuity_notes"))
     if continuity:
         action_lines.append(f"Continuity: {continuity}")
     if is_padded_window:
         action_lines.append("Padded ending: repeated final keyframes should be treated as a held ending pose, not as a reason to invent new action.")
     audio_prompt = f"Audio acting beats: {timeline_text}" if timeline_text else "Audio acting beats: follow the current audio segment timing with restrained acting."
+    rhythm_prompt = f"Editing rhythm guide: {edit_rhythm_text}" if edit_rhythm_text else "Editing rhythm guide: use a calm default rhythm with restrained motion."
     role_prompt = _role_prompt(segment_role, is_padded_window)
-    final_prompt = "\n\n".join([base, role_prompt, "\n".join(action_lines), audio_prompt]).strip()
+    final_prompt = "\n\n".join([base, role_prompt, "\n".join(action_lines), audio_prompt, rhythm_prompt]).strip()
     return {
         "base_video_prompt": base,
         "segment_role_prompt": role_prompt,
         "window_action_prompt": "\n".join(action_lines),
         "audio_acting_prompt": audio_prompt,
+        "edit_rhythm_prompt": rhythm_prompt,
         "final_ltx_prompt": final_prompt,
+        "original_action": " | ".join(f"{idx}. {item.get('original_action')}" for idx, item in enumerate(action_stabilization, start=1)),
+        "stabilized_action": " | ".join(f"{idx}. {item.get('stabilized_action')}" for idx, item in enumerate(action_stabilization, start=1)),
+        "stabilization_reason": " | ".join(f"{idx}. {item.get('stabilization_reason')}" for idx, item in enumerate(action_stabilization, start=1)),
+        "action_stabilization": action_stabilization,
     }
 
 
 def build_window_ltx_prompt(frame_details: list[dict[str, Any]], timeline_text: str, segment_role: str = "middle", is_padded_window: bool = False) -> str:
     return build_prompt_parts(frame_details, timeline_text, segment_role, is_padded_window)["final_ltx_prompt"]
+
+
+build_ltx_prompt = build_window_ltx_prompt
 
 
 def build_segment_plan(
@@ -232,6 +442,7 @@ def build_segment_plan(
     final_audio_path: str | Path,
     output_dir: str | Path,
     storyboard: dict[str, Any] | None = None,
+    edit_rhythm: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     images = collect_storyboard_images(image_manifest)
     if not images:
@@ -257,6 +468,7 @@ def build_segment_plan(
     if total_duration <= 0:
         total_duration = duration
     entries = audio_timeline.get("entries") if isinstance(audio_timeline.get("entries"), list) else []
+    rhythm_entries = _edit_rhythm_entries(edit_rhythm)
     window_size, stride, window_mode = _window_mode()
     windows = _build_windows(images, window_size, stride)
     audio_segment_count = max(1, math.ceil(total_duration / duration))
@@ -280,7 +492,9 @@ def build_segment_plan(
         clip_name = f"clip_{index:04d}.mp4"
         slice_name = f"audio_slice_{index:04d}.wav"
         timeline_text = _timeline_text(entries, start, end)
-        prompt_parts = build_prompt_parts(frame_details, timeline_text, role, is_padded_window)
+        rhythm_text = _edit_rhythm_text(rhythm_entries, start, end)
+        prompt_parts = build_prompt_parts(frame_details, timeline_text, role, is_padded_window, edit_rhythm_text=rhythm_text)
+        motion_policy = build_motion_policy(window_size, role, is_padded_window, prompt_parts.get("action_stabilization", []))
         segments.append(
             {
                 "segment_id": f"video_seg_{index:04d}",
@@ -308,10 +522,14 @@ def build_segment_plan(
                 "output_clip_path": str(clips_dir / clip_name),
                 "output_basename": Path(clip_name).stem,
                 "timeline_text": timeline_text,
+                "edit_rhythm_text": rhythm_text,
                 "prompt_parts": prompt_parts,
+                "original_action": prompt_parts.get("original_action"),
+                "stabilized_action": prompt_parts.get("stabilized_action"),
+                "stabilization_reason": prompt_parts.get("stabilization_reason"),
                 "ltx_prompt": prompt_parts["final_ltx_prompt"],
                 "negative_prompt": negative_prompt,
-                "motion_policy": build_motion_policy(window_size, role, is_padded_window),
+                "motion_policy": motion_policy,
                 "execution_mode": "execute" if mode in {"execute", "comfyui", "real"} else "dry_run",
             }
         )
@@ -343,6 +561,7 @@ def build_segment_plan(
             "width": width,
             "height": height,
             "overlap_frames": overlap_frames,
+            "edit_rhythm_enabled": bool(rhythm_entries),
             "workflow_path": os.getenv("AI_DRAMA_VIDEO_COMFYUI_WORKFLOW", os.getenv("AI_DRAMA_COMFYUI_WORKFLOW", "")),
             "based_on_ltx23_audio_slice_workflow": True,
             "external_python_one_submit_per_window": True,
@@ -370,6 +589,7 @@ def build_comfyui_workflow_payload(segment: dict[str, Any]) -> dict[str, Any]:
         "window_size": segment.get("window_size"),
         "stride": segment.get("stride"),
         "segment_role": segment.get("segment_role"),
+        "edit_rhythm_text": segment.get("edit_rhythm_text"),
         "output_clip_path": segment.get("output_clip_path"),
         "output_basename": segment.get("output_basename"),
         "image_paths": image_paths,

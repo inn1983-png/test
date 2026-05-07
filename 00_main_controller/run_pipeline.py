@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import os
+import platform
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -120,6 +123,69 @@ def check_dependencies_for_module(run_dir: str, module_name: str, contracts: dic
     return ok
 
 
+def _save_config_snapshot(context: Any, args: argparse.Namespace, selected_pipeline: list[str], pipeline_config: dict[str, Any]) -> None:
+    api_key = os.getenv("AI_DRAMA_LLM_API_KEY", "")
+    snapshot = {
+        "snapshot_version": "1.0",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "llm": {
+            "base_url": os.getenv("AI_DRAMA_LLM_BASE_URL", ""),
+            "model": os.getenv("AI_DRAMA_LLM_MODEL", ""),
+            "temperature": os.getenv("AI_DRAMA_LLM_TEMPERATURE", ""),
+            "timeout_sec": os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", ""),
+            "has_api_key": bool(api_key),
+        },
+        "image": {
+            "execution_mode": os.getenv("AI_DRAMA_IMAGE_EXECUTION_MODE", "dry_run"),
+            "comfyui_base_url": os.getenv("AI_DRAMA_COMFYUI_BASE_URL", ""),
+            "workflow": os.getenv("AI_DRAMA_COMFYUI_WORKFLOW", ""),
+            "workflow_mapping": os.getenv("AI_DRAMA_COMFYUI_WORKFLOW_MAPPING", ""),
+        },
+        "audio": {
+            "execution_mode": os.getenv("AI_DRAMA_AUDIO_EXECUTION_MODE", "dry_run"),
+            "index_tts_root": os.getenv("AI_DRAMA_INDEX_TTS_ROOT", "index-tts"),
+            "voice_map": os.getenv("AI_DRAMA_VOICE_MAP", ""),
+        },
+        "video": {
+            "execution_mode": os.getenv("AI_DRAMA_VIDEO_EXECUTION_MODE", "dry_run"),
+            "workflow": os.getenv("AI_DRAMA_VIDEO_WORKFLOW", ""),
+            "workflow_mapping": os.getenv("AI_DRAMA_VIDEO_WORKFLOW_MAPPING", ""),
+            "ffmpeg": os.getenv("AI_DRAMA_FFMPEG", "ffmpeg"),
+        },
+        "resource_release": {
+            "device": os.getenv("DEVICE", "cuda"),
+            "auto_release_gpu": os.getenv("AUTO_RELEASE_GPU", "true"),
+        },
+        "platform": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+            "python_version": platform.python_version(),
+        },
+        "run_args": {
+            "mode": args.mode,
+            "project_id": args.project_id,
+            "book_id": args.book_id,
+            "chapter_id": args.chapter_id,
+            "pipeline_file": args.pipeline,
+            "from_module": args.from_module,
+            "to_module": args.to_module,
+            "only_module": args.only_module,
+            "dry_run": args.dry_run,
+        },
+        "selected_pipeline": selected_pipeline,
+        "runtime_context": {
+            "mode": context.mode,
+            "run_id": context.run_id,
+            "run_dir": str(context.run_dir),
+            "input_dir": str(context.input_dir),
+        },
+    }
+    snapshot_path = Path(context.run_dir) / "config_snapshot.json"
+    io_utils.write_json(snapshot_path, snapshot)
+    print(f"[SNAPSHOT] config_snapshot.json saved to {snapshot_path}")
+
+
 def handle_phase_transition(previous_module: str | None, next_module: str) -> None:
     """Release model families only at explicit pipeline phase boundaries."""
     if previous_module == "06_storyboard" and next_module == "07_storyboard_image":
@@ -170,6 +236,8 @@ def main() -> int:
     context = create_context(args)
     print("Runtime context:")
     print(workspace_manager.dump_context_for_log(context))
+
+    _save_config_snapshot(context, args, selected_pipeline, pipeline_config)
 
     if args.empty_pipeline:
         run_status.initialize_status(context.run_dir, [])

@@ -49,7 +49,7 @@
     "05_prop_system": ["props.json"],
     "06_storyboard": ["storyboard.json", "storyboard_meta.json"],
     "07_storyboard_image": ["image_manifest.json", "image_meta.json"],
-    "08_audio": ["final_audio.wav", "audio_timeline.json", "subtitle.srt", "subtitle.ass"],
+    "08_audio": ["final_audio.wav", "audio_timeline.json", "audio_timing_review.json", "edit_rhythm.json", "subtitle.srt", "subtitle.ass"],
     "09_video": ["video_manifest.json", "final_video.mp4"],
     "10_final_assembly": ["final.mp4", "final_manifest.json", "final_meta.json"],
   };
@@ -144,13 +144,14 @@
     const activeClass = module.name === currentName ? " active" : "";
     const outputButtons = outputs.filter((item) => item.exists && item.path).slice(0, 3).map((item) => `<button onclick="window.previewFile && window.previewFile('${escapeHtml(item.path)}')">${escapeHtml(item.name)}</button>`).join("");
     const fallbackPath = outputs.find((item) => item.path)?.path || "";
+    const retryFailedButton = module.name === "07_storyboard_image" ? `<button onclick="window.startJob && window.startJob({only_module:'07_storyboard_image',retry_scope:'failed'})">重跑失败帧</button>` : "";
     return `
       <article class="nf-module-card ${escapeHtml(module.status || "pending")}${activeClass}" data-module="${escapeHtml(module.name)}">
         <div class="nf-card-top"><div><div class="nf-card-name">${escapeHtml(moduleName(module.name))}</div><div class="nf-card-raw">${escapeHtml(module.name)}</div></div>${statusBadge(module.status)}</div>
         <div class="nf-card-message">${escapeHtml(module.message || (module.name === currentName ? "当前关注步骤" : "等待阶段输出"))}</div>
         <div class="nf-card-raw">当前阶段：${escapeHtml(currentStageText)}</div>
         <div class="nf-card-stats"><div class="nf-stat"><span>阶段</span><strong>${stages.length}</strong></div><div class="nf-stat"><span>产物</span><strong>${outputs.filter((item) => item.exists).length}</strong></div><div class="nf-stat"><span>问题</span><strong>${issues}</strong></div></div>
-        <div class="nf-card-actions">${outputButtons || (fallbackPath ? `<button onclick="window.previewFile && window.previewFile('${escapeHtml(fallbackPath)}')">查看预期产物</button>` : "")}<button onclick="window.nfWorkbenchRunOnly && window.nfWorkbenchRunOnly('${escapeHtml(module.name)}')">只跑这一步</button></div>
+        <div class="nf-card-actions">${outputButtons || (fallbackPath ? `<button onclick="window.previewFile && window.previewFile('${escapeHtml(fallbackPath)}')">查看预期产物</button>` : "")}${retryFailedButton}<button onclick="window.nfWorkbenchRunOnly && window.nfWorkbenchRunOnly('${escapeHtml(module.name)}')">只跑这一步</button></div>
       </article>`;
   }
 

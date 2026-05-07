@@ -6,6 +6,7 @@ from importlib import import_module
 
 io_utils = import_module("00_common.io_utils")
 stage_status_writer = import_module("00_common.stage_status")
+stage_cache = import_module("00_common.stage_cache")
 llm_client_module = import_module("04_scene_system.core.llm_client")
 quality_checker = import_module("04_scene_system.core.quality_checker")
 json_repair = import_module("04_scene_system.core.json_repair")
@@ -99,12 +100,20 @@ def build_stage_payload(stage_id: str, novel_analysis: dict[str, Any], script: d
     return payload
 
 
-def _complete_json(client: Any, system_prompt: str, payload: dict[str, Any]) -> dict[str, Any]:
-    return client.complete_json(system_prompt, payload, repair_callback=lambda broken, error: json_repair.repair_json_with_llm(client, broken, error))
+def _complete_json(client: Any, system_prompt: str, payload: dict[str, Any], trace_label: str) -> dict[str, Any]:
+    return client.complete_json(system_prompt, payload, repair_callback=lambda broken, error: json_repair.repair_json_with_llm(client, broken, error), trace_label=trace_label)
 
 
-def _run_one_stage(client: Any, stage: dict[str, str], novel_analysis: dict[str, Any], script: dict[str, Any], outputs: dict[str, dict[str, Any]], output_dir: str | Path, max_retries: int, final_revision_context: dict[str, Any] | None = None) -> dict[str, Any]:
+def _run_one_stage(client: Any, stage: dict[str, str], novel_analysis: dict[str, Any], script: dict[str, Any], outputs: dict[str, dict[str, Any]], output_dir: str | Path, max_retries: int, final_revision_context: dict[str, Any] | None = None, force: bool = False, force_stages: list[str] | None = None) -> dict[str, Any]:
     stage_id = stage["stage_id"]
+    skip, cached = stage_cache.should_skip_stage(output_dir, stage_id, stage["output_file"], force=force, force_stages=force_stages)
+    if skip and cached is not None:
+        outputs[stage_id] = cached
+        quality = cached.get("stage_quality", {})
+        status = "success" if quality.get("passed") else "needs_review"
+        print(f"[RESUME] {stage_id} skipped (cached, score={quality.get('score', '?')})")
+        return {**stage, "status": status, "output_path": str(_intermediate_dir(output_dir) / stage["output_file"]), "quality": quality, "attempts": cached.get("stage_attempts", []), "final_revision_context": final_revision_context}
+
     stage_status_writer.mark_stage_started("04_scene_system", output_dir, stage_id, stage["name"], "stage started")
     system_prompt = _read_prompt(stage["prompt_file"])
     payload = build_stage_payload(stage_id, novel_analysis, script, outputs, final_revision_context)
@@ -112,8 +121,9 @@ def _run_one_stage(client: Any, stage: dict[str, str], novel_analysis: dict[str,
     current_output: dict[str, Any] | None = None
     quality: dict[str, Any] | None = None
     for attempt in range(1, max_retries + 2):
+        trace_label = f"{stage_id}_attempt_{attempt}"
         revision_payload = payload if attempt == 1 else quality_checker.build_revision_payload(stage_id, payload, current_output or {}, quality or {})
-        current_output = _complete_json(client, system_prompt, revision_payload)
+        current_output = _complete_json(client, system_prompt, revision_payload, trace_label=trace_label)
         current_output.setdefault("schema_version", SCHEMA_VERSION)
         current_output.setdefault("stage", stage["name"])
         current_output["status"] = "llm"
@@ -141,8 +151,8 @@ def _run_one_stage(client: Any, stage: dict[str, str], novel_analysis: dict[str,
     return {**stage, "status": status, "output_path": output_path, "quality": quality, "attempts": attempts, "final_revision_context": final_revision_context}
 
 
-def _run_stage_range(client: Any, novel_analysis: dict[str, Any], script: dict[str, Any], outputs: dict[str, dict[str, Any]], output_dir: str | Path, start_index: int, max_retries: int, final_revision_context: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-    return [_run_one_stage(client, stage, novel_analysis, script, outputs, output_dir, max_retries, final_revision_context) for stage in STAGES[start_index:]]
+def _run_stage_range(client: Any, novel_analysis: dict[str, Any], script: dict[str, Any], outputs: dict[str, dict[str, Any]], output_dir: str | Path, start_index: int, max_retries: int, final_revision_context: dict[str, Any] | None = None, force: bool = False, force_stages: list[str] | None = None) -> list[dict[str, Any]]:
+    return [_run_one_stage(client, stage, novel_analysis, script, outputs, output_dir, max_retries, final_revision_context, force=force, force_stages=force_stages) for stage in STAGES[start_index:]]
 
 
 def _extract_retry_stage_ids(outputs: dict[str, Any]) -> list[str]:
@@ -154,12 +164,24 @@ def _extract_retry_stage_ids(outputs: dict[str, Any]) -> list[str]:
     return [stage_id for stage_id in retry_stage_ids if stage_id in STAGE_INDEX and stage_id != REVIEW_STAGE_ID]
 
 
-def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], output_dir: str | Path, max_retries: int = DEFAULT_MAX_RETRIES, max_final_revision_rounds: int = DEFAULT_MAX_FINAL_REVISION_ROUNDS) -> dict[str, Any]:
+def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], output_dir: str | Path, max_retries: int = DEFAULT_MAX_RETRIES, max_final_revision_rounds: int = DEFAULT_MAX_FINAL_REVISION_ROUNDS, resume: bool = False, force: bool = False, force_stages: list[str] | None = None) -> dict[str, Any]:
     if not novel_analysis or not script:
         raise RuntimeError("04_scene_system requires 01 novel_analysis and 02 script.")
     client = llm_client_module.LLMClient()
+    if hasattr(client, "set_trace_output_dir"):
+        client.set_trace_output_dir(output_dir)
     outputs = initial_context()
-    stage_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, 0, max_retries)
+
+    start_index = 0
+    if resume and not force:
+        cached = stage_cache.load_cached_outputs(output_dir, STAGES, force=force, force_stages=force_stages)
+        for sid, data in cached.items():
+            outputs[sid] = data
+        start_index = stage_cache.find_resume_start_index(STAGES, cached, STAGE_INDEX)
+        if start_index > 0:
+            print(f"[RESUME] 04_scene_system resuming from stage index {start_index} ({STAGES[start_index]['stage_id'] if start_index < len(STAGES) else 'done'})")
+
+    stage_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, start_index, max_retries, force=force, force_stages=force_stages)
     final_revision_rounds = []
     for round_index in range(1, max_final_revision_rounds + 1):
         retry_stage_ids = _extract_retry_stage_ids(outputs)
@@ -169,7 +191,7 @@ def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], outpu
         review_context = outputs.get("04E", {}).get("review_report", {})
         quality_context = outputs.get("04D", {}).get("quality_report", {})
         final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_context, "review_report": review_context, "instruction": "04D/04E 要求重跑。请从最早问题阶段修正，并保持字段完整。"}
-        rerun_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, start_index, max_retries, final_revision_context)
+        rerun_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, start_index, max_retries, final_revision_context, force=force, force_stages=force_stages)
         final_revision_rounds.append({"round": round_index, "retry_stage_ids": retry_stage_ids, "rerun_status": rerun_status})
         stage_status.extend(rerun_status)
     return {"schema_version": SCHEMA_VERSION, "stage_mode": "llm", "stage_status": stage_status, "final_revision_rounds": final_revision_rounds, "outputs": outputs}

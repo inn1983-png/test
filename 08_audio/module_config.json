@@ -12,6 +12,8 @@
     "audio_manifest.json",
     "audio_meta.json",
     "audio_timeline.json",
+    "audio_timing_review.json",
+    "edit_rhythm.json",
     "subtitle.srt",
     "subtitle.ass"
   ],

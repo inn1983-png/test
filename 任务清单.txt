@@ -1,6 +1,6 @@
 ## 2026-05-07 本轮执行记录（Codex）
 
-已按顺序完成到任务 9，后续请从 **任务 10：07 支持失败帧局部重跑** 继续。
+已按顺序完成到任务 15，后续请从 **任务 16：LLM trace 落盘** 继续。
 
 已完成内容：
 
@@ -13,6 +13,12 @@
 7. 任务 7：新增项目级 `GET /api/projects/{project_id}/snapshot` 与归档标记接口；最近项目卡片增加打开项目、从失败处继续、从 01 重跑、归档项目。
 8. 任务 8：增强 `07_storyboard_image/core/comfyui_client.py`，execute 后解析 ComfyUI history outputs，按 filename/subfolder/type 在 ComfyUI output 目录查找并复制到 expected path，写 `output_resolution_report.json`。
 9. 任务 9：新增 `configs/comfyui_workflows/07_storyboard_image_mapping.example.json`；`workflow_router` 支持默认读取 `configs/comfyui_workflows/07_storyboard_image_mapping.json`，Web UI 可检查 mapping、显示缺失节点和 workflow_path。
+10. 任务 10：07 支持 `--retry-scope all|failed|frame|character_lock|appearance|reference_asset`、`--frame-id`、`--asset-key`、`--force`；支持通过 Web UI/env 触发局部重跑；已成功图片默认跳过，`image_manifest` 增加 `retry_history`；07 图片卡片显示输出路径并提供“重跑本帧/此项”和“执行生成”。
+11. 任务 11：09 dry_run 不再生成假的 `final_video.mp4`，改写 `final_video.placeholder.txt`；`video_manifest` 增加 `final_video_ready=false`；execute 合并必须 ffmpeg 成功且 ffprobe 校验通过才保留 `final_video.mp4`，失败时 `09D_final_merge.json` 写入 `merge_error`。
+12. 任务 12：09 execute 后解析 ComfyUI history outputs，提取视频 filename/subfolder/type，从 ComfyUI output 目录复制真实 clip 到 expected `output_clip_path`；找不到则 `status=failed` 且 error 为 `ComfyUI finished but clip not found`；09B/09C 不再把 `submitted` 当成功。
+13. 任务 13：09 `motion_policy` 改为 `stable_dynamic_storyboard`；新增默认允许稳态动作、禁止直接生成动作、复杂动作转译规则与 `stabilize_action()`；09A 生成 prompt 时只使用稳态动作，segment 与 `prompt_manifest.json` 增加 `original_action`、`stabilized_action`、`stabilization_reason`、`motion_policy`。
+14. 任务 14：08D 生成 `audio_timing_review.json`，检查非静音 voice_line 时长；8 秒以上写 warning，12 秒以上写 `needs_review=true`、`issue_type=voice_line_too_long`、`recommended_action=return_to_02_split_sentence` 和 `suggested_split`；Web UI 音频卡片显示总时长、每段时长、超长句列表和建议拆分。
+15. 任务 15：08D 生成 `edit_rhythm.json`，为每个音频段输出 start/end/duration、line_type、speaker、text、suggested_visual_role、intensity、needs_visual_pause；规则覆盖 S 留白、OS/M、强对白、地点旁白、道具/动作描写和情绪爆发；09 可选读取 `08_audio/edit_rhythm.json` 并把剪辑节奏注入 segment prompt。
 
 已验证：
 
@@ -21,10 +27,16 @@
 - 模拟“子模块返回 0 但缺少 produces”时，runner 返回 1 且 run_status 标记 failed。
 - `test_runner_check` 的 module requirements、repair index、project snapshot API 辅助函数已直接验证。
 - `event_writer`、`stage_status`、07 ComfyUI history outputs 提取、workflow mapping 检查已做轻量 smoke test。
+- 07 局部重跑 smoke test：首次 dry_run 后再次指定 `retry_scope=frame&frame_id=shot_001`，成功帧被跳过，未覆盖文件，并写入 `retry_history`。
+- 09D dry_run smoke test：未创建 `final_video.mp4`，写入 `final_video.placeholder.txt`，`final_video_ready=false`。
+- 09 ComfyUI history smoke test：可提取 `videos[].filename/subfolder/type`。
+- 09 motion_policy smoke test：`抓住手腕奔跑追逐` 会转译为“手腕特写 / 两人对峙 / 手指收紧”和“远景定格 + 衣摆风动 + 镜头缓推”，最终 LTX prompt 不再包含原始高风险动作。
+- 08 audio_timing_review smoke test：模拟 9.2 秒语音行生成 warning，12.8 秒语音行生成 `voice_line_too_long`；08D 落盘 smoke test 确认超 12 秒时阶段进入 `needs_review`。
+- 08 edit_rhythm smoke test：地点旁白→establishing、情绪爆发对白→closeup/high intensity、OS/M→closeup/reaction、S 留白→transition、道具动作→insert；09 prompt smoke test 确认 `Editing rhythm guide` 被注入。
 
 注意：
 
-- 本轮没有继续执行任务 10。
+- 本轮没有继续执行任务 16。
 - `test_runner_check` 是本轮用于验证的工作区项目，因缺少 `input/novel.txt`，01 按原逻辑失败。
 - ComfyUI execute 输出查找需要实际设置 `AI_DRAMA_COMFYUI_OUTPUT_DIR` 或 `COMFYUI_OUTPUT_DIR` 才能从 ComfyUI output 目录复制真实图片。
 
@@ -1054,6 +1066,132 @@ UI 验收：
 9. 08 音频阶段可以看到超长句预警。
 10. 09 视频阶段不再生成假的 final_video.mp4。
 11. 10 final_meta 显示 playable=true/false。
+```
+
+---
+
+# 完成记录（Trae Agent 执行）
+
+## 任务16：LLM trace 落盘（01-06模块）
+
+状态：✅ 已完成（Codex 前置完成）
+
+已有文件：
+
+```text
+00_common/llm_trace.py
+01-06 各模块 core/llm_client.py 已集成 trace
+01-06 各模块 core/stage_runner.py 已调用 set_trace_output_dir
+```
+
+---
+
+## 任务17：01-06 增加阶段缓存/resume
+
+状态：✅ 已完成
+
+新增文件：
+
+```text
+00_common/stage_cache.py
+```
+
+修改文件：
+
+```text
+01_novel_parser/run_staged.py
+01_novel_parser/core/stage_runner.py
+02_script_writer/run_staged.py
+02_script_writer/core/stage_runner.py
+03_character_system/run_staged.py
+03_character_system/core/stage_runner.py
+04_scene_system/run_staged.py
+04_scene_system/core/stage_runner.py
+05_prop_system/run_staged.py
+05_prop_system/core/stage_runner.py
+06_storyboard/run_staged.py
+06_storyboard/core/stage_runner.py
+```
+
+支持参数：
+
+```text
+--resume：跳过已通过质量检查的中间阶段，从第一个未完成阶段继续
+--force：强制重跑所有阶段，忽略缓存
+--force-stage 01C,01D：只强制重跑指定阶段，其余使用缓存
+AI_DRAMA_RESUME=1：等同于 --resume
+```
+
+缓存判断逻辑：
+
+```text
+intermediate/{stage_id}_{name}.json 存在
+且 stage_quality.passed == true
+且 schema_version 非空
+→ 跳过该阶段，加载缓存数据
+```
+
+---
+
+## 任务18：10 final.mp4 ffprobe 校验
+
+状态：✅ 已完成
+
+新增函数：
+
+```text
+10_final_assembly/core/ffmpeg_client.py: ffprobe_validate()
+```
+
+修改文件：
+
+```text
+10_final_assembly/core/stage_runner.py
+```
+
+功能：
+
+```text
+10B video_prepare 和 10D final_export 阶段导出视频后，自动调用 ffprobe 校验
+检查 has_video / has_audio / duration_seconds / stream_count / streams / format
+校验失败（无视频流）时标记 needs_review
+ffprobe 不可用时不阻断流程，只在 ffprobe_validation 中记录 error
+新增环境变量 AI_DRAMA_FFPROBE=ffprobe（默认）
+```
+
+---
+
+## 任务19：新增 config_snapshot.json
+
+状态：✅ 已完成
+
+修改文件：
+
+```text
+00_main_controller/run_pipeline.py
+```
+
+功能：
+
+```text
+Pipeline 运行开始时自动保存配置快照到 {run_dir}/config_snapshot.json
+按任务清单要求的分类格式：llm / image / audio / video / resource_release
+API Key 不写明文，只记录 has_api_key: true/false
+包含 platform / run_args / selected_pipeline / runtime_context
+```
+
+---
+
+## 任务20：更新文档
+
+状态：✅ 已完成
+
+修改文件：
+
+```text
+docs/development_log.md：新增阶段缓存、ffprobe 校验、config_snapshot 记录
+00_main_controller/README.md：新增 config_snapshot.json 说明
+10_final_assembly/README.md：新增 ffprobe 校验和 AI_DRAMA_FFPROBE 环境变量
 ```
 
 ---

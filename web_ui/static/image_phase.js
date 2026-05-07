@@ -31,7 +31,16 @@
   function preview(path) {
     if (typeof previewFile === "function") previewFile(path);
   }
-  function card(title, subtitle, imagePath, status, metaRows, jsonPath) {
+  function retryPayload(info) {
+    return encodeURIComponent(JSON.stringify(info || {}));
+  }
+  function retryActions(info) {
+    if (!info) return `<button class="btn small primary" onclick="regenerateImage('${esc(info?.title || "image") }')">局部重跑</button>`;
+    const label = info.scope === "frame" ? "重跑本帧" : "重跑此项";
+    const payload = retryPayload(info);
+    return `<button class="btn small primary" onclick="window.runImageRetryFromCard && window.runImageRetryFromCard('${payload}', false)">${label}</button><button class="btn small" onclick="window.runImageRetryFromCard && window.runImageRetryFromCard('${payload}', true)">执行生成</button>`;
+  }
+  function card(title, subtitle, imagePath, status, metaRows, jsonPath, retryInfo = null) {
     const image = imagePath
       ? `<img class="media-thumb" src="${mediaUrl(imagePath)}" onerror="this.parentElement.classList.add('placeholder');this.remove();" />`
       : `<div class="media-placeholder">暂无图片</div>`;
@@ -46,12 +55,13 @@
         </div>
         <div class="media-image">${image}</div>
         <div class="media-meta">
+          ${imagePath ? `<div><span>输出路径</span><strong>${esc(imagePath)}</strong></div>` : ""}
           ${(metaRows || []).map((row) => `<div><span>${esc(row[0])}</span><strong>${esc(row[1] ?? "-")}</strong></div>`).join("")}
         </div>
         <div class="card-actions">
           ${jsonPath ? `<button class="btn small" onclick="previewFile('${jsonPath}')">查看 JSON</button>` : ""}
           ${imagePath ? `<button class="btn small" onclick="previewFile('${imagePath}')">预览图片</button>` : ""}
-          <button class="btn small primary" onclick="regenerateImage('${esc(title || "image") }')">局部重跑</button>
+          ${retryActions(retryInfo)}
         </div>
       </div>
     `;
@@ -97,7 +107,8 @@
       item.selected_image_path,
       item.status,
       [["asset_level", item.asset_level], ["revision", item.revision], ["source frames", (item.source_frame_ids || []).length]],
-      `${currentRunDir()}/07_storyboard_image/character_lock_manifest.json`
+      `${currentRunDir()}/07_storyboard_image/character_lock_manifest.json`,
+      { scope: "character_lock", asset_key: item.lock_key, title: item.canonical_name }
     )).join("") : `<div class="muted">暂无定妆图任务。</div>`;
     appGrid.innerHTML = appRows.length ? appRows.map((item) => card(
       item.appearance_asset_key,
@@ -105,7 +116,8 @@
       item.selected_image_path,
       item.status,
       [["base lock", item.base_lock_key], ["wearable", (item.wearable_props || []).join("，") || "无"], ["frames", (item.source_frame_ids || []).length]],
-      `${currentRunDir()}/07_storyboard_image/appearance_manifest.json`
+      `${currentRunDir()}/07_storyboard_image/appearance_manifest.json`,
+      { scope: "appearance", asset_key: item.appearance_asset_key, title: item.appearance_asset_key }
     )).join("") : `<div class="muted">暂无造型图任务。</div>`;
     const refRows = [...sceneRows.map((x) => ({ ...x, title: x.scene_key, kind: "scene" })), ...propRows.map((x) => ({ ...x, title: x.prop_key, kind: "prop" }))];
     refGrid.innerHTML = refRows.length ? refRows.map((item) => card(
@@ -114,7 +126,8 @@
       item.selected_image_path,
       item.status,
       [["source mode", item.source_mode], ["revision", item.revision], ["frames", (item.source_frame_ids || []).length]],
-      `${currentRunDir()}/07_storyboard_image/reference_asset_manifest.json`
+      `${currentRunDir()}/07_storyboard_image/reference_asset_manifest.json`,
+      { scope: "reference_asset", asset_key: item.asset_key || item.scene_key || item.prop_key || item.title, title: item.title }
     )).join("") : `<div class="muted">暂无场景/道具参考图任务。</div>`;
     frameGrid.innerHTML = imageRows.length ? imageRows.map((item) => card(
       item.frame_id,
@@ -122,13 +135,25 @@
       item.image_path,
       item.status,
       [["scene", item.scene_ref_key], ["appearance", (item.appearance_asset_keys || []).join("，") || "无"], ["anchor", item.anchor_frame_id || "-"], ["prev", item.continuity_source_frame_id || "-"]],
-      `${currentRunDir()}/07_storyboard_image/image_manifest.json`
+      `${currentRunDir()}/07_storyboard_image/image_manifest.json`,
+      { scope: "frame", frame_id: item.frame_id, title: item.frame_id }
     )).join("") : `<div class="muted">暂无分镜图任务。</div>`;
     if (dep && Object.keys(dep.frame_dependencies || {}).length) {
       summary.innerHTML += summaryCard("依赖图", Object.keys(dep.frame_dependencies || {}).length, "支持局部失效与重跑");
     }
   }
   window.renderImagePhase = renderImagePhase;
+  window.runImageRetryFromCard = async function (encoded, force) {
+    const info = JSON.parse(decodeURIComponent(encoded || "%7B%7D"));
+    if (typeof startJob !== "function") return alert("生产控制台尚未初始化。");
+    await startJob({
+      only_module: "07_storyboard_image",
+      retry_scope: info.scope || "failed",
+      frame_id: info.frame_id || "",
+      asset_key: info.asset_key || "",
+      force: Boolean(force),
+    });
+  };
 
   try {
     const oldGetPayload = typeof getPayload === "function" ? getPayload : null;
@@ -168,8 +193,6 @@
   }
 
   setTimeout(() => {
-    const startImage = el("startImagePhaseBtn");
-    if (startImage && typeof startJob === "function") startImage.addEventListener("click", () => startJob({ only_module: "07_storyboard_image" }));
     const previewManifest = el("previewImageManifestBtn");
     if (previewManifest) previewManifest.addEventListener("click", () => { const rel = currentRunDir(); if (rel) preview(`${rel}/07_storyboard_image/image_manifest.json`); });
     const previewDep = el("previewDependencyBtn");

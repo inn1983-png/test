@@ -91,3 +91,46 @@ def is_probably_valid_media(path: Path, min_bytes: int = 1024) -> bool:
         return path.exists() and path.stat().st_size >= min_bytes
     except OSError:
         return False
+
+
+def ffprobe_validate(path: Path) -> dict[str, Any]:
+    ffprobe_bin = os.getenv("AI_DRAMA_FFPROBE", "ffprobe")
+    if not shutil.which(ffprobe_bin):
+        return {"valid": False, "error": "ffprobe not found", "streams": [], "format": {}}
+    cmd = [
+        ffprobe_bin,
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_format",
+        "-show_streams",
+        str(path),
+    ]
+    try:
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", env=_utf8_env())
+    except Exception as exc:
+        return {"valid": False, "error": str(exc), "streams": [], "format": {}}
+    if proc.returncode != 0:
+        return {"valid": False, "error": f"ffprobe exit code {proc.returncode}", "stderr": proc.stderr, "streams": [], "format": {}}
+    import json
+    try:
+        info = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {"valid": False, "error": "ffprobe output not valid JSON", "streams": [], "format": {}}
+    streams = info.get("streams", [])
+    fmt = info.get("format", {})
+    has_video = any(s.get("codec_type") == "video" for s in streams)
+    has_audio = any(s.get("codec_type") == "audio" for s in streams)
+    duration = None
+    try:
+        duration = float(fmt.get("duration", 0))
+    except (ValueError, TypeError):
+        pass
+    return {
+        "valid": has_video,
+        "has_video": has_video,
+        "has_audio": has_audio,
+        "duration_seconds": duration,
+        "stream_count": len(streams),
+        "streams": [{"codec_type": s.get("codec_type"), "codec_name": s.get("codec_name"), "width": s.get("width"), "height": s.get("height"), "duration": s.get("duration")} for s in streams],
+        "format": {"format_name": fmt.get("format_name"), "size": fmt.get("size"), "bit_rate": fmt.get("bit_rate"), "duration": fmt.get("duration")},
+    }

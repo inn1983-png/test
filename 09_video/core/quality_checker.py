@@ -43,7 +43,7 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
         results = data.get("execution_results") if isinstance(data.get("execution_results"), list) else []
         if not results:
             issues.append("09B must contain execution_results.")
-        failed = [item for item in results if isinstance(item, dict) and item.get("status") not in {"success", "submitted"}]
+        failed = [item for item in results if isinstance(item, dict) and item.get("status") != "success"]
         if failed:
             issues.append(f"09B has failed segments: {len(failed)}")
     elif stage_id == "09C":
@@ -52,10 +52,20 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
         if data.get("completed_count", 0) < 1:
             issues.append("09C no completed video clips.")
     elif stage_id == "09D":
-        if data.get("merge_status") not in {"success", "planned"}:
-            issues.append("09D merge_status must be success or planned.")
-        if not data.get("final_video_path"):
-            issues.append("09D missing final_video_path.")
+        if data.get("merge_status") not in {"success", "skipped", "skipped_dry_run", "failed"}:
+            issues.append("09D merge_status must be success, skipped, skipped_dry_run, or failed.")
+        if data.get("final_video_ready"):
+            if data.get("merge_status") != "success":
+                issues.append("09D final_video_ready=true requires merge_status=success.")
+            if not data.get("final_video_path"):
+                issues.append("09D missing final_video_path.")
+            probe = data.get("final_video_probe", {}) if isinstance(data.get("final_video_probe"), dict) else {}
+            if probe and not probe.get("valid"):
+                issues.append("09D final video ffprobe validation failed.")
+        elif data.get("execution_mode") == "execute":
+            issues.append(f"09D final_video not ready: {data.get('merge_error') or 'merge failed'}")
+        elif not data.get("final_video_placeholder_path"):
+            issues.append("09D dry_run should write final_video.placeholder.txt.")
 
     score -= min(80, len(issues) * 15)
     passed = score >= 70 and not issues

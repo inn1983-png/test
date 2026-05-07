@@ -179,6 +179,7 @@ workspace/books/{book_id}/chapters/{chapter_id}/08_audio/subtitle.ass
 
 ```text
 AI_DRAMA_FFMPEG=ffmpeg
+AI_DRAMA_FFPROBE=ffprobe
 AI_DRAMA_FINAL_DRY_RUN=0|1
 AI_DRAMA_FINAL_FORCE_RERUN=0|1
 AI_DRAMA_FINAL_BURN_SUBTITLES=0|1
@@ -193,6 +194,25 @@ AI_DRAMA_FINAL_FORCE_RERUN=0
 AI_DRAMA_FINAL_BURN_SUBTITLES=0
 AI_DRAMA_FINAL_MIN_VALID_BYTES=1024
 ```
+
+---
+
+## ffprobe 校验
+
+10B 和 10D 阶段导出视频后，自动调用 ffprobe 校验：
+
+```text
+has_video：是否包含视频流
+has_audio：是否包含音频流
+duration_seconds：视频时长
+stream_count：流数量
+streams：每个流的 codec_type / codec_name / width / height
+format：format_name / size / bit_rate / duration
+```
+
+校验失败（无视频流）时标记 needs_review。
+
+ffprobe 不可用时不阻断流程，只在 ffprobe_validation 中记录 error。
 
 ---
 

@@ -79,11 +79,12 @@ def main() -> int:
         storyboard = _read_optional_json_upstream("06_storyboard", "storyboard.json")
         image_manifest = _read_json_upstream("07_storyboard_image", "image_manifest.json")
         audio_timeline = _read_json_upstream("08_audio", "audio_timeline.json")
+        edit_rhythm = _read_optional_json_upstream("08_audio", "edit_rhythm.json")
         final_audio_path = _resolve_file_upstream("08_audio", "final_audio.wav")
         _, output_dir = base_module.get_runtime_module_dirs(MODULE_NAME)
 
-        stage_result = stage_runner.run_video_stages(image_manifest, audio_timeline, final_audio_path, output_dir, storyboard=storyboard)
-        data = stage_runner.merge_stage_outputs(image_manifest, audio_timeline, final_audio_path, config, stage_result, output_dir, storyboard=storyboard)
+        stage_result = stage_runner.run_video_stages(image_manifest, audio_timeline, final_audio_path, output_dir, storyboard=storyboard, edit_rhythm=edit_rhythm)
+        data = stage_runner.merge_stage_outputs(image_manifest, audio_timeline, final_audio_path, config, stage_result, output_dir, storyboard=storyboard, edit_rhythm=edit_rhythm)
 
         base_module.write_json_key_output(MODULE_NAME, KEY_OUTPUT, data, description="09 关键输出：窗口式视频分段计划、执行结果、断点续跑状态、合并结果。")
         base_module.write_json_key_output(

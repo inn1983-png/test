@@ -141,6 +141,7 @@ def run_10b(check: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
     preferred = _as_path(check.get("preferred_video_path"))
     if preferred and _valid_media(preferred) and not dry_run:
         shutil.copy2(preferred, prepared_video)
+        probe = ffmpeg_client.ffprobe_validate(prepared_video)
         return {
             "schema_version": SCHEMA_VERSION,
             "stage": "10B_video_prepare",
@@ -149,6 +150,7 @@ def run_10b(check: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
             "prepared_video_path": str(prepared_video),
             "source_video_path": str(preferred),
             "ffmpeg_result": None,
+            "ffprobe_validation": probe,
         }
 
     clip_paths = [_as_path(p) for p in check.get("clip_paths", []) or []]
@@ -156,6 +158,7 @@ def run_10b(check: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
     if clip_paths and not dry_run:
         result = client.concat_clips(clip_paths, prepared_video)
         if result.get("status") == "success" and _valid_media(prepared_video):
+            probe = ffmpeg_client.ffprobe_validate(prepared_video)
             return {
                 "schema_version": SCHEMA_VERSION,
                 "stage": "10B_video_prepare",
@@ -164,6 +167,7 @@ def run_10b(check: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
                 "prepared_video_path": str(prepared_video),
                 "source_clip_paths": [str(p) for p in clip_paths],
                 "ffmpeg_result": result,
+                "ffprobe_validation": probe,
             }
 
     prepared_video.write_text("DRY_RUN_FINAL_ASSEMBLY_PREPARED_VIDEO_PLACEHOLDER\n", encoding="utf-8")
@@ -269,6 +273,11 @@ def run_10d(video_prepare: dict[str, Any], audio_subtitle: dict[str, Any], outpu
             burn_result = {"status": "failed", "stderr": "burn requested but no copied subtitle found"}
 
     ok = _valid_media(final_path)
+    probe = None
+    if ok:
+        probe = ffmpeg_client.ffprobe_validate(final_path)
+        if not probe.get("valid"):
+            ok = False
     return {
         "schema_version": SCHEMA_VERSION,
         "stage": "10D_final_export",
@@ -278,6 +287,7 @@ def run_10d(video_prepare: dict[str, Any], audio_subtitle: dict[str, Any], outpu
         "mux_result": mux_result,
         "burn_result": burn_result,
         "burn_subtitles": burn,
+        "ffprobe_validation": probe,
     }
 
 

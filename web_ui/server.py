@@ -278,6 +278,14 @@ def discover_stage_outputs(module_dir: Path) -> list[dict[str, Any]]:
             row["score"] = quality.get("score") if isinstance(quality, dict) else None
             row["passed"] = quality.get("passed") if isinstance(quality, dict) else None
             row["issues_count"] = len(quality.get("issues", [])) if isinstance(quality, dict) and isinstance(quality.get("issues"), list) else 0
+            stage_prefix = str(path.name.split("_")[0])
+            trace_root = module_dir / "llm_traces"
+            if trace_root.exists():
+                trace_dirs = sorted(trace_root.glob(f"{stage_prefix}*_attempt_*"))
+                request_path = next((trace_dir / "request.json" for trace_dir in trace_dirs if (trace_dir / "request.json").exists()), None)
+                if request_path:
+                    row["llm_trace_request_path"] = rel_path(request_path)
+                    row["llm_trace_dir"] = rel_path(request_path.parent)
         rows.append(row)
     return rows
 
@@ -500,6 +508,10 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
         ("llm_temperature", "AI_DRAMA_LLM_TEMPERATURE"),
         ("llm_timeout_sec", "AI_DRAMA_LLM_TIMEOUT_SEC"),
         ("image_execution_mode", "AI_DRAMA_IMAGE_EXECUTION_MODE"),
+        ("retry_scope", "AI_DRAMA_IMAGE_RETRY_SCOPE"),
+        ("image_retry_scope", "AI_DRAMA_IMAGE_RETRY_SCOPE"),
+        ("frame_id", "AI_DRAMA_IMAGE_RETRY_FRAME_ID"),
+        ("asset_key", "AI_DRAMA_IMAGE_RETRY_ASSET_KEY"),
         ("comfyui_base_url", "AI_DRAMA_COMFYUI_BASE_URL"),
         ("comfyui_workflow", "AI_DRAMA_COMFYUI_WORKFLOW"),
         ("comfyui_workflow_mapping", "AI_DRAMA_COMFYUI_WORKFLOW_MAPPING"),
@@ -513,6 +525,8 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
         value = str(payload.get(source_key) or "").strip()
         if value:
             env[env_key] = value
+    if payload.get("force") or payload.get("image_retry_force"):
+        env["AI_DRAMA_IMAGE_RETRY_FORCE"] = "1"
     return cmd, env, job_kind
 
 

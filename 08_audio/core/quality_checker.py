@@ -9,6 +9,7 @@ def _is_silence(item: dict[str, Any]) -> bool:
 
 def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
     issues: list[str] = []
+    warnings: list[str] = []
     score = 100
 
     if stage_id == "08A":
@@ -66,19 +67,40 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
             if not data.get(key):
                 issues.append(f"08D 缺少 {key}。")
                 score -= 10
+        if not data.get("audio_timing_review_path"):
+            issues.append("08D 缺少 audio_timing_review_path。")
+            score -= 15
+        if not data.get("edit_rhythm_path"):
+            issues.append("08D 缺少 edit_rhythm_path。")
+            score -= 15
         timeline = data.get("timeline", {}) if isinstance(data.get("timeline"), dict) else {}
         if not timeline.get("entries"):
             issues.append("08D audio_timeline 没有 entries。")
             score -= 20
+        edit_rhythm = data.get("edit_rhythm", {}) if isinstance(data.get("edit_rhythm"), dict) else {}
+        if timeline.get("entries") and len(edit_rhythm.get("segments", []) or []) != len(timeline.get("entries", []) or []):
+            issues.append("08D edit_rhythm 段数必须和 audio_timeline.entries 对齐。")
+            score -= 20
+        timing_review = data.get("audio_timing_review", {}) if isinstance(data.get("audio_timing_review"), dict) else {}
+        warning_count = int(timing_review.get("warning_count") or 0)
+        issue_count = int(timing_review.get("issue_count") or 0)
+        if warning_count:
+            warnings.append(f"08D 有 {warning_count} 条非静音 voice_line 超过 8 秒，建议检查节奏。")
+            score -= min(10, warning_count * 2)
+        if issue_count or timing_review.get("needs_review"):
+            issues.append(f"08D 有 {issue_count} 条非静音 voice_line 超过 12 秒，需要回到 02 拆句。")
+            score -= min(60, max(1, issue_count) * 30)
 
     score = max(0, min(100, score))
     return {
         "score": score,
         "passed": score >= 80 and not issues,
         "issues": issues,
+        "warnings": warnings,
         "revision_instructions": [
             "检查 02_script_writer/script.json 是否包含 voice_lines/audio_lines/segments，或是否使用【N/D/M/S】标记。",
             "检查 shared_assets/voice_library/voices.json 或 AI_DRAMA_VOICE_MAP 是否覆盖主要角色音色。",
             "execute 模式下确认根目录 index-tts 存在、checkpoints/config.yaml 存在、角色音色样本存在，并已安装 uv。",
+            "如果 audio_timing_review.json 中存在 voice_line_too_long，优先回到 02_script_writer 拆句，再重新生成 08。",
         ] if issues else [],
     }

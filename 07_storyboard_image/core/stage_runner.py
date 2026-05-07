@@ -46,6 +46,16 @@ def _write_stage(output_dir: str | Path, filename: str, data: dict[str, Any]) ->
     return str(path)
 
 
+def _read_existing_manifest(output_dir: str | Path, filename: str, nested_key: str | None = None) -> dict[str, Any]:
+    path = Path(output_dir) / filename
+    data = io_utils.read_json(path, default={})
+    if not isinstance(data, dict):
+        return {}
+    if nested_key and isinstance(data.get(nested_key), dict):
+        return data[nested_key]
+    return data
+
+
 def _run_and_score(stage_id: str, data: dict[str, Any], output_dir: str | Path, output_file: str) -> dict[str, Any]:
     quality = quality_checker.evaluate_stage(stage_id, data)
     data["stage_quality"] = quality
@@ -117,28 +127,34 @@ def run_image_stages(
     scenes: dict[str, Any],
     props: dict[str, Any],
     output_dir: str | Path,
+    retry_options: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not storyboard or not storyboard.get("frames"):
         raise RuntimeError("07_storyboard_image requires 06_storyboard/storyboard.json with frames.")
+    retry_options = retry_manager.normalize_retry_options(retry_options)
     stage_status: list[dict[str, Any]] = []
     outputs: dict[str, dict[str, Any]] = {}
+    existing_character_lock = _read_existing_manifest(output_dir, "character_lock_manifest.json")
+    existing_appearance = _read_existing_manifest(output_dir, "appearance_manifest.json")
+    existing_reference = _read_existing_manifest(output_dir, "reference_asset_manifest.json")
+    existing_image = _read_existing_manifest(output_dir, "image_manifest.json", nested_key="image_manifest")
 
     _mark_started("07P", output_dir)
     outputs["07P"] = planner.build_plan(storyboard, characters, scenes, props)
     stage_status.append(_run_and_score("07P", outputs["07P"], output_dir, "07P_plan.json"))
 
     _mark_started("07A", output_dir)
-    outputs["07A"] = phase_07a.run(outputs["07P"], characters, output_dir)
+    outputs["07A"] = phase_07a.run(outputs["07P"], characters, output_dir, retry_options=retry_options, existing_manifest=existing_character_lock)
     stage_status.append(_run_and_score("07A", outputs["07A"], output_dir, "07A_character_lock.json"))
     _write_json(Path(output_dir) / "character_lock_manifest.json", outputs["07A"].get("character_lock_manifest", {}))
 
     _mark_started("07B", output_dir)
-    outputs["07B"] = phase_07b.run(outputs["07P"], characters, outputs["07A"].get("character_lock_manifest", {}), output_dir)
+    outputs["07B"] = phase_07b.run(outputs["07P"], characters, outputs["07A"].get("character_lock_manifest", {}), output_dir, retry_options=retry_options, existing_manifest=existing_appearance)
     stage_status.append(_run_and_score("07B", outputs["07B"], output_dir, "07B_character_appearance.json"))
     _write_json(Path(output_dir) / "appearance_manifest.json", outputs["07B"].get("appearance_manifest", {}))
 
     _mark_started("07C", output_dir)
-    outputs["07C"] = phase_07c.run(outputs["07P"], output_dir)
+    outputs["07C"] = phase_07c.run(outputs["07P"], output_dir, retry_options=retry_options, existing_manifest=existing_reference)
     stage_status.append(_run_and_score("07C", outputs["07C"], output_dir, "07C_reference_assets.json"))
     _write_json(Path(output_dir) / "reference_asset_manifest.json", outputs["07C"].get("reference_asset_manifest", {}))
 
@@ -149,6 +165,8 @@ def run_image_stages(
         outputs["07B"].get("appearance_manifest", {}),
         outputs["07C"].get("reference_asset_manifest", {}),
         output_dir,
+        retry_options=retry_options,
+        existing_manifest=existing_image,
     )
     stage_status.append(_run_and_score("07D", outputs["07D"], output_dir, "07D_storyboard_frame.json"))
     _write_json(Path(output_dir) / "image_manifest.json", outputs["07D"].get("image_manifest", {}))
@@ -166,7 +184,7 @@ def run_image_stages(
     _write_json(Path(output_dir) / "asset_image_registry.json", outputs["07E"].get("asset_image_registry", {}))
     _write_json(Path(output_dir) / "storyboard_image_meta.json", outputs["07E"].get("storyboard_image_meta", {}))
 
-    return {"schema_version": SCHEMA_VERSION, "stage_mode": "image_execution", "stage_status": stage_status, "outputs": outputs}
+    return {"schema_version": SCHEMA_VERSION, "stage_mode": "image_execution", "stage_status": stage_status, "outputs": outputs, "retry_options": retry_options}
 
 
 def merge_stage_outputs(
@@ -188,6 +206,7 @@ def merge_stage_outputs(
     stage_scores = {item["stage_id"]: (item.get("quality") or {}).get("score") for item in stage_result.get("stage_status", [])}
     quality_report = e.get("quality_report", {}) if isinstance(e.get("quality_report"), dict) else {}
     image_manifest = d.get("image_manifest", {}) if isinstance(d.get("image_manifest"), dict) else {}
+    retry_history = image_manifest.get("retry_history", []) if isinstance(image_manifest.get("retry_history"), list) else []
     data = {
         "schema_version": SCHEMA_VERSION,
         "module": "07_storyboard_image",
@@ -224,6 +243,8 @@ def merge_stage_outputs(
             "storyboard_frame": d.get("execution_summary", {}),
         },
         "retry_plan": e.get("retry_plan", {}),
+        "retry_history": retry_history,
+        "retry_options": stage_result.get("retry_options", {}),
         "quality_report": {**quality_report, "stage_scores": stage_scores},
         "notes": [
             "07 已拆为 07P/07A/07B/07C/07D/07E：计划依赖图、定妆图、换装造型图、场景/道具参考图、正式分镜图、汇总总检。",

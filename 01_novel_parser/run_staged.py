@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ base_module = import_module("00_common.base_module")
 io_utils = import_module("00_common.io_utils")
 resource_manager = import_module("00_common.resource_manager")
 stage_runner = import_module("01_novel_parser.core.stage_runner")
+stage_cache = import_module("00_common.stage_cache")
 
 MODULE_NAME = "01_novel_parser"
 DISPLAY_NAME = "小说解析系统"
@@ -61,11 +63,19 @@ def read_novel_text() -> str:
 
 def main() -> int:
     try:
+        parser = argparse.ArgumentParser(description="01 novel parser staged runner")
+        stage_cache.add_resume_args(parser)
+        args = parser.parse_args()
+
+        force_stages = stage_cache.parse_force_stages(args.force_stage)
         config = base_module.bootstrap_module(MODULE_NAME, DISPLAY_NAME, DESCRIPTION)
         novel_text = read_novel_text()
         _, output_dir = base_module.get_runtime_module_dirs(MODULE_NAME)
 
-        stage_result = stage_runner.run_llm_stages(novel_text, output_dir)
+        stage_result = stage_runner.run_llm_stages(
+            novel_text, output_dir,
+            resume=args.resume, force=args.force, force_stages=force_stages,
+        )
         data = stage_runner.merge_stage_outputs(novel_text, config, stage_result)
 
         base_module.write_json_key_output(
