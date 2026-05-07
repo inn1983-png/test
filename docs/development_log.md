@@ -22,7 +22,6 @@
 03/04/05 已从旧 scaffold library 目录切换为真实资产 system：03_character_system、04_scene_system、05_prop_system。
 03/04/05 已升级为五阶段真实资产系统：A 合并、B 资产卡、C 剧本绑定、D 模块总检、E 面向 06 的资产复核。
 06_storyboard 已升级为五阶段真实 LLM 单帧分镜系统：A 资产闸门、B 分镜规划、C 单帧分镜、D 连续性绑定、E 总检。
-01/02/03/04/05/06 已移除 write_placeholder_output，不再生成占位 result.json。
 01/02/03/04/05/06 已统一接入本地 Gemma JSON 输出护栏，适配 Gemma 4 31B Q4 等本地量化模型。
 01/02/03/04/05/06 的 parse_json_from_text 与 repair fallback 已统一清理 analysis / reasoning / chain_of_thought / _local_model_output_contract 等内部字段。
 00 validate_pipeline.py 已修正为识别 run_staged.py，并使用新的 03/04/05 system 模块顺序。
@@ -34,18 +33,7 @@ configs/local_resource_release.json 已从旧 library 模块名切换为 system 
 
 ---
 
-# 关键架构
-
-## 00 总控
-
-模块运行入口规则：
-
-```text
-如果模块目录存在 run_staged.py，00 优先运行 run_staged.py。
-否则运行 run.py。
-```
-
-当前 pipeline 模块顺序：
+# 当前 pipeline 顺序
 
 ```text
 01_novel_parser
@@ -60,22 +48,19 @@ configs/local_resource_release.json 已从旧 library 模块名切换为 system 
 10_final_assembly
 ```
 
-00 当前关键修正：
+关键产物：
 
 ```text
-validate_pipeline.py 不再只检查 run.py，也会接受 run_staged.py。
-DEFAULT_MODULE_ORDER 已从旧 03_character_library / 04_scene_library / 05_prop_library 改为 03_character_system / 04_scene_system / 05_prop_system。
-validate_pipeline.py 会拦截旧 library 模块，避免重新混入 pipeline。
-run_pipeline.py 依赖检查通过 manifest key_outputs、artifacts.db、run_dir/module/file fallback 三路解析上游产物。
-run_pipeline.py 会在模型阶段边界调用 resource_manager 的专用释放函数。
-```
-
-旧 scaffold 目录已移除：
-
-```text
-03_character_library
-04_scene_library
-05_prop_library
+01_novel_parser/novel_analysis.json
+02_script_writer/script.json
+03_character_system/characters.json
+04_scene_system/scenes.json
+05_prop_system/props.json
+06_storyboard/storyboard.json
+07_storyboard_image/image_manifest.json
+08_audio/final_audio.wav
+09_video/video_manifest.json
+10_final_assembly/final.mp4
 ```
 
 ---
@@ -116,24 +101,9 @@ complete_json 的 repair_callback 返回后也必须再次调用 remove_internal
 03/04/05/06：0.1
 ```
 
-如果需要统一覆盖，可以设置：
-
-```bash
-set AI_DRAMA_LLM_TEMPERATURE=0.1
-```
-
 ---
 
 # 本地模型资源释放规则
-
-统一文件：
-
-```text
-00_common/resource_manager.py
-configs/local_resource_release.json
-```
-
-阶段规则：
 
 ```text
 01–06：LLM_TEXT_PHASE，Gemma/本地 LLM 常驻，不在每个模块结束后主动卸载。
@@ -144,28 +114,29 @@ configs/local_resource_release.json
 10：普通合成阶段，不默认加载大模型。
 ```
 
-模块仍然可以在 finally 中调用：
+01–06 模块即使在 finally 调用 `resource_manager.release_local_resources(MODULE_NAME)`，也只做轻量清理，不主动卸载 LLM。
 
-```python
-resource_manager.release_local_resources(MODULE_NAME)
-```
+---
 
-但 01–06 的该调用只做轻量清理：
+# 角色一致性最新定案：定妆照 → 造型照 → 分镜图
 
-```text
-gc.collect()
-不主动 torch.cuda.empty_cache()
-不执行外部卸载命令
-不卸载 LLM / Gemma
-```
-
-阶段边界释放由 00_main_controller/run_pipeline.py 统一处理：
+为保证角色一致性与换装稳定，采用以下链路：
 
 ```text
-06_storyboard -> 07_storyboard_image：release_llm_resources()
-07_storyboard_image -> 08_audio：release_image_resources()
-08_audio -> 09_video：release_audio_resources() + release_image_resources()
-09_video -> 10_final_assembly：release_video_resources()
+03 建立角色稳定身份、定妆照需求、costume_variants。
+05 只管理可独立强调的穿戴物/关键道具，并用 wearable_policy 标明是否并入造型。
+06 输出 character_lock_reference 与 appearance_asset_requirements，只定义引用关系，不生成图片。
+07 后续先生成/引用角色定妆照锁脸，再基于定妆照图生图换衣服、加常驻穿戴物，生成角色造型照，最后正式分镜图引用角色造型照。
+```
+
+核心原则：
+
+```text
+先锁脸，再换装。
+服装主体归 03 costume_variants，不把同一角色的不同衣服拆成不同角色。
+腰牌、面具、玉佩、凤冠、面纱、特殊披风、官帽、护腕等可独立强调的穿戴物归 05。
+06 每帧引用 canonical_name + character_lock_reference + costume_id + appearance_asset_key + wearable_props。
+07 暂未实现，后续新开对话单独做。
 ```
 
 ---
@@ -178,22 +149,26 @@ gc.collect()
 01_novel_parser/run_staged.py
 ```
 
-当前修正：
-
-```text
-run_staged.py 已从旧 run_scaffold_stages 改为 run_llm_stages。
-已移除 write_placeholder_output。
-新增 novel_meta.json 真实元信息输出。
-LLM 输出已接入 JSON guard + 内部控制字段递归清理。
-```
-
-候选提取最高规则：
+最高规则：
 
 ```text
 只要文章里提到过的人、地点、物件，都必须作为候选输出。
 重要性只作为 importance 字段评分，不能作为是否提取的门槛。
 候选过多不算错误；遗漏才需要返工。
 01 不负责最终筛选、合并、去重。03/04/05 负责标准化、资产分级和复核。
+```
+
+01 禁止做：
+
+```text
+改写小说
+扩写剧情
+压缩成剧本
+生成正式剧本
+生成分镜
+生成图像提示词
+生成视频提示词
+直接写入 shared_assets
 ```
 
 ---
@@ -204,14 +179,6 @@ LLM 输出已接入 JSON guard + 内部控制字段递归清理。
 
 ```text
 02_script_writer/run_staged.py
-```
-
-当前修正：
-
-```text
-已移除 write_placeholder_output。
-script.json 顶层已补回 event_coverage_map，修复 schema_validator 检查事件覆盖但 merge_stage_outputs 未输出的问题。
-LLM 输出已接入 JSON guard + 内部控制字段递归清理。
 ```
 
 02 单帧分镜路线：
@@ -255,34 +222,40 @@ ComfyUI 调用
 03E asset_review
 ```
 
-03 资产分级：
+03B 每个 main/supporting 角色必须输出：
 
 ```text
-asset_importance_score = 0-100
-importance_reason
-source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / character_arc_map / paragraphs
-asset_level = main / supporting / extra_group / mentioned_only
-needs_fixed_face = true / false
-reference_image_priority = required / optional / not_needed
+canonical_name
+appearance
+costume
+default_costume_id
+costume_variants
+needs_fixed_face
 reference_image_plan
+source_evidence
+usage_in_script
 ```
 
-03E 复核：
+03 新增硬规则：
 
 ```text
-面向 06 单帧分镜复核，不是单纯格式检查。
-必须检查遗漏、误合并、误拆分、误分级、过度资产化、固定脸策略、参考图计划和 06 可用性。
-如果 01 candidate_characters 也遗漏但 01 理解中明确存在，写入 upstream_blocking_issues，建议 01D 重跑。
-如果 03 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
+main/supporting 必须包含 default_costume_id / costume_variants。
+default_costume_id 必须存在于 costume_variants。
+costume_variants 必须且只能有一个 is_default=true。
+换装不能拆成新角色。
+03 不生成图片，只写定妆照和服装版本需求。
 ```
 
-03 图像资产最高规则：
+03E 复核必须检查：
 
 ```text
-03 不生成图片，只写参考图计划。
-先单视图稳定，不要一开始做三视图。
-不要把正面/侧面/背面拼成一张三视图图板。
-图片由 07 根据 06 实际分镜需求统一生成。
+是否漏掉主角/反派/关键配角
+是否把同一角色拆成多个
+是否按年龄段/称谓/职务拆角色
+asset_level / fixed face / reference plan 是否合理
+main/supporting 是否缺 default_costume_id / costume_variants
+02 出现换装、伪装、婚服、夜行服、破损衣服、孝服等阶段时是否有对应 costume_variant
+06 是否能直接引用 canonical_name + costume_id
 ```
 
 ---
@@ -317,22 +290,7 @@ parent_scene：字段必须存在；只有 sub_scene 必须非空绑定主场景
 reference_image_plan
 ```
 
-04E 复核：
-
-```text
-面向 06 单帧分镜复核。
-必须检查场景拆太碎、错误合并、主/子/临时分级、parent_scene、全景图计划、临时地点误升主场景、背景物件误作场景和 06 可用性。
-如果 01 candidate_scenes 也遗漏但 01 理解中明确存在，写入 upstream_blocking_issues，建议 01D 重跑。
-如果 04 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
-```
-
-04 图像资产最高规则：
-
-```text
-04 不生成图片，只写参考图计划。
-场景优先全景图，不要一开始做大量多角度。
-图片由 07 根据 06 实际分镜需求统一生成。
-```
+04 不生成图片，只写参考图计划。场景优先全景图，不要一开始做大量多角度。
 
 ---
 
@@ -354,34 +312,39 @@ reference_image_plan
 05E asset_review
 ```
 
-05 资产分级：
+05B 每个道具必须输出：
 
 ```text
-asset_importance_score = 0-100
-importance_reason
-source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / asset_binding_hints / visual_risk_report / paragraphs
-asset_level = key_prop / action_prop / background_object / mentioned_only
-prop_type 与 asset_level 使用同一组枚举：key_prop / action_prop / background_object / mentioned_only
-needs_reference_image = true / false
+canonical_prop_name
+prop_type
+wearable_type
+wearable_policy
+bound_character_names
+bound_costume_ids
+asset_level
+needs_reference_image
 reference_image_plan
+source_evidence
+usage_in_script
 ```
 
-05E 复核：
+wearable_policy 枚举：
 
 ```text
-面向 06 单帧分镜复核。
-必须检查关键道具遗漏、背景物件误升关键道具、同一道具拆分、普通道具过度资产化、背景物件归入场景元素、owner_character 和 06 可用性。
-如果 01 candidate_props 也遗漏但 01 理解中明确存在，写入 upstream_blocking_issues，建议 01D 重跑。
-如果 05 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
+not_wearable
+merge_into_appearance_asset
+independent_prop_reference
+both
 ```
 
-05 图像资产最高规则：
+05 规则：
 
 ```text
+官服、常服、夜行衣、婚服、孝服、破损衣服等完整服装版本归 03 costume_variants。
+腰牌、面具、玉佩、凤冠、面纱、特殊披风、官帽、护腕等可独立强调的穿戴物归 05。
+merge_into_appearance_asset 表示后续 07 可在角色造型照阶段融合。
+independent_prop_reference 表示正式分镜图阶段仍可独立引用。
 05 不生成图片，只写参考图计划。
-关键道具用单独干净图。
-普通道具和背景物件不要全部做图，否则资产库会爆炸。
-图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
 ---
@@ -426,12 +389,23 @@ reference_image_plan
 只生成单帧分镜 JSON。
 不生成图片、不调用 ComfyUI、不生成最终视频。
 不得输出 prompt / image_prompt / desc_prompt / desc_promopt / negative_prompt / video_prompt / comfyui_prompt。
-只能输出 reference_requirements / composition_notes / continuity_notes。
+只能输出 character_lock_reference / appearance_asset_requirements / appearance_asset_key / reference_requirements / composition_notes / continuity_notes。
 每帧角色必须引用 03 canonical_name。
+每帧角色服装必须引用 03 costume_id。
 每帧场景必须引用 04 canonical_scene_name。
 每帧道具必须引用 05 canonical_prop_name。
-不允许新增不存在于资产库的主角色、主场景、关键道具。
+不允许新增不存在于资产库的主角色、服装版本、主场景、关键道具。
 如发现资产缺失，写入 upstream_blocking_issues，建议 03/04/05 对应阶段重跑。
+```
+
+06C 必须输出：
+
+```text
+appearance_asset_requirements：07 未来生成角色造型照的需求索引。
+frames[].characters[].character_lock_reference：定妆照锁脸引用。
+frames[].characters[].costume_id：角色服装版本。
+frames[].characters[].appearance_asset_key：造型照引用索引。
+frames[].characters[].wearable_props：并入造型照的常驻穿戴物。
 ```
 
 06 四宫格规则：
@@ -469,10 +443,10 @@ LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原
 ## 最终 schema 硬校验
 
 ```text
-03/04/05 最终 schema_validator.py 不只查字段，还会检查 asset_importance_score、source_understanding_basis、asset_review_report、downstream_readiness_for_06、main/optional/do_not_reference 清单。
-06 最终 schema_validator.py 会检查 frames、sequence_index 连续性、稳定资产名引用、allowed_asset_names 与 03/04/05 一致性、禁止图像提示词字段、资产不可用时必须有 upstream_blocking_issues。
-注意：schema_validation 不再作为预校验必填字段，避免校验前必然失败。
-03E/04E/05E 的 optional_assets_for_06 和 do_not_reference_as_main_asset 允许为空数组。
+03 最终 schema_validator.py 会检查角色去重、主/配角 fixed face、default_costume_id、costume_variants、默认服装唯一性。
+04 最终 schema_validator.py 会检查场景层级、parent_scene、主场景参考图计划。
+05 最终 schema_validator.py 会检查道具分级、wearable_type、wearable_policy、bound_character_names、bound_costume_ids、禁止图像提示词字段。
+06 最终 schema_validator.py 会检查 frames、sequence_index 连续性、稳定资产名引用、costume_id 引用、appearance_asset_key 定义、allowed_asset_names 与 03/04/05 一致性、禁止图像提示词字段、资产不可用时必须有 upstream_blocking_issues。
 ```
 
 ---
@@ -517,25 +491,20 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 01_novel_parser
 ```
 
-如果只想验证 00–06，不加载后续模型，可以先逐个跑到 06，或临时用 `--only-module` 分段测试。
-
 ---
 
 # 用户最新明确要求
 
 ```text
-01 负责提取一切。
-03/04/05 不要简单删除候选，而是合并、分级、复核、输出稳定资产库。
-03/04/05 必须真实可用，方便后续测试，不要用占位文件。
-复核必须使用 01 阶段对小说的真正理解来判断遗漏、误合并、误分级、过度资产化。
-复核发现遗漏不能直接在 E 阶段硬补，必须通过 retry_stages 触发前置阶段重跑；如果 01 自己也漏提，则写 upstream_blocking_issues。
 03/04/05 形成稳定资产库，让 06 单帧分镜可以直接引用稳定角色名、稳定场景名、稳定道具名，避免角色串脸、场景漂移、道具混乱。
-03/04/05 不生成图片，只写参考图计划；图片由 07 根据 06 实际分镜需求统一生成。
-06 必须读取 02_script_writer/script.json、03_character_system/characters.json、04_scene_system/scenes.json、05_prop_system/props.json。
+不同阶段角色可能有不同衣服，服装主体要归入 03 costume_variants，不要把换装拆成新角色。
+为了保证角色一致性，后续 07 应先生成角色定妆照锁脸，再用定妆照图生图换衣服加道具，生成角色造型照，再被正式分镜图引用。
+05 只处理可独立强调或可并入造型的穿戴物，不主管完整服装版本。
 06 只生成单帧分镜 JSON，不生成图片、不调用 ComfyUI、不生成最终视频。
-06 必须严格引用 03/04/05 稳定资产名，不允许新增不存在于资产库的主角色、主场景、关键道具。
+06 必须严格引用 03/04/05 稳定资产名和 03 costume_id，不允许新增不存在于资产库的主角色、服装版本、主场景、关键道具。
 06 如发现资产缺失，不能自己硬补，要输出 upstream_blocking_issues，建议 03/04/05 对应阶段重跑。
-06 为 07 图片生成服务，但不能直接写图像提示词；只能输出 reference_requirements / composition_notes / continuity_notes。
+06 为 07 图片生成服务，但不能直接写图像提示词；只能输出 character_lock_reference / appearance_asset_requirements / reference_requirements / composition_notes / continuity_notes。
+07 暂不改，等 01–06 全部完成后新开对话单独处理。
 用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05/06 需要强 JSON 护栏、低温度默认值、输出控制字段清理。
 00–06 都属于 LLM 文本阶段，不应每个模块结束就释放 LLM；06→07 才释放 LLM 显存。
 ```
