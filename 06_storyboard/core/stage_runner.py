@@ -135,6 +135,7 @@ def _source_summary(script: dict[str, Any], characters: dict[str, Any], scenes: 
             "voice_line_plan": script.get("voice_line_plan", []),
             "scene_beats": script.get("scene_beats", []),
             "visual_dramatic_units": script.get("visual_dramatic_units", []),
+            "appearance_state_changes": script.get("appearance_state_changes", []),
             "storyboard_hints": script.get("storyboard_hints", []),
             "continuity_chain": script.get("continuity_chain", []),
             "event_coverage_map": script.get("event_coverage_map", []),
@@ -158,20 +159,20 @@ def build_stage_payload(
     if stage_id == "06A":
         payload: dict[str, Any] = {
             "source": source,
-            "task": "检查 02 剧本中的角色/服装/场景/道具需求是否都能被 03/04/05 稳定资产库覆盖。不能新增资产；缺资产或 costume_id 必须输出 upstream_blocking_issues，并建议对应 03/04/05 阶段重跑。",
+            "task": "检查 02 剧本中的角色/服装/场景/道具需求是否都能被 03/04/05 稳定资产库覆盖。必须参考 02 appearance_state_changes 判断换装和穿戴状态。不能新增资产；缺资产或 costume_id 必须输出 upstream_blocking_issues，并建议对应 03/04/05 阶段重跑。",
         }
     elif stage_id == "06B":
         payload = {
             "source": source,
             "asset_gate": outputs["06A"],
-            "task": "基于 02 剧本和 06A 允许资产清单，规划单帧分镜组、覆盖范围、帧数密度和连续性策略。不要生成图片提示词。",
+            "task": "基于 02 剧本、02 appearance_state_changes 和 06A 允许资产清单，规划单帧分镜组、覆盖范围、帧数密度和连续性策略。不要生成图片提示词。",
         }
     elif stage_id == "06C":
         payload = {
             "source": source,
             "asset_gate": outputs["06A"],
             "storyboard_plan": outputs["06B"],
-            "task": "生成正式单帧分镜 JSON。每一帧只能引用 allowed_asset_names 中的稳定角色名、角色 costume_id、稳定场景名、稳定道具名；输出 character_lock_reference 与 appearance_asset_requirements，但不要写图像提示词。",
+            "task": "生成正式单帧分镜 JSON。每一帧只能引用 allowed_asset_names 中的稳定角色名、角色 costume_id、稳定场景名、稳定道具名；必须依据 02 appearance_state_changes 输出 character_lock_reference 与 appearance_asset_requirements，但不要写图像提示词。",
         }
     elif stage_id == "06D":
         payload = {
@@ -186,7 +187,7 @@ def build_stage_payload(
         payload = {
             "source": source,
             "stage_outputs": outputs,
-            "task": "总检 06 单帧分镜：资产引用、角色定妆照引用、角色造型引用、剧情覆盖、顺序、连续性、07 可用性、越界字段、缺资产阻塞问题，并可指定 retry_stages。",
+            "task": "总检 06 单帧分镜：资产引用、角色定妆照引用、角色造型引用、02 appearance_state_changes 覆盖、剧情覆盖、顺序、连续性、07 可用性、越界字段、缺资产阻塞问题，并可指定 retry_stages。",
         }
     else:
         raise ValueError(stage_id)
