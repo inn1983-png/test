@@ -6,7 +6,55 @@ const state = {
   logLines: [],
 };
 
+const MODULE_DISPLAY_NAMES = {
+  "01_novel_parser": "01 小说解析",
+  "02_script_writer": "02 剧本改编",
+  "03_character_system": "03 角色资产库",
+  "04_scene_system": "04 场景资产库",
+  "05_prop_system": "05 道具资产库",
+  "06_storyboard": "06 单帧分镜",
+  "07_storyboard_image": "07 分镜图片",
+  "08_audio": "08 音频生成",
+  "09_video": "09 视频生成",
+  "10_final_assembly": "10 最终合成",
+};
+
+const STAGE_DISPLAY_NAMES = {
+  "01A": "01A 原文结构解析",
+  "01B": "01B 候选角色/场景/道具提取",
+  "01C": "01C 故事理解与冲突梳理",
+  "01D": "01D 视觉风险与高留存片段",
+  "01E": "01E 小说解析总检",
+  "02A": "02A 剧情拆解",
+  "02B": "02B 剧本初稿",
+  "02C": "02C 对白/OS/留白优化",
+  "02D": "02D 视觉动作链绑定",
+  "02E": "02E 剧本总检与外观变化",
+  "03A": "03A 角色归并计划",
+  "03B": "03B 角色资产卡",
+  "03C": "03C 剧本使用绑定",
+  "03D": "03D 角色库总检",
+  "03E": "03E 面向分镜复核",
+  "04A": "04A 场景归并计划",
+  "04B": "04B 场景资产卡",
+  "04C": "04C 剧本使用绑定",
+  "04D": "04D 场景库总检",
+  "04E": "04E 面向分镜复核",
+  "05A": "05A 道具归并计划",
+  "05B": "05B 道具资产卡",
+  "05C": "05C 剧本使用绑定",
+  "05D": "05D 道具库总检",
+  "05E": "05E 面向分镜复核",
+  "06A": "06A 资产闸门检查",
+  "06B": "06B 分镜规划",
+  "06C": "06C 单帧分镜生成",
+  "06D": "06D 连续性绑定",
+  "06E": "06E 分镜总检",
+};
+
 const $ = (id) => document.getElementById(id);
+const moduleName = (name) => MODULE_DISPLAY_NAMES[name] || name || "未知模块";
+const stageName = (name) => STAGE_DISPLAY_NAMES[String(name || "").slice(0, 3)] || name || "未命名阶段";
 
 function statusLabel(status) {
   const map = {
@@ -92,8 +140,8 @@ async function loadPipeline() {
 function fillModuleSelects() {
   const from = $("fromModuleInput");
   const only = $("onlyModuleInput");
-  from.innerHTML = `<option value="">从头开始</option>` + state.pipeline.map((m) => `<option value="${m}">${m}</option>`).join("");
-  only.innerHTML = `<option value="">不限制</option>` + state.pipeline.map((m) => `<option value="${m}">${m}</option>`).join("");
+  from.innerHTML = `<option value="">从头开始</option>` + state.pipeline.map((m) => `<option value="${m}">${moduleName(m)}</option>`).join("");
+  only.innerHTML = `<option value="">不限制</option>` + state.pipeline.map((m) => `<option value="${m}">${moduleName(m)}</option>`).join("");
 }
 
 async function refreshAll() {
@@ -189,7 +237,7 @@ function connectEvents(jobId) {
   });
   state.eventSource.addEventListener("job_started", (ev) => {
     const event = JSON.parse(ev.data);
-    state.logLines.push(`[JOB] ${event.payload.run_dir}`);
+    state.logLines.push(`[任务] ${event.payload.run_dir}`);
     updateJobMini();
   });
   state.eventSource.addEventListener("job_finished", (ev) => {
@@ -201,7 +249,7 @@ function connectEvents(jobId) {
   });
   state.eventSource.addEventListener("job_error", (ev) => {
     const event = JSON.parse(ev.data);
-    state.logLines.push(`[ERROR] ${event.payload.error}`);
+    state.logLines.push(`[错误] ${event.payload.error}`);
     $("liveLog").textContent = state.logLines.join("\n");
   });
 }
@@ -248,7 +296,8 @@ function renderTimeline(modules = null) {
   $("pipelineTimeline").innerHTML = data.map((m, i) => `
     <div class="timeline-item status-${m.status || "pending"}">
       <div class="index">${String(i + 1).padStart(2, "0")}</div>
-      <div class="name">${m.name}</div>
+      <div class="name">${moduleName(m.name)}</div>
+      <div class="muted">${escapeHtml(m.name || "")}</div>
       ${badge(m.status)}
       <p>${m.message || ""}</p>
       ${m.duration_seconds ? `<div class="muted">耗时 ${m.duration_seconds}s</div>` : ""}
@@ -259,39 +308,64 @@ function renderTimeline(modules = null) {
 function renderStages(modules) {
   const groups = modules.filter((m) => (m.stages || []).length);
   if (!groups.length) {
-    $("stageExplorer").innerHTML = `<div class="muted">暂无阶段输出。运行 01–06 后这里会出现 A/B/C/D/E 阶段卡片。</div>`;
+    $("stageExplorer").innerHTML = `<div class="muted">暂无阶段输出。运行 01–06 后这里会出现模块 ABCDE 阶段卡片。</div>`;
     return;
   }
-  $("stageExplorer").innerHTML = groups.map((m) => `
-    <div class="module-stage-group">
-      <div class="module-stage-header">
-        <strong>${m.name}</strong>
-        ${badge(m.status)}
-      </div>
-      <div class="stage-grid">
-        ${m.stages.map((s) => `
-          <div class="stage-card">
-            <div class="stage-name">${s.stage_id || s.name}</div>
-            <div>${s.passed === true ? badge("success") : s.passed === false ? badge("needs_review") : badge("pending")}</div>
-            <div class="score">${s.score ?? "-"}</div>
-            <div class="muted">问题 ${s.issues_count ?? 0} 个</div>
-            <button class="btn small" onclick="previewFile('${s.path}')">查看输出</button>
+  $("stageExplorer").innerHTML = groups.map((m) => {
+    const stages = m.stages || [];
+    const passed = stages.filter((s) => s.passed === true).length;
+    const failed = stages.filter((s) => s.passed === false || Number(s.issues_count || 0) > 0).length;
+    return `
+      <div class="module-stage-group">
+        <div class="module-stage-header">
+          <div>
+            <strong>${moduleName(m.name)}</strong>
+            <div class="muted">${escapeHtml(m.name)} · 阶段 ${stages.length} 个 · 通过 ${passed} 个 · 问题 ${failed} 个</div>
           </div>
-        `).join("")}
+          ${badge(m.status)}
+        </div>
+        <div class="stage-grid detailed-stage-grid">
+          ${stages.map((s) => renderStageCard(s)).join("")}
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderStageCard(s) {
+  const sid = s.stage_id || s.name || "stage";
+  const status = s.passed === true ? "success" : s.passed === false ? "needs_review" : "pending";
+  return `
+    <div class="stage-card detailed-stage-card">
+      <div class="stage-name">${escapeHtml(stageName(sid))}</div>
+      <div class="muted">文件：${escapeHtml(s.name || "-")}</div>
+      <div class="stage-score-row">
+        <div>
+          <div class="score">${s.score ?? "-"}</div>
+          <div class="muted">阶段评分</div>
+        </div>
+        <div>${badge(status)}</div>
+      </div>
+      <div class="card-meta-grid">
+        <div class="card-meta"><span>问题数</span><strong>${s.issues_count ?? 0}</strong></div>
+        <div class="card-meta"><span>通过</span><strong>${s.passed === true ? "是" : s.passed === false ? "否" : "待定"}</strong></div>
+      </div>
+      <div class="card-actions">
+        <button class="btn small" onclick="previewFile('${s.path}')">查看阶段输出</button>
       </div>
     </div>
-  `).join("");
+  `;
 }
 
 function collectIssues(modules) {
   const issues = [];
   for (const m of modules) {
-    if (["failed", "blocked"].includes(m.status)) issues.push({ title: `${m.name} ${statusLabel(m.status)}`, detail: m.message || "模块未通过", level: "problem" });
+    if (["failed", "blocked"].includes(m.status)) issues.push({ title: `${moduleName(m.name)} ${statusLabel(m.status)}`, detail: m.message || "模块未通过", level: "problem" });
     for (const s of m.stages || []) {
-      if (s.passed === false || Number(s.issues_count || 0) > 0) issues.push({ title: `${m.name} / ${s.stage_id || s.name}`, detail: `评分 ${s.score ?? "-"}，问题 ${s.issues_count ?? 0} 个`, level: "problem", path: s.path });
+      if (s.passed === false || Number(s.issues_count || 0) > 0) issues.push({ title: `${moduleName(m.name)} / ${stageName(s.stage_id || s.name)}`, detail: `评分 ${s.score ?? "-"}，问题 ${s.issues_count ?? 0} 个`, level: "problem", path: s.path });
     }
     const q = m.quality || {};
-    if (q.needs_review || q.needs_retry || q.schema_validation_passed === false) issues.push({ title: `${m.name} 总检需复核`, detail: JSON.stringify(q).slice(0, 220), level: "problem" });
+    if (q.needs_review || q.needs_retry || q.schema_validation_passed === false) issues.push({ title: `${moduleName(m.name)} 总检需复核`, detail: JSON.stringify(q).slice(0, 220), level: "problem" });
   }
   return issues;
 }
@@ -416,7 +490,7 @@ async function renderStoryboardWorkspace(snap) {
   const wrap = $("storyboardWorkspace");
   if (!wrap) return;
   if (!snap) {
-    wrap.innerHTML = `<div class="muted">暂无分镜数据。运行 06_storyboard 后这里会显示分镜卡片。</div>`;
+    wrap.innerHTML = `<div class="muted">暂无分镜数据。运行 06 单帧分镜 后这里会显示分镜卡片。</div>`;
     return;
   }
   const storyboard = await loadJsonFromRun("06_storyboard/storyboard.json");
