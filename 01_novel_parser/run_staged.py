@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from importlib import import_module
@@ -20,8 +21,42 @@ SCHEMA_VERSION = "1.2"
 
 
 def read_novel_text() -> str:
-    novel_path = base_module.module_input_path(MODULE_NAME, "novel.txt")
-    return io_utils.read_text(novel_path, default="").strip()
+    """Read novel text from module input first, then project/chapter shared input.
+
+    In pipeline mode, 00 creates a shared input dir:
+        workspace/projects/{project_id}/input/novel.txt
+
+    Module runtime input is separate:
+        workspace/projects/{project_id}/01_novel_parser/input/
+
+    Users usually place novel.txt in the shared input dir, so 01 must support both.
+    """
+    candidates: list[Path] = []
+
+    module_path = base_module.module_input_path(MODULE_NAME, "novel.txt")
+    candidates.append(module_path)
+
+    shared_input_dir = os.getenv("AI_DRAMA_INPUT_DIR")
+    if shared_input_dir:
+        candidates.append(Path(shared_input_dir) / "novel.txt")
+
+    candidates.append(ROOT_DIR / "workspace" / "input" / "novel.txt")
+    candidates.append(ROOT_DIR / MODULE_NAME / "input" / "novel.txt")
+
+    checked: list[str] = []
+    for path in candidates:
+        if path in [Path(p) for p in checked]:
+            continue
+        checked.append(str(path))
+        text = io_utils.read_text(path, default="").strip()
+        if text:
+            print(f"[INPUT] 01_novel_parser loaded novel text from: {path}")
+            return text
+
+    print("[INPUT] 01_novel_parser checked novel input paths:")
+    for path in checked:
+        print(f"  - {path}")
+    return ""
 
 
 def main() -> int:
