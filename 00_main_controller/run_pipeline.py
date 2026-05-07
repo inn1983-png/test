@@ -13,6 +13,7 @@ from importlib import import_module
 io_utils = import_module("00_common.io_utils")
 module_contracts = import_module("00_common.module_contracts")
 module_runner = import_module("00_common.module_runner")
+resource_manager = import_module("00_common.resource_manager")
 run_status = import_module("00_common.run_status")
 workspace_manager = import_module("00_common.workspace_manager")
 validate_pipeline = import_module("00_main_controller.validate_pipeline")
@@ -102,6 +103,21 @@ def check_dependencies_for_module(run_dir: str, module_name: str, contracts: dic
     return ok
 
 
+def handle_phase_transition(previous_module: str | None, next_module: str) -> None:
+    """Release model families only at explicit pipeline phase boundaries."""
+    if previous_module == "06_storyboard" and next_module == "07_storyboard_image":
+        resource_manager.release_llm_resources()
+    if previous_module == "07_storyboard_image" and next_module == "08_audio":
+        resource_manager.release_image_resources()
+    if previous_module == "08_audio" and next_module == "09_video":
+        resource_manager.release_audio_resources()
+    if previous_module == "08_audio" and next_module == "09_video":
+        # LTX2.3 should start with other large model families unloaded.
+        resource_manager.release_image_resources()
+    if previous_module == "09_video" and next_module == "10_final_assembly":
+        resource_manager.release_video_resources()
+
+
 def main() -> int:
     args = build_parser().parse_args()
     pipeline_config = load_pipeline_config(args.pipeline)
@@ -150,7 +166,10 @@ def main() -> int:
         print("Dry-run finished. No modules were executed.")
         return 0
 
+    previous_module: str | None = None
     for module_name in selected_pipeline:
+        handle_phase_transition(previous_module, module_name)
+
         if not args.skip_dependency_check:
             dependencies_ok = check_dependencies_for_module(context.run_dir, module_name, contracts)
             if not dependencies_ok:
@@ -168,6 +187,7 @@ def main() -> int:
         if code != 0:
             print(f"Pipeline stopped at: {module_name}")
             return code
+        previous_module = module_name
 
     print("Pipeline finished.")
     return 0
