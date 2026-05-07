@@ -17,11 +17,12 @@ DEFAULT_MAX_RETRIES = 2
 DEFAULT_MAX_FINAL_REVISION_ROUNDS = 1
 DEFAULT_BATCH_MAX_CHARS = 6000
 
-# 本地 Gemma 当前常用 n_ctx=49152。这里按字符先做保守预算，避免 01A/01B/01F
-# 把整篇小说或完整 stage_outputs 一次性塞入上下文，导致 HTTP 400 exceed_context_size。
-DEFAULT_GLOBAL_TEXT_BUDGET_CHARS = 26000
-DEFAULT_PARAGRAPH_PREVIEW_CHARS = 220
-DEFAULT_STAGE_ARRAY_PREVIEW_ITEMS = 80
+# 文本 LLM 已默认切到 DeepSeek V4 Pro API。这里不再按本地 49K 上下文强压缩输入，
+# 只保留输出 max_tokens / JSON 护栏来防止模型生成 runaway JSON。
+# 如需临时回到本地小上下文模型，可通过环境变量显式开启压缩。
+DEFAULT_GLOBAL_TEXT_BUDGET_CHARS = 900_000
+DEFAULT_PARAGRAPH_PREVIEW_CHARS = 4_000
+DEFAULT_STAGE_ARRAY_PREVIEW_ITEMS = 10_000
 
 STAGES: list[dict[str, str]] = [
     {"stage_id": "01A", "name": "story_understanding", "prompt_file": "prompts/01A_story_understanding.md", "output_file": "01A_story_understanding.json"},
@@ -58,10 +59,20 @@ def _read_prompt(prompt_file: str) -> str:
     return content
 
 
+def _input_compression_enabled() -> bool:
+    """Off by default because text LLM now uses long-context DeepSeek Pro.
+
+    Set AI_DRAMA_LLM_INPUT_COMPACT=1 only when deliberately running a small
+    local text model again.
+    """
+    import os
+
+    return os.getenv("AI_DRAMA_LLM_INPUT_COMPACT", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _compact_text_window(text: str, max_chars: int = DEFAULT_GLOBAL_TEXT_BUDGET_CHARS) -> str:
-    """Keep head/middle/tail evidence while staying safely below local LLM ctx."""
     text = text or ""
-    if len(text) <= max_chars:
+    if not _input_compression_enabled() or len(text) <= max_chars:
         return text
     head = max_chars // 2
     middle = max_chars // 5
@@ -70,7 +81,7 @@ def _compact_text_window(text: str, max_chars: int = DEFAULT_GLOBAL_TEXT_BUDGET_
     mid_end = min(len(text), mid_start + middle)
     return (
         text[:head]
-        + "\n\n...[中间原文已压缩：用于避免本地 LLM 上下文超限；保留开头/中段/结尾作为全局理解依据]...\n\n"
+        + "\n\n...[中间原文已压缩：仅在 AI_DRAMA_LLM_INPUT_COMPACT=1 时启用]...\n\n"
         + text[mid_start:mid_end]
         + "\n\n...[后接原文结尾片段]...\n\n"
         + text[-tail:]
@@ -79,14 +90,14 @@ def _compact_text_window(text: str, max_chars: int = DEFAULT_GLOBAL_TEXT_BUDGET_
 
 def _preview_text(text: Any, max_chars: int = DEFAULT_PARAGRAPH_PREVIEW_CHARS) -> str:
     value = str(text or "")
-    if len(value) <= max_chars:
+    if not _input_compression_enabled() or len(value) <= max_chars:
         return value
     head = max_chars // 2
     tail = max_chars - head
     return value[:head] + "...[段落预览截断]..." + value[-tail:]
 
 
-def _slim_paragraph(para: dict[str, Any], keep_text: bool = False) -> dict[str, Any]:
+def _slim_paragraph(para: dict[str, Any], keep_text: bool = True) -> dict[str, Any]:
     slim = {
         "paragraph_id": para.get("paragraph_id"),
         "chapter_id": para.get("chapter_id"),
@@ -100,45 +111,48 @@ def _slim_paragraph(para: dict[str, Any], keep_text: bool = False) -> dict[str, 
         "contains_new_scene": para.get("contains_new_scene"),
         "contains_new_prop": para.get("contains_new_prop"),
     }
-    if keep_text:
+    if keep_text or not _input_compression_enabled():
         slim["text"] = para.get("text", "")
     else:
         slim["text_preview"] = _preview_text(para.get("text", ""))
     return slim
 
 
-def _slim_paragraphs(paragraphs: list[dict[str, Any]], limit: int | None = None, keep_text: bool = False) -> list[dict[str, Any]]:
-    items = paragraphs if limit is None else paragraphs[:limit]
+def _slim_paragraphs(paragraphs: list[dict[str, Any]], limit: int | None = None, keep_text: bool = True) -> list[dict[str, Any]]:
+    effective_limit = limit if _input_compression_enabled() else None
+    items = paragraphs if effective_limit is None else paragraphs[:effective_limit]
     result = [_slim_paragraph(item, keep_text=keep_text) for item in items if isinstance(item, dict)]
-    if limit is not None and len(paragraphs) > limit:
-        result.append({"truncated_note": f"原 paragraphs 共 {len(paragraphs)} 条，这里只保留前 {limit} 条用于总检上下文预算。"})
+    if effective_limit is not None and len(paragraphs) > effective_limit:
+        result.append({"truncated_note": f"原 paragraphs 共 {len(paragraphs)} 条，这里只保留前 {effective_limit} 条。"})
     return result
 
 
 def _slim_base_split(base_split: dict[str, Any]) -> dict[str, Any]:
     return {
         "chapters": base_split.get("chapters", []),
-        "paragraphs": _slim_paragraphs(base_split.get("paragraphs", []) or [], keep_text=False),
+        "paragraphs": _slim_paragraphs(base_split.get("paragraphs", []) or [], keep_text=True),
         "timeline": base_split.get("timeline", []),
-        "note": "base_split 中 text_preview 仅供 LLM 判断段落类型；最终输出会由程序合并回完整原文 text。",
+        "note": "base_split 由程序生成，段落边界和 paragraph_id 已锁定；LLM 只补充标注，不要改写原文。",
     }
 
 
 def _compact_event_graph(event_graph: Any, max_items: int = DEFAULT_STAGE_ARRAY_PREVIEW_ITEMS) -> Any:
-    if not isinstance(event_graph, dict):
+    if not _input_compression_enabled() or not isinstance(event_graph, dict):
         return event_graph
     compact = dict(event_graph)
     for key in ["events", "edges", "causal_links"]:
         value = compact.get(key)
         if isinstance(value, list) and len(value) > max_items:
             compact[key] = value[:max_items]
-            compact[f"{key}_truncated_note"] = f"原数组 {len(value)} 项，已压缩为前 {max_items} 项以避免上下文超限。"
+            compact[f"{key}_truncated_note"] = f"原数组 {len(value)} 项，已压缩为前 {max_items} 项。"
     return compact
 
 
 def _compact_stage_output(stage_id: str, data: dict[str, Any], max_items: int = DEFAULT_STAGE_ARRAY_PREVIEW_ITEMS) -> dict[str, Any]:
     if not isinstance(data, dict):
         return {}
+    if not _input_compression_enabled():
+        return data
 
     skip_keys = {"stage_attempts", "batch_status"}
     compact: dict[str, Any] = {}
@@ -146,7 +160,7 @@ def _compact_stage_output(stage_id: str, data: dict[str, Any], max_items: int = 
         if key in skip_keys:
             continue
         if key == "paragraphs" and isinstance(value, list):
-            compact[key] = _slim_paragraphs(value, limit=max_items, keep_text=False)
+            compact[key] = _slim_paragraphs(value, limit=max_items, keep_text=True)
         elif key == "event_graph":
             compact[key] = _compact_event_graph(value, max_items=max_items)
         elif isinstance(value, list):
@@ -154,12 +168,12 @@ def _compact_stage_output(stage_id: str, data: dict[str, Any], max_items: int = 
             if len(value) > max_items:
                 compact[f"{key}_truncated_note"] = f"原数组 {len(value)} 项，已压缩为前 {max_items} 项。"
         elif isinstance(value, str):
-            compact[key] = _preview_text(value, max_chars=1200)
+            compact[key] = _preview_text(value, max_chars=4000)
         elif isinstance(value, dict):
             compact[key] = value
         else:
             compact[key] = value
-    compact["compact_note"] = f"{stage_id} 已按本地 LLM 上下文预算压缩，仅用于后续阶段理解/总检。完整产物仍写入 intermediate。"
+    compact["compact_note"] = f"{stage_id} 已按 AI_DRAMA_LLM_INPUT_COMPACT 压缩。"
     return compact
 
 
@@ -194,7 +208,8 @@ def build_stage_payload(
         payload: dict[str, Any] = {
             "novel_text": _compact_text_window(novel_text),
             "input_text_length": len(novel_text),
-            "context_budget_note": "输入过长时已保留开头/中段/结尾。01A 只做全局理解，不做逐段资产提取。逐段候选提取由 01D 分批完成。",
+            "context_policy": "quality_first_full_context_deepseek_pro",
+            "instruction": "请基于完整原文做全局理解。不要复述全文，只输出阶段 JSON。",
         }
     elif stage_id == "01B":
         base = outputs.get("01B", {}).get("base_split") or paragraph_splitter.split_paragraphs(novel_text)
@@ -202,14 +217,15 @@ def build_stage_payload(
             "novel_text": _compact_text_window(novel_text),
             "input_text_length": len(novel_text),
             "base_split": _slim_base_split(base),
-            "instruction": "保留 base_split 的 paragraph_id、start_char、end_char 和顺序，只补充章节、段落类型和 timeline 标注。base_split.text_preview 是预览；最终完整 text 会由程序从 base_split 合并回去，不要改写原文。",
+            "context_policy": "quality_first_full_context_deepseek_pro",
+            "instruction": "保留 base_split 的 paragraph_id、text、start_char、end_char 和顺序，只补充章节、段落类型和 timeline 标注。不要改写原文。",
         }
     elif stage_id == "01C":
         payload = {
             "story_understanding": outputs["01A"].get("story_understanding"),
             "story_spine": outputs["01A"].get("story_spine"),
-            "paragraphs": _slim_paragraphs(outputs["01B"].get("paragraphs", []) or [], keep_text=False),
-            "context_budget_note": "paragraphs 使用 text_preview 压缩；请根据段落顺序、类型和预览建立事件图。",
+            "paragraphs": _slim_paragraphs(outputs["01B"].get("paragraphs", []) or [], keep_text=True),
+            "context_policy": "quality_first_full_context_deepseek_pro",
         }
     elif stage_id == "01D":
         payload = {
@@ -222,16 +238,17 @@ def build_stage_payload(
             "story_understanding": outputs["01A"].get("story_understanding"),
             "story_spine": outputs["01A"].get("story_spine"),
             "event_graph": _compact_event_graph(outputs["01C"].get("event_graph")),
-            "paragraphs": _slim_paragraphs(outputs["01B"].get("paragraphs", []) or [], keep_text=False),
+            "paragraphs": _slim_paragraphs(outputs["01B"].get("paragraphs", []) or [], keep_text=True),
             "golden_lines_draft": outputs["01E"].get("golden_lines", []),
-            "context_budget_note": "paragraphs 已压缩为 text_preview；01E 只预测制作价值、口播/视频候选，不要复述全文。",
+            "context_policy": "quality_first_full_context_deepseek_pro",
         }
     elif stage_id == "01F":
         payload = {
-            "novel_text_overview": _compact_text_window(novel_text, max_chars=16000),
+            "novel_text": _compact_text_window(novel_text),
             "input_text_length": len(novel_text),
             "stage_outputs": _compact_outputs_for_final(outputs),
-            "instruction": "执行总检时只判断字段完整性、证据链、重跑建议和风险。不要要求回传完整小说原文或完整 paragraphs。",
+            "context_policy": "quality_first_full_context_deepseek_pro",
+            "instruction": "执行总检，判断字段完整性、证据链、重跑建议和风险。不要复述完整原文。",
         }
     else:
         raise ValueError(f"Unknown stage_id: {stage_id}")
@@ -320,13 +337,13 @@ def _run_candidate_stage_in_batches(
     batch_outputs = []
     batch_status = []
     base_policy = outputs.get("01D", {}).get("candidate_extraction_policy", {})
-    compact_event_graph = _compact_event_graph(outputs["01C"].get("event_graph"))
+    event_graph = outputs["01C"].get("event_graph")
 
     for batch in batches:
         payload = {
             "batch_id": batch["batch_id"],
             "paragraphs": batch["paragraphs"],
-            "event_graph": compact_event_graph,
+            "event_graph": event_graph,
             "candidate_extraction_policy": base_policy,
             "final_quality_revision_context": final_revision_context,
         }
@@ -448,7 +465,7 @@ def merge_stage_outputs(novel_text: str, config: dict[str, Any], stage_result: d
         "warnings": f.get("warnings", []),
         "chapter_memory_update": f.get("chapter_memory_update", {}),
         "adaptation_hints": {"global_rule": "所有改编建议必须基于 story_understanding 和 story_spine。"},
-        "notes": ["01 已采用真实 LLM 分阶段解析；01B 使用程序段落边界，长文本请求会自动压缩上下文；01D 分批提取候选，最终执行硬规则校验。"],
+        "notes": ["01 已采用 DeepSeek V4 Pro 质量优先上下文；01B 使用程序段落边界；01D 分批提取候选；最终执行硬规则校验。"],
         "config": config,
     }
     validation = schema_validator.validate_final_output(data)
