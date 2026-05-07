@@ -11,14 +11,8 @@ from typing import Any
 class ComfyUIClient:
     """Small ComfyUI queue client.
 
-    The module supports two modes:
-    - dry_run: write deterministic placeholder task records without contacting ComfyUI.
-    - execute: submit workflow JSON to ComfyUI /prompt and poll /history.
-
-    Workflow templating is intentionally conservative: the project can pass an
-    already-exported ComfyUI API workflow JSON through AI_DRAMA_COMFYUI_WORKFLOW.
-    Text/image injection is handled through node-id environment variables so the
-    workflow can be changed without changing the module contract.
+    Supports dry_run and execute modes. execute mode can use either old global
+    env injection or per-task workflow_config from workflow_router.
     """
 
     def __init__(self) -> None:
@@ -33,36 +27,44 @@ class ComfyUIClient:
     def dry_run(self) -> bool:
         return self.mode not in {"execute", "comfyui", "real"}
 
-    def _load_workflow(self) -> dict[str, Any]:
-        if not self.workflow_path:
-            raise RuntimeError("AI_DRAMA_COMFYUI_WORKFLOW is required when AI_DRAMA_IMAGE_EXECUTION_MODE=execute.")
-        path = Path(self.workflow_path)
+    def _load_workflow(self, workflow_path: str | None = None) -> dict[str, Any]:
+        resolved = (workflow_path or self.workflow_path or "").strip()
+        if not resolved:
+            raise RuntimeError("workflow_path is required when AI_DRAMA_IMAGE_EXECUTION_MODE=execute.")
+        path = Path(resolved)
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
             raise RuntimeError("ComfyUI workflow JSON must be an object.")
         return data
 
-    def _inject_node_value(self, workflow: dict[str, Any], env_key: str, value: Any, input_key: str = "text") -> None:
-        node_id = os.getenv(env_key, "").strip()
+    def _inject_node_value(self, workflow: dict[str, Any], node_id: str, value: Any, input_key: str = "text") -> None:
+        node_id = str(node_id or "").strip()
         if not node_id:
             return
         node = workflow.get(node_id)
         if not isinstance(node, dict):
-            raise RuntimeError(f"ComfyUI workflow missing node id from {env_key}: {node_id}")
+            raise RuntimeError(f"ComfyUI workflow missing node id: {node_id}")
         inputs = node.setdefault("inputs", {})
         if not isinstance(inputs, dict):
             raise RuntimeError(f"ComfyUI node {node_id} inputs must be an object.")
         inputs[input_key] = value
 
     def build_workflow(self, task: dict[str, Any]) -> dict[str, Any]:
-        workflow = self._load_workflow()
+        cfg = task.get("workflow_config", {}) if isinstance(task.get("workflow_config"), dict) else {}
+        workflow = self._load_workflow(str(cfg.get("workflow_path") or "") or None)
         positive = task.get("positive_prompt", "")
         negative = task.get("negative_prompt", "")
-        output_name = task.get("output_basename", task.get("frame_id", "shot"))
-        self._inject_node_value(workflow, "AI_DRAMA_COMFYUI_POSITIVE_NODE_ID", positive, os.getenv("AI_DRAMA_COMFYUI_POSITIVE_INPUT", "text"))
-        self._inject_node_value(workflow, "AI_DRAMA_COMFYUI_NEGATIVE_NODE_ID", negative, os.getenv("AI_DRAMA_COMFYUI_NEGATIVE_INPUT", "text"))
-        self._inject_node_value(workflow, "AI_DRAMA_COMFYUI_OUTPUT_PREFIX_NODE_ID", output_name, os.getenv("AI_DRAMA_COMFYUI_OUTPUT_PREFIX_INPUT", "filename_prefix"))
+        output_name = task.get("output_basename", task.get("frame_id", task.get("task_id", "image")))
+        positive_node = cfg.get("positive_node_id") or os.getenv("AI_DRAMA_COMFYUI_POSITIVE_NODE_ID", "")
+        negative_node = cfg.get("negative_node_id") or os.getenv("AI_DRAMA_COMFYUI_NEGATIVE_NODE_ID", "")
+        output_node = cfg.get("output_prefix_node_id") or cfg.get("output_node_id") or os.getenv("AI_DRAMA_COMFYUI_OUTPUT_PREFIX_NODE_ID", "")
+        positive_input = cfg.get("positive_input") or os.getenv("AI_DRAMA_COMFYUI_POSITIVE_INPUT", "text")
+        negative_input = cfg.get("negative_input") or os.getenv("AI_DRAMA_COMFYUI_NEGATIVE_INPUT", "text")
+        output_input = cfg.get("output_prefix_input") or os.getenv("AI_DRAMA_COMFYUI_OUTPUT_PREFIX_INPUT", "filename_prefix")
+        self._inject_node_value(workflow, str(positive_node), positive, str(positive_input))
+        self._inject_node_value(workflow, str(negative_node), negative, str(negative_input))
+        self._inject_node_value(workflow, str(output_node), output_name, str(output_input))
         return workflow
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -84,20 +86,25 @@ class ComfyUIClient:
         return value
 
     def submit_task(self, task: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
-        images_dir = Path(output_dir) / "images"
-        images_dir.mkdir(parents=True, exist_ok=True)
-        frame_id = str(task.get("frame_id") or task.get("task_id") or "shot")
-        output_path = images_dir / f"{task.get('output_basename', frame_id)}.png"
+        output_path = str(task.get("output_image_path") or "")
+        if not output_path:
+            images_dir = Path(output_dir) / "images" / str(task.get("task_type", "misc"))
+            images_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(images_dir / f"{task.get('output_basename', task.get('task_id', 'image'))}.png")
+        else:
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        image_id = str(task.get("frame_id") or task.get("appearance_asset_key") or task.get("lock_key") or task.get("task_id") or "image")
         if self.dry_run:
             return {
                 "status": "planned",
                 "execution_mode": "dry_run",
                 "prompt_id": None,
-                "frame_id": frame_id,
-                "output_path": str(output_path),
-                "note": "Dry run only. Set AI_DRAMA_IMAGE_EXECUTION_MODE=execute and configure ComfyUI workflow/node ids to generate images.",
+                "image_id": image_id,
+                "frame_id": task.get("frame_id"),
+                "task_id": task.get("task_id"),
+                "output_path": output_path,
+                "note": "Dry run only. Set AI_DRAMA_IMAGE_EXECUTION_MODE=execute and configure workflow mapping to generate images.",
             }
-
         workflow = self.build_workflow(task)
         response = self._post_json("/prompt", {"prompt": workflow, "client_id": self.client_id})
         prompt_id = response.get("prompt_id")
@@ -116,7 +123,9 @@ class ComfyUIClient:
             "status": "submitted",
             "execution_mode": "execute",
             "prompt_id": prompt_id,
-            "frame_id": frame_id,
-            "output_path": str(output_path),
+            "image_id": image_id,
+            "frame_id": task.get("frame_id"),
+            "task_id": task.get("task_id"),
+            "output_path": output_path,
             "history": history.get(str(prompt_id), {}),
         }
