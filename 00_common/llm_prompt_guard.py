@@ -20,6 +20,20 @@ LOCAL_GEMMA_JSON_GUARD = """
 11. 输出前自检：JSON 能被 json.loads 直接解析，并且没有模板外的多余顶层字段。
 """.strip()
 
+INTERNAL_OUTPUT_FIELD_NAMES = {
+    "_local_model_output_contract",
+    "analysis",
+    "reasoning",
+    "chain_of_thought",
+    "scratchpad",
+    "thoughts",
+    "thinking",
+    "internal_reasoning",
+    "internal_notes",
+    "debug",
+    "debug_notes",
+}
+
 
 def apply_json_guard(system_prompt: str, stage_id: str | None = None) -> str:
     stage_line = f"\n\n当前阶段：{stage_id}" if stage_id else ""
@@ -37,3 +51,22 @@ def compact_payload_hint(payload: dict[str, Any]) -> dict[str, Any]:
         },
         **payload,
     }
+
+
+def remove_internal_output_fields(value: Any) -> Any:
+    """Remove guard / reasoning fields that local models may copy into business JSON.
+
+    The prompt guard asks Gemma-style local models not to emit these fields, but
+    this is the final runtime safety net after json.loads and JSON repair. It is
+    intentionally recursive because copied control fields often appear inside
+    stage reports or nested objects, not only at the top level.
+    """
+    if isinstance(value, dict):
+        return {
+            key: remove_internal_output_fields(item)
+            for key, item in value.items()
+            if key not in INTERNAL_OUTPUT_FIELD_NAMES and not key.startswith("_local_model_")
+        }
+    if isinstance(value, list):
+        return [remove_internal_output_fields(item) for item in value]
+    return value
