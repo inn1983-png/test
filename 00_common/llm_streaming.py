@@ -16,11 +16,11 @@ def stream_log_enabled() -> bool:
 def default_max_tokens() -> int:
     """Default completion cap for staged JSON calls.
 
-    This prevents local Gemma / remote APIs from emitting runaway 10k+ token JSON,
-    which can cause truncation, invalid JSON, slow retries and context blowups.
-    Set AI_DRAMA_LLM_MAX_TOKENS=0 to disable globally.
+    Text LLM now defaults to DeepSeek V4 Pro API. The cap prevents any stage from
+    emitting runaway JSON while still leaving enough room for high-quality script
+    and storyboard output. Set AI_DRAMA_LLM_MAX_TOKENS=0 to disable globally.
     """
-    return int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "4096"))
+    return int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "8192"))
 
 
 def _sanitize_env_key(value: str) -> str:
@@ -31,9 +31,9 @@ def max_tokens_for_trace(trace_label: str) -> int:
     """Allow coarse or stage-specific output caps.
 
     Examples:
-      AI_DRAMA_LLM_MAX_TOKENS=4096
-      AI_DRAMA_LLM_MAX_TOKENS_01A=2048
-      AI_DRAMA_LLM_MAX_TOKENS_06_STORYBOARD=8192
+      AI_DRAMA_LLM_MAX_TOKENS=8192
+      AI_DRAMA_LLM_MAX_TOKENS_01A=4096
+      AI_DRAMA_LLM_MAX_TOKENS_06_STORYBOARD=12000
     """
     default = default_max_tokens()
     candidates = []
@@ -96,7 +96,7 @@ def complete_text_with_logs(
 def _complete_once(payload: dict[str, Any], base_url: str, api_key: str, timeout_sec: int, trace_label: str) -> str:
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     print(
-        f"[LLM_REQUEST] {trace_label} 请求模型 bytes={len(data)} max_tokens={payload.get('max_tokens')} url={base_url}",
+        f"[LLM_REQUEST] {trace_label} 请求模型 model={payload.get('model')} bytes={len(data)} max_tokens={payload.get('max_tokens')} url={base_url}",
         flush=True,
     )
     start = time.time()
@@ -107,7 +107,7 @@ def _complete_once(payload: dict[str, Any], base_url: str, api_key: str, timeout
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
         raise RuntimeError(
-            "Local/remote LLM HTTP error:\n"
+            "LLM API HTTP error:\n"
             f"  status={exc.code} {exc.reason}\n"
             f"  url={base_url}\n"
             f"  model={payload.get('model')}\n"
@@ -127,7 +127,7 @@ def _complete_stream(payload: dict[str, Any], base_url: str, api_key: str, timeo
     payload["stream"] = True
     data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     print(
-        f"[LLM_REQUEST] {trace_label} 流式请求 bytes={len(data)} max_tokens={payload.get('max_tokens')} url={base_url}",
+        f"[LLM_REQUEST] {trace_label} 流式请求 model={payload.get('model')} bytes={len(data)} max_tokens={payload.get('max_tokens')} url={base_url}",
         flush=True,
     )
     request = urllib.request.Request(base_url, data=data, headers=build_headers(api_key), method="POST")
@@ -161,7 +161,7 @@ def _complete_stream(payload: dict[str, Any], base_url: str, api_key: str, timeo
     except urllib.error.HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
         raise RuntimeError(
-            "Local/remote LLM stream HTTP error:\n"
+            "LLM API stream HTTP error:\n"
             f"  status={exc.code} {exc.reason}\n"
             f"  url={base_url}\n"
             f"  model={payload.get('model')}\n"
