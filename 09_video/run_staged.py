@@ -16,9 +16,9 @@ stage_runner = import_module("09_video.core.stage_runner")
 
 MODULE_NAME = "09_video"
 DISPLAY_NAME = "视频生成系统"
-DESCRIPTION = "读取 07 分镜图片文件夹与 08 final_audio.wav，按 10/12 秒音频切片调用本地 LTX2.3 ComfyUI 工作流生成视频段，支持断点续跑与最终合并。"
+DESCRIPTION = "读取 06 分镜、07 分镜图片与 08 音频，按滑动窗口一段一提交 LTX2.3 ComfyUI。"
 KEY_OUTPUT = "video_manifest.json"
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 def _read_json_upstream(module_name: str, filename: str) -> dict[str, Any]:
@@ -33,6 +33,13 @@ def _read_json_upstream(module_name: str, filename: str) -> dict[str, Any]:
     if not isinstance(data, dict) or not data:
         raise RuntimeError(f"{MODULE_NAME} requires upstream {module_name}/{filename}.")
     return data
+
+
+def _read_optional_json_upstream(module_name: str, filename: str) -> dict[str, Any]:
+    try:
+        return _read_json_upstream(module_name, filename)
+    except Exception:
+        return {}
 
 
 def _resolve_file_upstream(module_name: str, filename: str) -> Path:
@@ -65,24 +72,20 @@ def _register_if_exists(artifact_name: str, path_value: Any, artifact_type: str,
 
 
 def main() -> int:
+    resource_manager.release_image_resources()
+    resource_manager.release_audio_resources()
     try:
-        resource_manager.release_image_resources()
-        resource_manager.release_audio_resources()
         config = base_module.bootstrap_module(MODULE_NAME, DISPLAY_NAME, DESCRIPTION)
+        storyboard = _read_optional_json_upstream("06_storyboard", "storyboard.json")
         image_manifest = _read_json_upstream("07_storyboard_image", "image_manifest.json")
         audio_timeline = _read_json_upstream("08_audio", "audio_timeline.json")
         final_audio_path = _resolve_file_upstream("08_audio", "final_audio.wav")
         _, output_dir = base_module.get_runtime_module_dirs(MODULE_NAME)
 
-        stage_result = stage_runner.run_video_stages(image_manifest, audio_timeline, final_audio_path, output_dir)
-        data = stage_runner.merge_stage_outputs(image_manifest, audio_timeline, final_audio_path, config, stage_result, output_dir)
+        stage_result = stage_runner.run_video_stages(image_manifest, audio_timeline, final_audio_path, output_dir, storyboard=storyboard)
+        data = stage_runner.merge_stage_outputs(image_manifest, audio_timeline, final_audio_path, config, stage_result, output_dir, storyboard=storyboard)
 
-        base_module.write_json_key_output(
-            MODULE_NAME,
-            KEY_OUTPUT,
-            data,
-            description="09 关键输出：视频分段计划、ComfyUI/LTX2.3 执行结果、断点续跑状态、合并结果与最终视频路径。",
-        )
+        base_module.write_json_key_output(MODULE_NAME, KEY_OUTPUT, data, description="09 关键输出：窗口式视频分段计划、执行结果、断点续跑状态、合并结果。")
         base_module.write_json_key_output(
             MODULE_NAME,
             "video_meta.json",
@@ -91,6 +94,7 @@ def main() -> int:
                 "schema_version": SCHEMA_VERSION,
                 "status": data.get("status"),
                 "execution_mode": data.get("execution_mode"),
+                "window_mode": data.get("window_mode"),
                 "segment_count": len(data.get("video_segments", []) or []),
                 "completed_segment_count": len([s for s in data.get("video_segments", []) or [] if isinstance(s, dict) and s.get("status") == "success"]),
                 "final_video_path": data.get("final_video_path"),
@@ -98,7 +102,7 @@ def main() -> int:
                 "quality_report": data.get("quality_report", {}),
                 "schema_validation": data.get("schema_validation", {}),
             },
-            description="09 元信息：视频阶段状态、执行模式、分段完成度、合并路径、评分与 schema 校验。",
+            description="09 元信息：视频阶段状态、执行模式、窗口模式、分段完成度、合并路径、评分与 schema 校验。",
         )
         _register_if_exists("final_video.mp4", data.get("final_video_path"), "video", "09 可选关键产物：自动合并后的视频成品。", key=True)
         print(f"{DISPLAY_NAME} finished. key output: {KEY_OUTPUT}")
