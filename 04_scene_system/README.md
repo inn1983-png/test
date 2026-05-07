@@ -15,7 +15,7 @@
 
 ```text
 01 = 提取一切，宁可多提，不漏掉
-04 = 先合并，再分级，不简单删除候选
+04 = 先合并，再分级，再复核，不简单删除候选
 06 = 只引用 04 输出的稳定场景名和主场景/子场景关系
 ```
 
@@ -24,22 +24,59 @@
 04B 必须给每个场景输出：
 
 ```text
+asset_importance_score = 0-100
+importance_reason
+source_understanding_basis
 asset_level = main_scene / sub_scene / temporary / background
 needs_reference_image = true / false
 parent_scene
 reference_image_plan
 ```
 
-分级规则：
+分级必须参考 01 的真正理解：
 
 ```text
-main_scene：主场景，反复出现或承载核心戏，必须有全景参考图。
-sub_scene：主场景的一部分，如门口、桌前、堂下，必须绑定 parent_scene。
-temporary：临时地点，一般不生成参考图。
-background：背景地点或泛称地点，一般不生成参考图。
+story_understanding
+story_spine
+events / event_graph
+conflicts
+high_retention_segments
+scene_value_map
+visual_risk_report
+paragraphs
 ```
 
-参考图策略：
+## 复核机制
+
+04E 是面向 06 的资产可用性复核，不是格式检查。
+
+04E 必须检查：
+
+```text
+是否把同一场景拆太碎
+是否把不同场景错误合并
+主场景 / 子场景 / 临时地点分级是否合理
+子场景是否正确绑定 parent_scene
+主场景是否有全景图计划
+临时地点是否误升为主场景
+背景物件是否错误变成场景
+06 是否能直接引用 canonical_scene_name
+```
+
+04E 输出：
+
+```text
+asset_review_report
+downstream_readiness_for_06
+main_assets_for_06
+optional_assets_for_06
+do_not_reference_as_main_asset
+upstream_blocking_issues
+```
+
+如果 04E 发现遗漏或误分级，不直接补资产，而是输出 retry_stages 和 revision_instructions，触发前置阶段连锁重跑。
+
+## 参考图策略
 
 ```text
 main_scene：wide_establishing_view，先用全景图稳定空间。
@@ -50,9 +87,10 @@ temporary / background：只保留文字资产，不强制做图。
 最高图像资产规则：
 
 ```text
+04 不生成图片，只写参考图计划。
 场景优先全景图，不要一开始做大量多角度。
 先主场景全景，再根据 06/07 失败情况补子区域局部图。
-场景系统只写资产描述和参考图计划，不写图像提示词。
+图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
 ## 绝对边界
@@ -69,6 +107,7 @@ temporary / background：只保留文字资产，不强制做图。
 证据链
 场景连续性规则
 场景库质量评分
+面向 06 的资产复核
 ```
 
 04 禁止做：
@@ -95,9 +134,10 @@ python 04_scene_system/run_staged.py
 
 ```text
 04A scene_merge_plan：合并同一场景的不同说法
-04B scene_cards：输出稳定场景卡 + 资产分级
+04B scene_cards：输出稳定场景卡 + 资产分级 + 重要性评分
 04C script_usage_binding：绑定 02 剧本里的场景使用
-04D quality_check：总检评分，可触发连锁重跑
+04D quality_check：模块内部总检评分
+04E asset_review：基于 01 真正理解，面向 06 复核资产可用性
 ```
 
 ## 评分与重跑
@@ -106,21 +146,10 @@ python 04_scene_system/run_staged.py
 
 低于阈值时会生成 `revision_instructions`，并把修改意见传回同阶段 LLM 自动重跑。
 
-04D 如果输出：
-
-```json
-{
-  "quality_report": {
-    "needs_retry": true,
-    "retry_stages": ["04A"]
-  }
-}
-```
-
-系统会从最早问题阶段开始连锁重跑：
+04D / 04E 如果输出 `needs_retry=true`，系统会从最早问题阶段开始连锁重跑：
 
 ```text
-04A → 04B → 04C → 04D
+04A → 04B → 04C → 04D → 04E
 ```
 
 ## 最终硬规则校验
@@ -132,10 +161,14 @@ scenes 是否为空
 scene_id 是否重复
 canonical_scene_name 是否重复
 aliases 是否互相冲突
+asset_importance_score 是否为 0-100
+source_understanding_basis 是否引用 01 理解依据
 asset_level 是否合法
 主场景是否 needs_reference_image=true
 主场景 reference_image_plan 是否包含 wide_establishing_view
 子场景是否绑定 parent_scene
+asset_review_report 是否存在
+downstream_readiness_for_06 是否存在
 是否出现 prompt / image_prompt / desc_prompt 等越界字段
 source_evidence 是否存在
 usage_in_script 是否为数组
@@ -149,6 +182,9 @@ usage_in_script 是否为数组
 canonical_scene_name
 aliases
 scene_type
+asset_importance_score
+importance_reason
+source_understanding_basis
 asset_level
 needs_reference_image
 parent_scene
@@ -162,14 +198,6 @@ key_visual_elements
 continuity_rules
 source_evidence
 usage_in_script
-```
-
-## 最高规则
-
-```text
-合并同一场景的不同说法。
-区分主场景、子场景、临时地点。
-场景描述要适合后续 06 单帧分镜引用，但不要写图像提示词。
 ```
 
 ## LLM 配置
