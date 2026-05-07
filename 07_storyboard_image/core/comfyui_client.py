@@ -151,8 +151,9 @@ class ComfyUIClient:
             time.sleep(self.poll_interval_sec)
         if str(prompt_id) not in history:
             raise TimeoutError(f"ComfyUI prompt timeout: {prompt_id}")
+        output_exists = Path(output_path).exists()
         return {
-            "status": "submitted",
+            "status": "success" if output_exists else "failed",
             "execution_mode": "execute",
             "prompt_id": prompt_id,
             "image_id": image_id,
@@ -160,4 +161,5 @@ class ComfyUIClient:
             "task_id": task.get("task_id"),
             "output_path": output_path,
             "history": history.get(str(prompt_id), {}),
+            "error": None if output_exists else "ComfyUI finished, but expected output_path was not found. Configure workflow output prefix/path to match output_image_path.",
         }
