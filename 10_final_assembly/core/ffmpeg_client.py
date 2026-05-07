@@ -7,6 +7,14 @@ from pathlib import Path
 from typing import Any
 
 
+def _utf8_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONLEGACYWINDOWSSTDIO", "0")
+    return env
+
+
 class FFmpegClient:
     """Small deterministic FFmpeg wrapper for final packaging.
 
@@ -21,7 +29,7 @@ class FFmpegClient:
     def _run(self, cmd: list[str]) -> dict[str, Any]:
         if not self.available:
             return {"status": "unavailable", "cmd": cmd, "returncode": None, "stdout": "", "stderr": "ffmpeg not found"}
-        proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        proc = subprocess.run(cmd, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", env=_utf8_env())
         return {"status": "success" if proc.returncode == 0 else "failed", "cmd": cmd, "returncode": proc.returncode, "stdout": proc.stdout, "stderr": proc.stderr}
 
     def concat_clips(self, clip_paths: list[Path], output_path: Path) -> dict[str, Any]:
