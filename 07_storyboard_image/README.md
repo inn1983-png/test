@@ -2,14 +2,27 @@
 
 ## 模块定位
 
-`07_storyboard_image` 是图片执行阶段，负责把 `06_storyboard/storyboard.json` 中的单帧分镜、角色造型引用、场景引用、道具引用，转成可执行图片任务，并输出 `image_manifest.json`。
+`07_storyboard_image` 是图片执行阶段，不再是一个简单的“分镜图任务生成器”，而是一个完整的图片生产子系统。
 
-它不重新写剧情、不重新规划分镜、不新增角色/场景/道具资产。它只做三件事：
+它负责把 `06_storyboard/storyboard.json` 中的单帧分镜、角色定妆引用、角色造型引用、场景引用、道具引用，拆成以下生产链路：
 
 ```text
-读取 06 单帧分镜
-构建参考图任务 + 正式分镜图任务
-调用本地 ComfyUI 或 dry_run 生成图片清单
+07P 计划与依赖图
+07A 角色定妆图
+07B 角色造型图 / 换装图
+07C 场景 / 道具参考图
+07D 正式单帧分镜图
+07E 汇总、注册表、总检、局部重跑计划
+```
+
+核心原则：
+
+```text
+先锁脸，再换装，最后生成分镜图。
+07 不重新写剧情。
+07 不重新规划分镜。
+07 不新增 03/04/05 资产。
+07 只把 06 已绑定的结构化分镜转成图片执行任务。
 ```
 
 ---
@@ -36,7 +49,7 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 06_storyboard/storyboard.json
 ```
 
-可选输入，用于记录 schema 版本与后续扩展资产核对：
+可选输入，用于按需生成定妆图、造型图、场景图、道具图：
 
 ```text
 03_character_system/characters.json
@@ -60,47 +73,200 @@ props[].canonical_prop_name
 
 ## 输出
 
-关键产物：
+最终关键产物：
 
 ```text
 07_storyboard_image/image_manifest.json
 07_storyboard_image/image_meta.json
-07_storyboard_image/intermediate/07A_reference_asset_prepare.json
-07_storyboard_image/intermediate/07B_frame_image_tasks.json
-07_storyboard_image/intermediate/07C_comfyui_execution.json
-07_storyboard_image/intermediate/07D_manifest_quality_check.json
-07_storyboard_image/images/shot_001.png
-07_storyboard_image/images/shot_002.png
-...
+07_storyboard_image/character_lock_manifest.json
+07_storyboard_image/appearance_manifest.json
+07_storyboard_image/reference_asset_manifest.json
+07_storyboard_image/dependency_index.json
+07_storyboard_image/asset_image_registry.json
+07_storyboard_image/storyboard_image_meta.json
 ```
 
-`image_manifest.json` 会包含：
+阶段输出：
 
 ```text
-reference_asset_tasks      # 角色造型照、场景图、道具图任务
-frame_image_tasks          # 每一帧的正式图片生成任务
-execution_results          # dry_run / ComfyUI 执行结果
-images                     # 每个 frame_id 对应的图片路径和引用资产
-missing_references         # 严格模式下缺失的参考图
-quality_report             # 是否需要重跑、失败帧、schema 校验结果
+07_storyboard_image/intermediate/07P_plan.json
+07_storyboard_image/intermediate/07A_character_lock.json
+07_storyboard_image/intermediate/07B_character_appearance.json
+07_storyboard_image/intermediate/07C_reference_assets.json
+07_storyboard_image/intermediate/07D_storyboard_frame.json
+07_storyboard_image/intermediate/07E_finalize.json
+```
+
+图片目录：
+
+```text
+07_storyboard_image/images/character_lock/
+07_storyboard_image/images/character_appearance/
+07_storyboard_image/images/scene_reference/
+07_storyboard_image/images/prop_reference/
+07_storyboard_image/images/storyboard/
 ```
 
 ---
 
 ## 阶段设计
 
+### 07P_plan
+
+计划与依赖图阶段。
+
+职责：
+
 ```text
-07A reference_asset_prepare
-    收集 06 appearance_asset_requirements、场景、道具，生成参考资产任务。
+读取 06 storyboard + 03/04/05 assets
+计算哪些角色需要定妆图
+计算哪些 appearance_asset_key 需要造型图
+计算哪些场景 / 道具需要参考图
+计算每个 frame 依赖哪些角色造型、场景、道具
+生成 dependency_index，用于局部重跑和失效传播
+```
 
-07B frame_image_task_build
-    把每个 06 frame 转成图片任务，生成 positive_prompt / negative_prompt / reference_images / output_basename。
+输出：
 
-07C comfyui_execution
-    默认 dry_run，只写 planned 结果；execute 模式下提交 ComfyUI workflow。
+```text
+character_lock_tasks
+appearance_tasks
+reference_asset_tasks
+storyboard_frame_tasks
+dependency_index
+```
 
-07D manifest_quality_check
-    汇总 image_manifest，检查失败帧，生成 retry_plan。
+---
+
+### 07A_character_lock
+
+角色定妆图阶段。
+
+本质：
+
+```text
+文生图 → 角色定妆图
+```
+
+目标：
+
+```text
+单人
+锁脸
+固定性别 / 年龄 / 气质
+背景干净
+不追求剧情动作
+```
+
+输出：
+
+```text
+character_lock_manifest.json
+images/character_lock/*.png
+```
+
+---
+
+### 07B_character_appearance
+
+角色造型图 / 换装图阶段。
+
+本质：
+
+```text
+定妆图 + costume_id + wearable_props → 角色造型图
+```
+
+目标：
+
+```text
+同一张脸
+指定服装版本
+指定常驻穿戴物
+给后续分镜图作为稳定角色参考图
+```
+
+输出：
+
+```text
+appearance_manifest.json
+images/character_appearance/*.png
+```
+
+---
+
+### 07C_reference_assets
+
+场景 / 道具参考图阶段。
+
+职责：
+
+```text
+只处理本章 / 本次 06 分镜实际用到的场景和关键道具
+可以生成，也可以登记已有参考图
+不给不存在于 04/05 的资产硬造新名字
+```
+
+输出：
+
+```text
+reference_asset_manifest.json
+images/scene_reference/*.png
+images/prop_reference/*.png
+```
+
+---
+
+### 07D_storyboard_frame
+
+正式单帧分镜图阶段。
+
+本质：
+
+```text
+场景参考图 + 角色造型图 + 道具参考图 + 06 分镜结构 → 正式分镜图
+```
+
+执行策略：
+
+```text
+锚点帧优先
+普通帧可引用锚点帧 / 上一帧
+失败时优先只重跑失败帧
+```
+
+输出：
+
+```text
+image_manifest.json
+images/storyboard/shot_001.png
+images/storyboard/shot_002.png
+...
+```
+
+---
+
+### 07E_finalize
+
+总检、注册表、局部重跑计划。
+
+职责：
+
+```text
+汇总定妆图、造型图、参考图、分镜图
+生成 asset_image_registry
+生成 dependency_index
+检查缺图和失败任务
+生成 retry_plan
+输出 storyboard_image_meta
+```
+
+输出：
+
+```text
+asset_image_registry.json
+dependency_index.json
+storyboard_image_meta.json
 ```
 
 ---
@@ -109,89 +275,76 @@ quality_report             # 是否需要重跑、失败帧、schema 校验结�
 
 ### 1. dry_run 默认模式
 
-不调用 ComfyUI，只生成任务清单和计划图片路径。
+不调用 ComfyUI，只生成任务清单、manifest 和预期图片路径。
 
 ```bash
 set AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run
 python 07_storyboard_image/run_staged.py
 ```
 
-这个模式用于先打通 06 → 07 → 09 的数据结构，也方便 Web UI 展示每一步发生了什么。
+这个模式用于先打通：
+
+```text
+06 → 07 → 09
+```
+
+也方便 Web UI 展示每一步发生了什么。
+
+---
 
 ### 2. execute 真实 ComfyUI 模式
+
+推荐使用 workflow mapping，而不是只靠一套全局 workflow。
 
 ```bash
 set AI_DRAMA_IMAGE_EXECUTION_MODE=execute
 set AI_DRAMA_COMFYUI_BASE_URL=http://127.0.0.1:8188
-set AI_DRAMA_COMFYUI_WORKFLOW=D:\path\to\workflow_api.json
-set AI_DRAMA_COMFYUI_POSITIVE_NODE_ID=12
-set AI_DRAMA_COMFYUI_NEGATIVE_NODE_ID=13
-set AI_DRAMA_COMFYUI_OUTPUT_PREFIX_NODE_ID=20
+set AI_DRAMA_COMFYUI_WORKFLOW_MAPPING=D:\path\workflow_mapping.json
 python 07_storyboard_image/run_staged.py
 ```
 
-可选注入字段名：
+示例文件：
 
-```bash
-set AI_DRAMA_COMFYUI_POSITIVE_INPUT=text
-set AI_DRAMA_COMFYUI_NEGATIVE_INPUT=text
-set AI_DRAMA_COMFYUI_OUTPUT_PREFIX_INPUT=filename_prefix
+```text
+07_storyboard_image/configs/workflow_mapping.example.json
+```
+
+支持四类 workflow：
+
+```text
+character_lock          # 文生图定妆照
+character_appearance    # 图生图换装造型图
+reference_asset         # 场景/道具参考图
+storyboard_frame        # 正式单帧分镜图
+```
+
+每类 workflow 配置：
+
+```json
+{
+  "workflow_path": "workflows/storyboard_frame_api.json",
+  "positive_node_id": "12",
+  "negative_node_id": "13",
+  "output_prefix_node_id": "20",
+  "positive_input": "text",
+  "negative_input": "text",
+  "output_prefix_input": "filename_prefix"
+}
 ```
 
 说明：
 
 ```text
-workflow_api.json 必须是 ComfyUI 导出的 API 格式 workflow。
+workflow_path 必须是 ComfyUI 导出的 API 格式 workflow。
 07 不强行绑定某套节点包，避免节点名错误导致不可导入。
-节点 ID 由环境变量指定，便于替换 Flux / SD / IPAdapter / PuLID / InstantID / ControlNet 等方案。
+节点 ID 由 workflow_mapping 指定，便于替换 Flux / SD / IPAdapter / PuLID / InstantID / ControlNet 等方案。
 ```
-
----
-
-## 参考图路径规则
-
-默认参考图基准目录：
-
-```text
-shared_assets
-```
-
-可通过环境变量覆盖：
-
-```bash
-set AI_DRAMA_ASSET_IMAGE_BASE=workspace/books/book_001/shared_assets
-```
-
-默认推导路径：
-
-```text
-shared_assets/characters/appearance/{appearance_asset_key}.png
-shared_assets/scenes/{canonical_scene_name}.png
-shared_assets/props/{canonical_prop_name}.png
-```
-
-严格检查参考图是否存在：
-
-```bash
-set AI_DRAMA_REQUIRE_REFERENCE_IMAGES=1
-```
-
-不开严格检查时，07 只记录 expected image path，不因为参考图文件暂时不存在而中断。
 
 ---
 
 ## 提示词策略
 
-07 会把 06 的结构化字段转成图片执行提示：
-
-```text
-story_action
-emotion
-camera_plan
-composition_notes
-continuity_notes
-scene / characters / props 引用
-```
+07 使用确定性 prompt_builder，不再依赖 LLM 自动重写 JSON。
 
 默认风格后缀：
 
@@ -215,6 +368,67 @@ modern objects, modern clothing, western face, cartoon, anime, 3d render, low qu
 
 ```bash
 set AI_DRAMA_IMAGE_NEGATIVE_PROMPT=你的负向提示词
+```
+
+---
+
+## 局部重跑与依赖图
+
+07 会生成：
+
+```text
+dependency_index.json
+```
+
+记录：
+
+```text
+角色定妆图 → 哪些造型图
+角色造型图 → 哪些分镜帧
+场景参考图 → 哪些分镜帧
+道具参考图 → 哪些分镜帧
+每个 frame 的依赖项
+```
+
+重跑策略：
+
+```text
+定妆图失败：只重跑该角色定妆图，并标记下游造型图 / 分镜帧 stale
+造型图失败：只重跑该 appearance_asset_key，并标记关联分镜帧 stale
+参考图失败：只重跑该场景或道具图，并标记关联分镜帧 stale
+分镜图失败：只重跑失败 frame
+```
+
+07E 会输出：
+
+```text
+retry_plan
+```
+
+---
+
+## Web UI 接入
+
+Web UI 已新增：
+
+```text
+图片阶段
+```
+
+展示内容：
+
+```text
+07A 角色定妆图
+07B 角色造型图 / 换装图
+07C 场景 / 道具参考图
+07D 正式单帧分镜图
+07E 依赖图与重跑状态
+```
+
+启动：
+
+```bash
+python web_ui/server.py --host 127.0.0.1 --port 1144
 ```
 
 ---
@@ -245,4 +459,4 @@ resource_manager.release_local_resources("07_storyboard_image")
 06_storyboard → 07_storyboard_image → 09_video
 ```
 
-`07_storyboard_image` 输出的 `image_manifest.json` 是 09 视频阶段读取单帧图、四宫格/多图拼接、音频驱动视频生成的基础输入。
+`07_storyboard_image/image_manifest.json` 是 09 视频阶段读取单帧图、四宫格/多图拼接、音频驱动视频生成的基础输入。
