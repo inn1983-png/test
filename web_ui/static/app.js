@@ -44,13 +44,18 @@ async function init() {
 
 function bindNav() {
   document.querySelectorAll(".nav-item").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".nav-item").forEach((item) => item.classList.remove("active"));
-      document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
-      btn.classList.add("active");
-      $(`view-${btn.dataset.view}`).classList.add("active");
-    });
+    btn.addEventListener("click", () => switchView(btn.dataset.view));
   });
+  document.querySelectorAll("[data-jump]").forEach((btn) => {
+    btn.addEventListener("click", () => switchView(btn.dataset.jump));
+  });
+}
+
+function switchView(view) {
+  document.querySelectorAll(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === view));
+  document.querySelectorAll(".view").forEach((item) => item.classList.remove("active"));
+  const target = $(`view-${view}`);
+  if (target) target.classList.add("active");
 }
 
 function bindActions() {
@@ -59,6 +64,13 @@ function bindActions() {
   $("startTextPhaseBtn").addEventListener("click", () => startJob({ from_module: "01_novel_parser" }));
   $("stopBtn").addEventListener("click", stopCurrentJob);
   $("closePreviewBtn").addEventListener("click", () => $("previewModal").classList.add("hidden"));
+  const previewStoryboardBtn = $("previewStoryboardBtn");
+  if (previewStoryboardBtn) {
+    previewStoryboardBtn.addEventListener("click", () => {
+      const rel = currentRunDir();
+      if (rel) previewFile(`${rel}/06_storyboard/storyboard.json`);
+    });
+  }
   document.querySelectorAll(".preview-main-output").forEach((btn) => {
     btn.addEventListener("click", () => {
       const panel = btn.closest(".asset-panel");
@@ -92,6 +104,8 @@ async function refreshAll() {
     renderSnapshot();
   } else {
     renderTimeline();
+    renderRetryCenter([]);
+    renderStoryboardWorkspace(null);
   }
 }
 
@@ -149,6 +163,7 @@ async function startJob(extra) {
   $("stopBtn").disabled = false;
   connectEvents(state.currentJob.id);
   updateJobMini();
+  switchView("dashboard");
 }
 
 async function stopCurrentJob() {
@@ -194,29 +209,43 @@ function updateJobMini() {
   if (!state.currentJob) {
     $("currentJobMini").textContent = "暂无任务";
     $("metricJob").textContent = "无";
-    $("metricJobSub").textContent = "未运行";
+    $("metricJobSub") && ($("metricJobSub").textContent = "未运行");
     return;
   }
   $("currentJobMini").innerHTML = `<strong>${state.currentJob.id}</strong><br>${badge(state.currentJob.status)}<br><span class="muted">${state.currentJob.run_dir}</span>`;
   $("metricJob").textContent = state.currentJob.id;
-  $("metricJobSub").textContent = statusLabel(state.currentJob.status);
 }
 
 function renderSnapshot() {
   const snap = state.currentSnapshot;
   if (!snap) return;
+  const issues = collectIssues(snap.modules || []);
   $("metricRunStatus").textContent = statusLabel(snap.summary_status);
   $("metricOutputs").textContent = (snap.important_outputs || []).length;
+  $("metricIssues").textContent = issues.length;
+  const heroBadge = $("heroStatusBadge");
+  if (heroBadge) heroBadge.outerHTML = badge(snap.summary_status).replace("badge", "badge") .replace(">", ` id="heroStatusBadge">`);
+  renderProgress(snap.modules || []);
   renderTimeline(snap.modules || []);
   renderStages(snap.modules || []);
   renderOutputs(snap.important_outputs || []);
   renderAssetSummaries(snap);
+  renderRetryCenter(issues);
+  renderStoryboardWorkspace(snap);
+}
+
+function renderProgress(modules) {
+  const total = modules.length || state.pipeline.length || 1;
+  const done = modules.filter((m) => ["success", "skipped"].includes(m.status)).length;
+  const pct = Math.round((done / total) * 100);
+  const bar = $("pipelineProgressBar");
+  if (bar) bar.style.width = `${pct}%`;
 }
 
 function renderTimeline(modules = null) {
   const data = modules || state.pipeline.map((name) => ({ name, status: "pending", message: "等待" }));
   $("pipelineTimeline").innerHTML = data.map((m, i) => `
-    <div class="timeline-item">
+    <div class="timeline-item status-${m.status || "pending"}">
       <div class="index">${String(i + 1).padStart(2, "0")}</div>
       <div class="name">${m.name}</div>
       ${badge(m.status)}
@@ -253,6 +282,41 @@ function renderStages(modules) {
   `).join("");
 }
 
+function collectIssues(modules) {
+  const issues = [];
+  for (const m of modules) {
+    if (["failed", "blocked"].includes(m.status)) {
+      issues.push({ title: `${m.name} ${statusLabel(m.status)}`, detail: m.message || "模块未通过", level: "problem" });
+    }
+    for (const s of m.stages || []) {
+      if (s.passed === false || Number(s.issues_count || 0) > 0) {
+        issues.push({ title: `${m.name} / ${s.stage_id || s.name}`, detail: `评分 ${s.score ?? "-"}，问题 ${s.issues_count ?? 0} 个`, level: "problem", path: s.path });
+      }
+    }
+    const q = m.quality || {};
+    if (q.needs_review || q.needs_retry || q.schema_validation_passed === false) {
+      issues.push({ title: `${m.name} 总检需复核`, detail: JSON.stringify(q).slice(0, 220), level: "problem" });
+    }
+  }
+  return issues;
+}
+
+function renderRetryCenter(issues) {
+  const wrap = $("retryCenter");
+  if (!wrap) return;
+  if (!issues.length) {
+    wrap.innerHTML = `<div class="retry-item ok"><div class="retry-title">暂无集中返工问题</div><div class="muted">运行后如果出现低分、schema 校验失败、上游阻塞，这里会集中显示。</div></div>`;
+    return;
+  }
+  wrap.innerHTML = issues.map((item) => `
+    <div class="retry-item ${item.level}">
+      <div class="retry-title">${item.title}</div>
+      <div class="muted">${escapeHtml(item.detail || "")}</div>
+      ${item.path ? `<button class="btn small" onclick="previewFile('${item.path}')">查看问题文件</button>` : ""}
+    </div>
+  `).join("");
+}
+
 function renderOutputs(outputs) {
   if (!outputs.length) {
     $("outputList").innerHTML = `<div class="muted">暂无最终产物。</div>`;
@@ -272,9 +336,41 @@ function renderOutputs(outputs) {
 function renderAssetSummaries(snap) {
   const outputs = snap.important_outputs || [];
   const has = (suffix) => outputs.some((o) => o.path.endsWith(suffix));
-  $("characterSummary").textContent = has("03_character_system/characters.json") ? "角色资产已生成，可预览角色卡 JSON。" : "等待 03 输出";
-  $("sceneSummary").textContent = has("04_scene_system/scenes.json") ? "场景资产已生成，可预览场景卡 JSON。" : "等待 04 输出";
-  $("propSummary").textContent = has("05_prop_system/props.json") ? "道具资产已生成，可预览道具卡 JSON。" : "等待 05 输出";
+  $("characterSummary").textContent = has("03_character_system/characters.json") ? "角色资产已生成。后续这里显示 canonical_name、costume_variants、定妆照和造型照。" : "等待 03 输出";
+  $("sceneSummary").textContent = has("04_scene_system/scenes.json") ? "场景资产已生成。后续这里显示主场景、子场景、父场景和参考图。" : "等待 04 输出";
+  $("propSummary").textContent = has("05_prop_system/props.json") ? "道具资产已生成。后续这里显示 wearable_policy、绑定角色和参考图。" : "等待 05 输出";
+}
+
+function renderStoryboardWorkspace(snap) {
+  const wrap = $("storyboardWorkspace");
+  if (!wrap) return;
+  if (!snap) {
+    wrap.innerHTML = `<div class="muted">暂无分镜数据。运行 06_storyboard 后这里会显示分镜工作台。</div>`;
+    return;
+  }
+  const output = (snap.important_outputs || []).find((o) => o.path.endsWith("06_storyboard/storyboard.json"));
+  if (!output) {
+    wrap.innerHTML = `<div class="muted">等待 06_storyboard/storyboard.json 输出。</div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="storyboard-card">
+      <div class="frame-index">当前阶段</div>
+      <div class="frame-title">单帧分镜 JSON 已生成</div>
+      <div class="frame-meta">${output.path}<br>大小 ${output.size || 0} bytes</div>
+      <button class="btn small" onclick="previewFile('${output.path}')">打开分镜 JSON</button>
+    </div>
+    <div class="storyboard-card">
+      <div class="frame-index">后续升级</div>
+      <div class="frame-title">图文分镜表</div>
+      <div class="frame-meta">07 图片接入后展示 frame_id、角色引用、场景图、角色造型图和分镜图。</div>
+    </div>
+    <div class="storyboard-card">
+      <div class="frame-index">连续性</div>
+      <div class="frame-title">四宫格预览组</div>
+      <div class="frame-meta">读取 four_grid_preview_groups，展示 1–4、4–7、7–10 的连续性检查。</div>
+    </div>
+  `;
 }
 
 function currentRunDir() {
@@ -298,6 +394,10 @@ async function previewFile(path) {
     $("previewContent").textContent = String(err);
     $("previewModal").classList.remove("hidden");
   }
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 }
 
 window.previewFile = previewFile;
