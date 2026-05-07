@@ -94,12 +94,60 @@ def _evaluate_candidate_stage(data: dict[str, Any], score: int, issues: list[str
     return score, issues, suggestions
 
 
+def _compact_text(text: str, head: int = 9000, tail: int = 3000) -> str:
+    if len(text) <= head + tail + 200:
+        return text
+    return text[:head] + "\n...[中间原文已省略，用于避免本地模型重跑时上下文爆炸]...\n" + text[-tail:]
+
+
+def _compact_original_input(stage_id: str, original_payload: dict[str, Any]) -> dict[str, Any]:
+    if stage_id == "01A":
+        text = str(original_payload.get("novel_text", ""))
+        return {"novel_text": _compact_text(text), "note": "重跑阶段使用压缩原文。必须补齐缺失字段，不要复述原文。"}
+    if stage_id == "01B":
+        return {
+            "base_split": original_payload.get("base_split", []),
+            "instruction": original_payload.get("instruction", "保留 base_split，只补充标注。"),
+        }
+    if stage_id in {"01C", "01D", "01E"}:
+        return {key: original_payload.get(key) for key in original_payload if key != "paragraphs"} | {
+            "paragraphs_summary": "重跑时不回传完整 paragraphs，按 previous_output 和 revision_instructions 修复字段结构。"
+        }
+    if stage_id == "01F":
+        return {"note": "01F 重跑只根据 quality_report 修复总检报告，不回传完整 stage_outputs。"}
+    return original_payload
+
+
+def _compact_previous_output(stage_id: str, previous: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key in REQUIRED_KEYS.get(stage_id, []):
+        value = previous.get(key)
+        if isinstance(value, str):
+            result[key] = _compact_text(value, 2000, 500)
+        elif isinstance(value, list):
+            result[key] = value[:30]
+            if len(value) > 30:
+                result[f"{key}_truncated_note"] = f"原数组 {len(value)} 项，重跑 payload 只保留前 30 项。"
+        elif isinstance(value, dict):
+            result[key] = value
+        else:
+            result[key] = value
+    result["schema_version"] = previous.get("schema_version")
+    result["stage"] = previous.get("stage")
+    return result
+
+
 def build_revision_payload(stage_id: str, original_payload: dict[str, Any], last_output: dict[str, Any], quality: dict[str, Any]) -> dict[str, Any]:
     return {
-        "mode": "revise_previous_stage_output",
+        "mode": "revise_previous_stage_output_compact",
         "stage_id": stage_id,
-        "original_input": original_payload,
-        "previous_output": last_output,
-        "quality_report": quality,
-        "instruction": "请严格根据 quality_report.revision_instructions 修正 previous_output，只输出修正后的 JSON 对象，不要输出解释。",
+        "original_input_compact": _compact_original_input(stage_id, original_payload),
+        "previous_output_compact": _compact_previous_output(stage_id, last_output or {}),
+        "quality_report": {
+            "score": quality.get("score"),
+            "threshold": quality.get("threshold"),
+            "issues": quality.get("issues", []),
+            "revision_instructions": quality.get("revision_instructions", []),
+        },
+        "instruction": "请严格根据 quality_report.revision_instructions 修正 previous_output_compact。必须补齐本阶段必要字段，只输出修正后的完整 JSON 对象，不要输出解释。",
     }
