@@ -15,6 +15,26 @@ prompt_guard = import_module("00_common.llm_prompt_guard")
 JSON_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
 
 
+def _sanitize_env_key(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").upper()
+
+
+def _max_tokens_for_trace(trace_label: str) -> int:
+    default = int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "4096"))
+    candidates = []
+    if trace_label:
+        sanitized = _sanitize_env_key(trace_label)
+        candidates.append(f"AI_DRAMA_LLM_MAX_TOKENS_{sanitized}")
+        first = sanitized.split("_")[0]
+        if first:
+            candidates.append(f"AI_DRAMA_LLM_MAX_TOKENS_{first}")
+    for key in candidates:
+        raw = os.getenv(key)
+        if raw is not None and raw.strip():
+            return int(raw)
+    return default
+
+
 @dataclass
 class LLMConfig:
     base_url: str
@@ -23,6 +43,7 @@ class LLMConfig:
     timeout_sec: int
     temperature: float
     stream_log: bool
+    max_tokens: int
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
@@ -40,11 +61,12 @@ class LLMConfig:
             timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "6000")),
             temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.1")),
             stream_log=os.getenv("AI_DRAMA_LLM_STREAM_LOG", "1").strip() not in {"0", "false", "False", "no"},
+            max_tokens=int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "4096")),
         )
 
 
 class LLMClient:
-    """Minimal OpenAI-compatible local LLM client.
+    """Minimal OpenAI-compatible local/remote LLM client.
 
     01_novel_parser must use a real LLM for all stages.
     Expected endpoint: POST /v1/chat/completions
@@ -68,8 +90,9 @@ class LLMClient:
             headers["Authorization"] = f"Bearer {self.config.api_key}"
         return headers
 
-    def _base_payload(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
-        return {
+    def _base_payload(self, system_prompt: str, user_prompt: str, trace_label: str = "LLM") -> dict[str, Any]:
+        max_tokens = _max_tokens_for_trace(trace_label)
+        payload: dict[str, Any] = {
             "model": self.config.model,
             "temperature": self.config.temperature,
             "messages": [
@@ -77,11 +100,17 @@ class LLMClient:
                 {"role": "user", "content": user_prompt},
             ],
         }
+        if max_tokens > 0:
+            payload["max_tokens"] = max_tokens
+        return payload
 
     def _complete_text_once(self, system_prompt: str, user_prompt: str, trace_label: str) -> str:
-        payload = self._base_payload(system_prompt, user_prompt)
+        payload = self._base_payload(system_prompt, user_prompt, trace_label=trace_label)
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        print(f"[LLM_REQUEST] {trace_label} 普通请求 model={self.config.model} bytes={len(data)} url={self.config.base_url}", flush=True)
+        print(
+            f"[LLM_REQUEST] {trace_label} 普通请求 model={self.config.model} bytes={len(data)} max_tokens={payload.get('max_tokens')} url={self.config.base_url}",
+            flush=True,
+        )
         request = urllib.request.Request(self.config.base_url, data=data, headers=self._headers(), method="POST")
         start = time.time()
         try:
@@ -90,11 +119,12 @@ class LLMClient:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             raise RuntimeError(
-                "Local LLM HTTP error:\n"
+                "Local/remote LLM HTTP error:\n"
                 f"  status={exc.code} {exc.reason}\n"
                 f"  url={self.config.base_url}\n"
                 f"  model={self.config.model}\n"
                 f"  request_bytes={len(data)}\n"
+                f"  max_tokens={payload.get('max_tokens')}\n"
                 f"  response_body={body}"
             ) from exc
         result = json.loads(raw)
@@ -104,40 +134,55 @@ class LLMClient:
         return text
 
     def _complete_text_stream(self, system_prompt: str, user_prompt: str, trace_label: str) -> str:
-        payload = self._base_payload(system_prompt, user_prompt)
+        payload = self._base_payload(system_prompt, user_prompt, trace_label=trace_label)
         payload["stream"] = True
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        print(f"[LLM_REQUEST] {trace_label} 流式请求 model={self.config.model} bytes={len(data)} url={self.config.base_url}", flush=True)
+        print(
+            f"[LLM_REQUEST] {trace_label} 流式请求 model={self.config.model} bytes={len(data)} max_tokens={payload.get('max_tokens')} url={self.config.base_url}",
+            flush=True,
+        )
         request = urllib.request.Request(self.config.base_url, data=data, headers=self._headers(), method="POST")
         chunks: list[str] = []
         printed_chars = 0
         start = time.time()
-        with urllib.request.urlopen(request, timeout=self.config.timeout_sec) as response:
-            for raw_line in response:
-                line = raw_line.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                if line.startswith("data:"):
-                    line = line[5:].strip()
-                if line == "[DONE]":
-                    break
-                try:
-                    event = json.loads(line)
-                except Exception:
-                    continue
-                choice = (event.get("choices") or [{}])[0]
-                delta = choice.get("delta") or {}
-                content = delta.get("content")
-                if content is None:
-                    content = (choice.get("message") or {}).get("content")
-                if not content:
-                    continue
-                chunks.append(content)
-                joined_len = sum(len(item) for item in chunks)
-                if joined_len - printed_chars >= 180:
-                    preview = "".join(chunks)[printed_chars:joined_len]
-                    print(f"[LLM_STREAM] {trace_label} {preview.replace(chr(10), ' ')}", flush=True)
-                    printed_chars = joined_len
+        try:
+            with urllib.request.urlopen(request, timeout=self.config.timeout_sec) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    if line.startswith("data:"):
+                        line = line[5:].strip()
+                    if line == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(line)
+                    except Exception:
+                        continue
+                    choice = (event.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    content = delta.get("content")
+                    if content is None:
+                        content = (choice.get("message") or {}).get("content")
+                    if not content:
+                        continue
+                    chunks.append(content)
+                    joined_len = sum(len(item) for item in chunks)
+                    if joined_len - printed_chars >= 180:
+                        preview = "".join(chunks)[printed_chars:joined_len]
+                        print(f"[LLM_STREAM] {trace_label} {preview.replace(chr(10), ' ')}", flush=True)
+                        printed_chars = joined_len
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
+            raise RuntimeError(
+                "Local/remote LLM stream HTTP error:\n"
+                f"  status={exc.code} {exc.reason}\n"
+                f"  url={self.config.base_url}\n"
+                f"  model={self.config.model}\n"
+                f"  request_bytes={len(data)}\n"
+                f"  max_tokens={payload.get('max_tokens')}\n"
+                f"  response_body={body}"
+            ) from exc
         text = "".join(chunks)
         if printed_chars < len(text):
             print(f"[LLM_STREAM] {trace_label} {text[printed_chars:].replace(chr(10), ' ')}", flush=True)
