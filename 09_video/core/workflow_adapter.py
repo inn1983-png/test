@@ -135,18 +135,28 @@ def _window_mode() -> tuple[int, int, str]:
     return size, max(1, size - 1), f"{size}grid"
 
 
-def _build_windows(images: list[dict[str, Any]], window_size: int, stride: int) -> list[list[dict[str, Any]]]:
-    windows: list[list[dict[str, Any]]] = []
+def _build_windows(images: list[dict[str, Any]], window_size: int, stride: int) -> list[dict[str, Any]]:
+    windows: list[dict[str, Any]] = []
     start = 0
     while start < len(images):
-        window = images[start : start + window_size]
-        if len(window) < window_size:
-            window = [*window, *([images[-1]] * (window_size - len(window)))]
-        windows.append(window)
+        original_window = images[start : start + window_size]
+        padded_count = max(0, window_size - len(original_window))
+        window = [*original_window, *([images[-1]] * padded_count)]
+        windows.append({"items": window, "is_padded_window": padded_count > 0, "padded_frame_count": padded_count})
         if start + window_size >= len(images):
             break
         start += stride
     return windows
+
+
+def _segment_role(index: int, total: int) -> str:
+    if total <= 1:
+        return "single"
+    if index == 1:
+        return "first"
+    if index == total:
+        return "last"
+    return "middle"
 
 
 def build_negative_prompt() -> str:
@@ -156,9 +166,10 @@ def build_negative_prompt() -> str:
     )
 
 
-def build_motion_policy(window_size: int) -> dict[str, Any]:
+def build_motion_policy(window_size: int, segment_role: str, is_padded_window: bool) -> dict[str, Any]:
     return {
         "policy": "window_keyframe_progression",
+        "segment_role": segment_role,
         "window_size": window_size,
         "motion_strength": os.getenv("AI_DRAMA_VIDEO_MOTION_STRENGTH", "low"),
         "identity_lock": True,
@@ -168,25 +179,51 @@ def build_motion_policy(window_size: int) -> dict[str, Any]:
         "prop_lock": True,
         "lighting_lock": True,
         "composition_lock": True,
+        "is_padded_window": is_padded_window,
         "allowed_motion": ["natural breathing", "subtle facial expression", "small hand movement", "cloth movement", "gentle camera push-in", "smooth transition between provided keyframes"],
         "forbidden_changes": ["new characters", "face change", "costume change", "scene change", "new props", "subtitles", "watermark", "modern objects"],
     }
 
 
-def build_window_ltx_prompt(frame_details: list[dict[str, Any]], timeline_text: str) -> str:
+def _role_prompt(segment_role: str, is_padded_window: bool) -> str:
+    if segment_role == "first":
+        return "Start clearly and steadily from the first keyframe. Establish the scene without sudden motion."
+    if segment_role == "middle":
+        return "Continue naturally from the previous segment. The first keyframe is the previous segment ending anchor."
+    if segment_role == "last":
+        return "End cleanly on the final keyframe. Avoid abrupt motion or new action near the end."
+    if is_padded_window:
+        return "The final repeated keyframes are held for a calm ending. Avoid inventing extra action."
+    return "Play this single segment as a stable keyframe progression."
+
+
+def build_prompt_parts(frame_details: list[dict[str, Any]], timeline_text: str, segment_role: str, is_padded_window: bool) -> dict[str, str]:
     base = os.getenv(
         "AI_DRAMA_VIDEO_PROMPT_TEMPLATE",
-        "Use the provided storyboard keyframe image group as the exact visual anchor. Animate a smooth progression across the keyframes. Keep the same character identity, face, costume, scene, props, lighting, composition style, and historical era. Only allow subtle natural motion: breathing, small facial expression changes, slight hand movement, cloth movement, and gentle camera movement. Do not add new characters or props. Do not change face, costume, scene, layout, or era. No subtitles, no captions, no typography, no watermark.",
+        "Use the provided storyboard keyframe image group as the exact visual anchor. Keep the same character identity, face, costume, scene, props, lighting, composition style, and historical era. Only allow subtle natural motion: breathing, small facial expression changes, slight hand movement, cloth movement, and gentle camera movement. Do not add new characters or props. Do not change face, costume, scene, layout, or era. No subtitles, no captions, no typography, no watermark.",
     )
-    lines = [base, "", "Keyframe progression:"]
+    action_lines = ["Animate a smooth progression across the provided keyframes.", "Keyframe progression:"]
     for idx, frame in enumerate(frame_details, start=1):
-        lines.append(f"{idx}. {frame.get('story_action')} | emotion: {frame.get('emotion')} | camera: {frame.get('camera_plan')}")
+        action_lines.append(f"{idx}. {frame.get('story_action')} | emotion: {frame.get('emotion')} | camera: {frame.get('camera_plan')}")
     continuity = "; ".join(str(frame.get("continuity_notes") or "").strip() for frame in frame_details if frame.get("continuity_notes"))
     if continuity:
-        lines.extend(["", f"Continuity: {continuity}"])
-    if timeline_text:
-        lines.extend(["", f"Audio acting beats: {timeline_text}"])
-    return "\n".join(lines).strip()
+        action_lines.append(f"Continuity: {continuity}")
+    if is_padded_window:
+        action_lines.append("Padded ending: repeated final keyframes should be treated as a held ending pose, not as a reason to invent new action.")
+    audio_prompt = f"Audio acting beats: {timeline_text}" if timeline_text else "Audio acting beats: follow the current audio segment timing with restrained acting."
+    role_prompt = _role_prompt(segment_role, is_padded_window)
+    final_prompt = "\n\n".join([base, role_prompt, "\n".join(action_lines), audio_prompt]).strip()
+    return {
+        "base_video_prompt": base,
+        "segment_role_prompt": role_prompt,
+        "window_action_prompt": "\n".join(action_lines),
+        "audio_acting_prompt": audio_prompt,
+        "final_ltx_prompt": final_prompt,
+    }
+
+
+def build_window_ltx_prompt(frame_details: list[dict[str, Any]], timeline_text: str, segment_role: str = "middle", is_padded_window: bool = False) -> str:
+    return build_prompt_parts(frame_details, timeline_text, segment_role, is_padded_window)["final_ltx_prompt"]
 
 
 def build_segment_plan(
@@ -232,17 +269,23 @@ def build_segment_plan(
         start = round((index - 1) * duration, 3)
         end = round(min(index * duration, total_duration), 3)
         actual_duration = max(0.001, end - start)
-        window = windows[(index - 1) % len(windows)]
+        window_record = windows[(index - 1) % len(windows)]
+        window = window_record["items"]
+        is_padded_window = bool(window_record.get("is_padded_window"))
+        padded_frame_count = int(window_record.get("padded_frame_count") or 0)
+        role = _segment_role(index, segment_count)
         frame_details = [_frame_detail(image, frame_index, fallback_number=i) for i, image in enumerate(window, start=1)]
         image_paths = [str(frame.get("image_path") or "") for frame in frame_details]
         frame_ids = [str(frame.get("frame_id") or f"frame_{i:04d}") for i, frame in enumerate(frame_details, start=1)]
         clip_name = f"clip_{index:04d}.mp4"
         slice_name = f"audio_slice_{index:04d}.wav"
         timeline_text = _timeline_text(entries, start, end)
+        prompt_parts = build_prompt_parts(frame_details, timeline_text, role, is_padded_window)
         segments.append(
             {
                 "segment_id": f"video_seg_{index:04d}",
                 "segment_index": index,
+                "segment_role": role,
                 "window_mode": window_mode,
                 "window_size": window_size,
                 "stride": stride,
@@ -250,6 +293,8 @@ def build_segment_plan(
                 "image_paths": image_paths,
                 "keyframe_details": frame_details,
                 "anchor_frame_id": frame_ids[-1] if frame_ids else None,
+                "is_padded_window": is_padded_window,
+                "padded_frame_count": padded_frame_count,
                 "start_seconds": start,
                 "end_seconds": end,
                 "duration_seconds": actual_duration,
@@ -263,9 +308,10 @@ def build_segment_plan(
                 "output_clip_path": str(clips_dir / clip_name),
                 "output_basename": Path(clip_name).stem,
                 "timeline_text": timeline_text,
-                "ltx_prompt": build_window_ltx_prompt(frame_details, timeline_text),
+                "prompt_parts": prompt_parts,
+                "ltx_prompt": prompt_parts["final_ltx_prompt"],
                 "negative_prompt": negative_prompt,
-                "motion_policy": build_motion_policy(window_size),
+                "motion_policy": build_motion_policy(window_size, role, is_padded_window),
                 "execution_mode": "execute" if mode in {"execute", "comfyui", "real"} else "dry_run",
             }
         )
@@ -282,8 +328,14 @@ def build_segment_plan(
         "window_size": window_size,
         "stride": stride,
         "windows": [
-            {"window_index": idx, "frame_ids": [str(img.get("frame_id")) for img in window], "image_paths": [str(img.get("image_path")) for img in window]}
-            for idx, window in enumerate(windows, start=1)
+            {
+                "window_index": idx,
+                "frame_ids": [str(img.get("frame_id")) for img in record["items"]],
+                "image_paths": [str(img.get("image_path")) for img in record["items"]],
+                "is_padded_window": bool(record.get("is_padded_window")),
+                "padded_frame_count": int(record.get("padded_frame_count") or 0),
+            }
+            for idx, record in enumerate(windows, start=1)
         ],
         "segments": segments,
         "settings": {
@@ -317,6 +369,7 @@ def build_comfyui_workflow_payload(segment: dict[str, Any]) -> dict[str, Any]:
         "overlap_frames": segment.get("overlap_frames", 0),
         "window_size": segment.get("window_size"),
         "stride": segment.get("stride"),
+        "segment_role": segment.get("segment_role"),
         "output_clip_path": segment.get("output_clip_path"),
         "output_basename": segment.get("output_basename"),
         "image_paths": image_paths,
