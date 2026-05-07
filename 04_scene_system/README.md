@@ -11,18 +11,48 @@
 02_script_writer/script.json
 ```
 
-重点使用：
+核心原则：
 
 ```text
-01: candidate_scenes / paragraphs / events / scene_value_map
-02: scene_beats / visual_dramatic_units / storyboard_hints / segments / continuity_chain
+01 = 提取一切，宁可多提，不漏掉
+04 = 先合并，再分级，不简单删除候选
+06 = 只引用 04 输出的稳定场景名和主场景/子场景关系
 ```
 
-输出：
+## 资产分级
+
+04B 必须给每个场景输出：
 
 ```text
-04_scene_system/scenes.json
-04_scene_system/scene_meta.json
+asset_level = main_scene / sub_scene / temporary / background
+needs_reference_image = true / false
+parent_scene
+reference_image_plan
+```
+
+分级规则：
+
+```text
+main_scene：主场景，反复出现或承载核心戏，必须有全景参考图。
+sub_scene：主场景的一部分，如门口、桌前、堂下，必须绑定 parent_scene。
+temporary：临时地点，一般不生成参考图。
+background：背景地点或泛称地点，一般不生成参考图。
+```
+
+参考图策略：
+
+```text
+main_scene：wide_establishing_view，先用全景图稳定空间。
+sub_scene：需要时再补 local_area_view。
+temporary / background：只保留文字资产，不强制做图。
+```
+
+最高图像资产规则：
+
+```text
+场景优先全景图，不要一开始做大量多角度。
+先主场景全景，再根据 06/07 失败情况补子区域局部图。
+场景系统只写资产描述和参考图计划，不写图像提示词。
 ```
 
 ## 绝对边界
@@ -33,6 +63,7 @@
 场景合并
 场景别名归并
 主场景/子场景/临时地点区分
+场景资产分级
 稳定场景卡
 剧本使用绑定
 证据链
@@ -64,7 +95,7 @@ python 04_scene_system/run_staged.py
 
 ```text
 04A scene_merge_plan：合并同一场景的不同说法
-04B scene_cards：输出稳定场景卡
+04B scene_cards：输出稳定场景卡 + 资产分级
 04C script_usage_binding：绑定 02 剧本里的场景使用
 04D quality_check：总检评分，可触发连锁重跑
 ```
@@ -92,10 +123,6 @@ python 04_scene_system/run_staged.py
 04A → 04B → 04C → 04D
 ```
 
-## JSON 修复机制
-
-LLM 返回 JSON 解析失败时，`json_repair.py` 会把 broken_json 和错误原因发回 LLM，只修复 JSON 格式，不新增业务内容。
-
 ## 最终硬规则校验
 
 `schema_validator.py` 会检查：
@@ -105,6 +132,10 @@ scenes 是否为空
 scene_id 是否重复
 canonical_scene_name 是否重复
 aliases 是否互相冲突
+asset_level 是否合法
+主场景是否 needs_reference_image=true
+主场景 reference_image_plan 是否包含 wide_establishing_view
+子场景是否绑定 parent_scene
 是否出现 prompt / image_prompt / desc_prompt 等越界字段
 source_evidence 是否存在
 usage_in_script 是否为数组
@@ -118,6 +149,10 @@ usage_in_script 是否为数组
 canonical_scene_name
 aliases
 scene_type
+asset_level
+needs_reference_image
+parent_scene
+reference_image_plan
 time_period
 lighting
 weather
