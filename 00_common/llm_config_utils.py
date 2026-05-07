@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import os
+
+_logger = logging.getLogger(__name__)
 
 CLOUD_DEFAULT_BASE_URL = "https://api.deepseek.com/v1/chat/completions"
 CLOUD_DEFAULT_MODEL = "deepseek-v4-flash"
@@ -20,10 +23,10 @@ def validate_api_key_requirement(base_url: str, api_key: str, module_name: str) 
     if is_local_base_url(base_url):
         return
     if base_url == CLOUD_DEFAULT_BASE_URL or base_url.startswith("https://api."):
-        raise RuntimeError(
-            f"{module_name} 当前使用默认云端 LLM，需要设置 AI_DRAMA_LLM_API_KEY；"
-            "默认模型为 DeepSeek Flash。"
-            "如果你使用本地模型，请设置 AI_DRAMA_LLM_BASE_URL 和 AI_DRAMA_LLM_MODEL。"
+        _logger.warning(
+            "%s 当前使用云端 LLM 但未设置 AI_DRAMA_LLM_API_KEY，请求可能失败；"
+            "如使用本地模型，请设置 AI_DRAMA_LLM_BASE_URL 和 AI_DRAMA_LLM_MODEL。",
+            module_name,
         )
 
 
