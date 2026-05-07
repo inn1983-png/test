@@ -13,8 +13,12 @@ REQUIRED_BY_STAGE = {
 
 REQUIRED_CHARACTER_FIELDS = [
     "character_id", "canonical_name", "aliases", "gender", "age_range", "identity",
-    "appearance", "costume", "temperament", "role_function", "source_evidence", "usage_in_script"
+    "appearance", "costume", "temperament", "role_function", "source_evidence", "usage_in_script",
+    "asset_level", "needs_fixed_face", "reference_image_priority", "reference_image_plan"
 ]
+
+VALID_ASSET_LEVELS = {"main", "supporting", "extra_group", "mentioned_only"}
+VALID_REFERENCE_PRIORITIES = {"required", "optional", "not_needed"}
 
 
 def _non_empty(value: Any) -> bool:
@@ -43,6 +47,18 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
             if any(prefix in name for prefix in ["年轻", "少年", "中年", "老年", "年老"]):
                 issues.append(f"疑似按年龄段拆分角色：{name}")
                 score -= 20
+            if item.get("asset_level") not in VALID_ASSET_LEVELS:
+                issues.append(f"角色 {name or idx} asset_level 非法：{item.get('asset_level')}")
+                score -= 10
+            if item.get("reference_image_priority") not in VALID_REFERENCE_PRIORITIES:
+                issues.append(f"角色 {name or idx} reference_image_priority 非法：{item.get('reference_image_priority')}")
+                score -= 10
+            if item.get("asset_level") in {"main", "supporting"} and item.get("needs_fixed_face") is not True:
+                issues.append(f"主/配角必须 needs_fixed_face=true：{name or idx}")
+                score -= 10
+            if item.get("asset_level") in {"extra_group", "mentioned_only"} and item.get("reference_image_priority") == "required":
+                issues.append(f"龙套/仅提及角色不应强制参考图：{name or idx}")
+                score -= 8
     if stage_id == "03D":
         qr = data.get("quality_report", {}) if isinstance(data.get("quality_report"), dict) else {}
         if qr.get("needs_retry") and not qr.get("retry_stages"):
