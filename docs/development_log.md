@@ -23,10 +23,12 @@
 03/04/05 已升级为五阶段真实资产系统：A 合并、B 资产卡、C 剧本绑定、D 模块总检、E 面向 06 的资产复核。
 06_storyboard 已升级为五阶段真实 LLM 单帧分镜系统：A 资产闸门、B 分镜规划、C 单帧分镜、D 连续性绑定、E 总检。
 07_storyboard_image 已升级为四阶段图片执行系统：A 参考资产准备、B 分镜图片任务构建、C ComfyUI/dry_run 执行、D manifest 总检。
+08_audio 已升级为真实音频执行系统：支持 TxtovideoAudio 的 N/D/M/S 标记、音色库绑定、情绪映射、IndexTTS2 分段生成、final_audio.wav、audio_timeline.json、subtitle.srt、subtitle.ass。
 01/02/03/04/05/06 已统一接入本地 Gemma JSON 输出护栏，适配 Gemma 4 31B Q4 等本地量化模型。
 01/02/03/04/05/06 的 parse_json_from_text 与 repair fallback 已统一清理 analysis / reasoning / chain_of_thought / _local_model_output_contract 等内部字段。
 00 validate_pipeline.py 已修正为识别 run_staged.py，并使用新的 03/04/05 system 模块顺序。
 00 resource_manager.py 已改成阶段感知资源释放：01–06 LLM 常驻，06→07 才释放 LLM。
+configs/module_contracts.json 已把 09_video 对 08 的依赖升级为 final_audio.wav + audio_timeline.json。
 configs/local_resource_release.json 已从旧 library 模块名切换为 system 模块名，并新增 phase_commands。
 04_scene_system 已修正 parent_scene 校验：只有 sub_scene 必须非空绑定 parent_scene，main/temporary/background 可为空但字段需存在。
 05_prop_system 已修正 05B prop_type 枚举，与 asset_level 统一为 key_prop/action_prop/background_object/mentioned_only。
@@ -61,8 +63,96 @@ web_ui 已新增最终版总控工作台骨架：不是测试 UI，而是面向 
 06_storyboard/storyboard.json
 07_storyboard_image/image_manifest.json
 08_audio/final_audio.wav
+08_audio/audio_timeline.json
 09_video/video_manifest.json
 10_final_assembly/final.mp4
+```
+
+---
+
+# 08 配音生成系统
+
+正式入口：
+
+```text
+08_audio/run_staged.py
+```
+
+阶段：
+
+```text
+08A audio_queue_build
+08B voice_emotion_binding_and_tts_plan
+08C tts_execution
+08D final_mix_timeline_subtitle
+```
+
+08 输入：
+
+```text
+02_script_writer/script.json
+可选：shared_assets/voice_library/voices.json
+可选：AI_DRAMA_VOICE_MAP 指定音色库
+```
+
+08 输出：
+
+```text
+08_audio/final_audio.wav
+08_audio/audio_manifest.json
+08_audio/audio_meta.json
+08_audio/audio_timeline.json
+08_audio/subtitle.srt
+08_audio/subtitle.ass
+08_audio/segments/audio_seg_0001.wav ...
+```
+
+08 已吸收 TxtovideoAudio 音频驱动规则：
+
+```text
+N：旁白，固定 narrator 音色，弱情绪，不强制口型。
+D：角色对白，角色音色，较强情绪，可用于口型。
+M：心理 OS，角色音色或 OS 音色，中等情绪，不强制口型。
+S：静音留白，只生成静音段。
+```
+
+08 核心规则：
+
+```text
+不改写剧本正文。
+不改变角色说话人。
+N/D/M/S 标记优先保持原顺序。
+非静音行必须绑定 voice_id 与 spk_audio_prompt。
+情绪先映射为稳定 emo_text / emo_alpha，再传给 IndexTTS2。
+默认 dry_run 生成真实可读静音 WAV，execute 模式调用本地根目录 index-tts。
+失败段只建议局部重跑 failed_audio_segments，不回滚 02。
+audio_timeline.json 是 09 按真实音频时长规划 6–12 秒视频单元的关键输入。
+如果单条 voice_line 加起势和末帧留白后超过 12 秒，优先回到 02 拆句，不在 09 硬救。
+```
+
+音色库推荐位置：
+
+```text
+shared_assets/voice_library/voices.json
+```
+
+本地 IndexTTS2 默认位置：
+
+```text
+index-tts/
+```
+
+关键环境变量：
+
+```text
+AI_DRAMA_AUDIO_EXECUTION_MODE=dry_run|execute
+AI_DRAMA_INDEX_TTS_ROOT=index-tts
+AI_DRAMA_VOICE_MAP=shared_assets/voice_library/voices.json
+AI_DRAMA_TTS_FP16=1
+AI_DRAMA_TTS_DEEPSPEED=0
+AI_DRAMA_TTS_CUDA_KERNEL=0
+AI_DRAMA_TTS_EMO_ALPHA=0.6
+AI_DRAMA_AUDIO_NORMALIZE=0|1
 ```
 
 ---
@@ -167,7 +257,7 @@ complete_json 的 repair_callback 返回后也必须再次调用 remove_internal
 01–06：LLM_TEXT_PHASE，Gemma/本地 LLM 常驻，不在每个模块结束后主动卸载。
 06 → 07：进入图片阶段前 release_llm_resources，释放 LLM 显存。
 07：图片生成 / ComfyUI 阶段，完成后按需 release_image_resources。
-08：TTS / CosyVoice2 阶段，按显存情况 release_audio_resources。
+08：TTS / IndexTTS2 阶段，按显存情况 release_audio_resources。
 09：视频模型 LTX2.3 阶段，加载前释放其他大模型，完成后 release_video_resources。
 10：普通合成阶段，不默认加载大模型。
 ```
@@ -555,7 +645,7 @@ AI_DRAMA_IMAGE_NEGATIVE_PROMPT=...
 
 ---
 
-# 03/04/05/06/07 共同真实执行机制
+# 03/04/05/06/07/08 共同真实执行机制
 
 ## 阶段评分与修改意见重跑
 
@@ -563,6 +653,7 @@ AI_DRAMA_IMAGE_NEGATIVE_PROMPT=...
 每阶段生成后 quality_checker.py 评分。
 低于阈值时生成 revision_instructions，并把修改意见传回同阶段 LLM 自动重跑。
 07 不使用 LLM 自动重跑；07D 只输出 failed_frames retry_plan，后续由控制器或 UI 触发失败帧重跑。
+08 不使用 LLM 自动重跑；08C 失败时只建议 failed_audio_segments 局部重跑，不回滚 02。
 ```
 
 ## 总检/复核连锁重跑
@@ -570,6 +661,7 @@ AI_DRAMA_IMAGE_NEGATIVE_PROMPT=...
 ```text
 03D/03E、04D/04E、05D/05E、06D/06E 输出 needs_retry=true 和 retry_stages 时，stage_runner.py 会从最早问题阶段开始，连同后续阶段再跑一轮。
 07D 输出 needs_retry=true 时，只建议重跑失败图片帧，不建议回滚 06，除非缺少 06 资产绑定或 reference_images。
+08C/08D 输出 needs_retry=true 时，只建议重跑失败音频段或修复音色库 / index-tts 环境，不建议回滚 02，除非 02 没有可配音文本或单句过长。
 ```
 
 ## JSON 修复机制
@@ -578,7 +670,7 @@ AI_DRAMA_IMAGE_NEGATIVE_PROMPT=...
 LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原因发回 LLM。
 该机制只修复 JSON 格式，不新增业务内容。
 修复后的 JSON 也会再次进入内部控制字段清理。
-07 不依赖 LLM JSON 修复，因为 07 是确定性图片执行阶段。
+07/08 不依赖 LLM JSON 修复，因为是确定性执行阶段。
 ```
 
 ## 最终 schema 硬校验
@@ -590,6 +682,7 @@ LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原
 05 最终 schema_validator.py 会检查道具分级、wearable_type、wearable_policy、bound_character_names、bound_costume_ids、禁止图像提示词字段。
 06 最终 schema_validator.py 会检查 frames、sequence_index 连续性、稳定资产名引用、costume_id 引用、appearance_asset_key 定义、allowed_asset_names 与 03/04/05 一致性、禁止图像提示词字段、资产不可用时必须有 upstream_blocking_issues。
 07 最终 schema_validator.py 会检查 frame_image_tasks、execution_results、images 的 frame_id 一致性，sequence_index 连续性，image_path、reference_images、retry_frames 与 execution_mode。
+08 最终 schema_validator.py 会检查 final_audio.wav、audio_timeline.json、subtitle.srt、subtitle.ass、非静音音色绑定、分段音频路径、真实时长。
 ```
 
 ---
@@ -634,12 +727,15 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 06_storyboard
 set AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 07_storyboard_image
+set AI_DRAMA_AUDIO_EXECUTION_MODE=dry_run
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 08_audio
 ```
 
-完整测试到 07：
+完整测试到 08：
 
 ```bash
 set AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run
+set AI_DRAMA_AUDIO_EXECUTION_MODE=dry_run
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 01_novel_parser
 ```
 
@@ -660,5 +756,6 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 07 已开始实现为图片执行阶段：默认 dry_run，后续接入真实 ComfyUI workflow 时通过环境变量注入节点 ID，避免节点名错误和工作流不可导入。
 用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05/06 需要强 JSON 护栏、低温度默认值、输出控制字段清理。
 00–06 都属于 LLM 文本阶段，不应每个模块结束就释放 LLM；06→07 才释放 LLM 显存。
+08 必须参考 TxtovideoAudio 的音频驱动思路：IndexTTS2 作为唯一 TTS，N/D/M/S 标记，旁白固定 narrator 音色，角色对白绑定角色音色，心理 OS 中等情绪，静音留白生成静音段，从真实音频时长开始服务 09 视频单元规划。
 Web UI 不是测试用 UI，而是最终版 UI 设计：要让用户在界面里看到每一步发生了什么，阶段输出、评分、修改意见、返工、产物都要有对应显示区域。当前 web_ui 已按最终工作台骨架落地，后续 07/08/09/10 必须继续接入同一工作台。Web UI 默认端口使用 1144。
 ```
