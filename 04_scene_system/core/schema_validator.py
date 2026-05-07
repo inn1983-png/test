@@ -18,6 +18,12 @@ REQUIRED_SCENE_FIELDS = [
 VALID_ASSET_LEVELS = {"main_scene", "sub_scene", "temporary", "background"}
 
 
+def _is_missing_scene_field(item: dict[str, Any], field: str) -> bool:
+    if field == "parent_scene" and item.get("asset_level") != "sub_scene":
+        return "parent_scene" not in item
+    return item.get(field) in (None, "", [], {})
+
+
 def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
     issues: list[str] = []
     for field in REQUIRED_TOP:
@@ -38,7 +44,7 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             issues.append(f"scenes[{idx}] 不是对象")
             continue
         for field in REQUIRED_SCENE_FIELDS:
-            if item.get(field) in (None, "", [], {}):
+            if _is_missing_scene_field(item, field):
                 issues.append(f"场景 {item.get('canonical_scene_name', idx)} 缺少必要字段：{field}")
         if "prompt" in item or "image_prompt" in item or "desc_prompt" in item:
             issues.append(f"场景含图像提示词字段，越界：{item.get('canonical_scene_name', idx)}")
