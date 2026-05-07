@@ -11,6 +11,14 @@
 筛选原则：
 01 负责提取一切，05 不要简单删除候选，而是先合并，再分级。
 
+必须使用 01 的真正理解作为分级依据：story_understanding、story_spine、events、conflicts、high_retention_segments、asset_binding_hints、visual_risk_report、paragraphs。
+
+asset_importance_score 评分：
+- 90-100：核心关键道具，必须稳定。
+- 70-89：重要道具，需要进入主库。
+- 40-69：动作/辅助道具，需要记录但不一定做图。
+- 0-39：背景/仅提及物件，保留但不进入主生图资产。
+
 asset_level 只能使用：
 - key_prop：关键道具，影响剧情或反复出现，必须有独立参考图计划。
 - action_prop：动作道具，会被拿、递、摔、使用，可选参考图。
@@ -33,6 +41,9 @@ asset_level 只能使用：
       "canonical_prop_name": "稳定道具名",
       "aliases": ["别名"],
       "prop_type": "key_prop/normal_prop/background_object",
+      "asset_importance_score": 0,
+      "importance_reason": "基于 01 story_spine/events/conflicts/asset_binding_hints 判断的重要性理由",
+      "source_understanding_basis": ["story_spine", "events", "conflicts", "asset_binding_hints"],
       "asset_level": "key_prop/action_prop/background_object/mentioned_only",
       "needs_reference_image": true,
       "reference_image_plan": {
