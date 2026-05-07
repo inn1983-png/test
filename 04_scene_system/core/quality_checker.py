@@ -30,6 +30,12 @@ def _non_empty(value: Any) -> bool:
     return value not in (None, "", [], {})
 
 
+def _is_missing_scene_field(item: dict[str, Any], field: str) -> bool:
+    if field == "parent_scene" and item.get("asset_level") != "sub_scene":
+        return "parent_scene" not in item
+    return item.get(field) in (None, "", [], {})
+
+
 def _check_review_report(stage_id: str, data: dict[str, Any], issues: list[str]) -> int:
     score_delta = 0
     report = data.get("review_report", {}) if isinstance(data.get("review_report"), dict) else {}
@@ -83,7 +89,7 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
                 score -= 10
                 continue
             for field in REQUIRED_SCENE_FIELDS:
-                if not _non_empty(item.get(field)):
+                if _is_missing_scene_field(item, field):
                     issues.append(f"场景 {item.get('canonical_scene_name', idx)} 缺少字段：{field}")
                     score -= 5
             if "prompt" in item or "image_prompt" in item:
