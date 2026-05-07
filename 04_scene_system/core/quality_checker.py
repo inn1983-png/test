@@ -14,8 +14,11 @@ REQUIRED_BY_STAGE = {
 REQUIRED_SCENE_FIELDS = [
     "scene_id", "canonical_scene_name", "aliases", "scene_type", "time_period",
     "lighting", "weather", "atmosphere", "layout", "key_visual_elements",
-    "continuity_rules", "source_evidence", "usage_in_script"
+    "continuity_rules", "source_evidence", "usage_in_script",
+    "asset_level", "needs_reference_image", "reference_image_plan", "parent_scene"
 ]
+
+VALID_ASSET_LEVELS = {"main_scene", "sub_scene", "temporary", "background"}
 
 
 def _non_empty(value: Any) -> bool:
@@ -43,6 +46,19 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
             if "prompt" in item or "image_prompt" in item:
                 issues.append(f"场景 {item.get('canonical_scene_name', idx)} 含图像提示词字段，越界")
                 score -= 20
+            name = str(item.get("canonical_scene_name", idx))
+            if item.get("asset_level") not in VALID_ASSET_LEVELS:
+                issues.append(f"场景 {name} asset_level 非法：{item.get('asset_level')}")
+                score -= 10
+            if item.get("asset_level") == "main_scene" and item.get("needs_reference_image") is not True:
+                issues.append(f"主场景必须 needs_reference_image=true：{name}")
+                score -= 10
+            if item.get("asset_level") == "sub_scene" and not str(item.get("parent_scene", "")).strip():
+                issues.append(f"子场景必须绑定 parent_scene：{name}")
+                score -= 10
+            if item.get("asset_level") in {"temporary", "background"} and item.get("needs_reference_image") is True:
+                issues.append(f"临时/背景场景不建议强制参考图：{name}")
+                score -= 6
     if stage_id == "04D":
         qr = data.get("quality_report", {}) if isinstance(data.get("quality_report"), dict) else {}
         if qr.get("needs_retry") and not qr.get("retry_stages"):
