@@ -71,16 +71,6 @@ def main() -> int:
             },
             description="剧本改编元信息：阶段状态、评分、重跑记录与 schema 校验。",
         )
-        base_module.write_placeholder_output(MODULE_NAME, {
-            "module": MODULE_NAME,
-            "status": data.get("status"),
-            "message": f"剧本改编系统已按 02A–02F 阶段运行，关键输出已生成：{KEY_OUTPUT}",
-            "key_output": KEY_OUTPUT,
-            "schema_version": SCHEMA_VERSION,
-            "stage_mode": stage_result["stage_mode"],
-            "stage_status": stage_result["stage_status"],
-            "config": config,
-        })
         print(f"{DISPLAY_NAME} finished. key output: {KEY_OUTPUT}")
         return 0
     finally:
