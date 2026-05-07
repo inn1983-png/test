@@ -29,7 +29,7 @@
 configs/local_resource_release.json 已从旧 library 模块名切换为 system 模块名，并新增 phase_commands。
 04_scene_system 已修正 parent_scene 校验：只有 sub_scene 必须非空绑定 parent_scene，main/temporary/background 可为空但字段需存在。
 05_prop_system 已修正 05B prop_type 枚举，与 asset_level 统一为 key_prop/action_prop/background_object/mentioned_only。
-web_ui 已新增最终版总控工作台骨架：不是测试 UI，而是面向 01–10 全流程的生产控制台、阶段透明区、资产库入口、产物中心和后续媒体生产区扩展基础。
+web_ui 已新增最终版总控工作台骨架：不是测试 UI，而是面向 01–10 全流程的生产控制台、阶段透明区、资产库入口、产物中心和后续媒体生产区扩展基础；默认端口已改为 1144。
 ```
 
 ---
@@ -77,13 +77,19 @@ web_ui/
 启动：
 
 ```bash
-python web_ui/server.py --host 127.0.0.1 --port 7860
+python web_ui/server.py --host 127.0.0.1 --port 1144
+```
+
+也可直接使用默认端口：
+
+```bash
+python web_ui/server.py
 ```
 
 浏览器：
 
 ```text
-http://127.0.0.1:7860
+http://127.0.0.1:1144
 ```
 
 定位：
@@ -535,7 +541,7 @@ set AI_DRAMA_LLM_TIMEOUT_SEC=240
 启动最终版 Web UI：
 
 ```bash
-python web_ui/server.py --host 127.0.0.1 --port 7860
+python web_ui/server.py --host 127.0.0.1 --port 1144
 ```
 
 先校验 pipeline：
@@ -578,5 +584,5 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 07 暂不改，等 01–06 全部完成后新开对话单独处理。
 用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05/06 需要强 JSON 护栏、低温度默认值、输出控制字段清理。
 00–06 都属于 LLM 文本阶段，不应每个模块结束就释放 LLM；06→07 才释放 LLM 显存。
-Web UI 不是测试用 UI，而是最终版 UI 设计：要让用户在界面里看到每一步发生了什么，阶段输出、评分、修改意见、返工、产物都要有对应显示区域。当前 web_ui 已按最终工作台骨架落地，后续 07/08/09/10 必须继续接入同一工作台。
+Web UI 不是测试用 UI，而是最终版 UI 设计：要让用户在界面里看到每一步发生了什么，阶段输出、评分、修改意见、返工、产物都要有对应显示区域。当前 web_ui 已按最终工作台骨架落地，后续 07/08/09/10 必须继续接入同一工作台。Web UI 默认端口使用 1144。
 ```
