@@ -1,17 +1,23 @@
 {
   "enabled": false,
-  "description": "Optional external cleanup commands for local model resources. Disabled by default to avoid stopping user services by accident.",
+  "description": "Optional external cleanup commands for local model resources. Disabled by default to avoid stopping user services by accident. 01-06 are one continuous LLM text phase and should not unload the local LLM after each module. Use phase_commands for explicit model-family switches.",
   "global_commands": [],
   "module_commands": {
     "01_novel_parser": [],
     "02_script_writer": [],
-    "03_character_library": [],
-    "04_scene_library": [],
-    "05_prop_library": [],
+    "03_character_system": [],
+    "04_scene_system": [],
+    "05_prop_system": [],
     "06_storyboard": [],
     "07_storyboard_image": [],
     "08_audio": [],
     "09_video": [],
     "10_final_assembly": []
+  },
+  "phase_commands": {
+    "release_llm_resources": [],
+    "release_image_resources": [],
+    "release_audio_resources": [],
+    "release_video_resources": []
   }
 }
