@@ -11,7 +11,7 @@ if "%AI_DRAMA_LLM_BASE_URL%"=="" (
 
 if "%AI_DRAMA_LLM_MODEL%"=="" set "AI_DRAMA_LLM_MODEL=gemma-4-31B-it-Q4_K_M.gguf"
 if "%AI_DRAMA_LLM_TEMPERATURE%"=="" set "AI_DRAMA_LLM_TEMPERATURE=0.1"
-if "%AI_DRAMA_LLM_TIMEOUT_SEC%"=="" set "AI_DRAMA_LLM_TIMEOUT_SEC=240"
+if "%AI_DRAMA_LLM_TIMEOUT_SEC%"=="" set "AI_DRAMA_LLM_TIMEOUT_SEC=1800"
 if "%AI_DRAMA_UI_PORT%"=="" set "AI_DRAMA_UI_PORT=1144"
 
 echo.
@@ -23,6 +23,7 @@ echo AI_DRAMA_LLM_TIMEOUT_SEC=%AI_DRAMA_LLM_TIMEOUT_SEC%
 echo AI_DRAMA_UI_PORT=%AI_DRAMA_UI_PORT%
 echo.
 echo 请确认你的本地 LLM 服务已经启动。
+echo Gemma 31B Q4 首次长 JSON 输出可能很慢，当前超时已设为 1800 秒。
 echo.
 
 python 11_web_ui\app.py
