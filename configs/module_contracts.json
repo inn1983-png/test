@@ -64,8 +64,19 @@
       ]
     },
     "10_final_assembly": {
-      "requires": [{"module": "09_video", "name": "video_manifest.json"}],
-      "produces": [{"module": "10_final_assembly", "name": "final.mp4", "type": "video"}]
+      "requires": [
+        {"module": "09_video", "name": "video_manifest.json", "type": "json"},
+        {"module": "08_audio", "name": "final_audio.wav", "type": "audio"},
+        {"module": "09_video", "name": "final_video.mp4", "type": "video", "optional": true},
+        {"module": "09_video", "name": "clips", "type": "video_dir", "optional": true},
+        {"module": "08_audio", "name": "subtitle.srt", "type": "subtitle", "optional": true},
+        {"module": "08_audio", "name": "subtitle.ass", "type": "subtitle", "optional": true}
+      ],
+      "produces": [
+        {"module": "10_final_assembly", "name": "final.mp4", "type": "video"},
+        {"module": "10_final_assembly", "name": "final_manifest.json", "type": "json"},
+        {"module": "10_final_assembly", "name": "final_meta.json", "type": "json"}
+      ]
     }
   }
 }
