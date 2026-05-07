@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 
@@ -10,17 +9,34 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
 
     if stage_id == "09A":
         segments = data.get("segments") if isinstance(data.get("segments"), list) else []
+        window_size = int(data.get("window_size") or 0)
+        stride = int(data.get("stride") or 0)
         if not segments:
             issues.append("09A must build at least one video segment.")
+        if window_size not in {4, 6, 9}:
+            issues.append("09A window_size should be 4, 6, or 9.")
+        if stride != max(1, window_size - 1):
+            issues.append("09A stride must equal window_size - 1.")
         if not data.get("final_audio_path"):
             issues.append("09A missing final_audio_path.")
+        previous_last = None
         for idx, seg in enumerate(segments, start=1):
             if not isinstance(seg, dict):
                 issues.append(f"09A segment[{idx}] must be object.")
                 continue
-            for key in ("image_path", "audio_source_path", "output_clip_path", "start_seconds", "end_seconds"):
-                if seg.get(key) in (None, ""):
+            for key in ("image_paths", "frame_ids", "audio_source_path", "output_clip_path", "start_seconds", "end_seconds", "ltx_prompt", "negative_prompt", "motion_policy"):
+                if seg.get(key) in (None, "", []):
                     issues.append(f"09A {seg.get('segment_id', idx)} missing {key}.")
+            frame_ids = seg.get("frame_ids") if isinstance(seg.get("frame_ids"), list) else []
+            image_paths = seg.get("image_paths") if isinstance(seg.get("image_paths"), list) else []
+            if len(frame_ids) != window_size:
+                issues.append(f"09A {seg.get('segment_id', idx)} frame_ids length mismatch.")
+            if len(image_paths) != window_size:
+                issues.append(f"09A {seg.get('segment_id', idx)} image_paths length mismatch.")
+            if previous_last and frame_ids and frame_ids[0] != previous_last:
+                issues.append(f"09A {seg.get('segment_id', idx)} does not overlap previous segment tail frame.")
+            if frame_ids:
+                previous_last = frame_ids[-1]
             if float(seg.get("duration_seconds") or 0) > 12.5:
                 issues.append(f"09A {seg.get('segment_id', idx)} duration exceeds 12.5 seconds.")
     elif stage_id == "09B":
