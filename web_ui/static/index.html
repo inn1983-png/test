@@ -165,141 +165,37 @@
         </div>
       </section>
 
-      <section class="view" id="view-stages">
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>阶段透明区</h2>
-              <p>每个模块阶段都会显示输出文件、评分、是否通过、问题数量。</p>
-            </div>
-          </div>
-          <div id="stageExplorer" class="stage-explorer"></div>
-        </div>
-      </section>
-
-      <section class="view" id="view-retry">
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>返工中心</h2>
-              <p>集中展示 needs_retry、upstream_blocking_issues、schema_validation_issues 和低分阶段。</p>
-            </div>
-            <div class="panel-chip danger-chip">问题集中处理</div>
-          </div>
-          <div id="retryCenter" class="retry-list"></div>
-        </div>
-      </section>
+      <section class="view" id="view-stages"><div class="panel"><div class="panel-header"><div><h2>阶段透明区</h2><p>每个模块阶段都会显示输出文件、评分、是否通过、问题数量。</p></div></div><div id="stageExplorer" class="stage-explorer"></div></div></section>
+      <section class="view" id="view-retry"><div class="panel"><div class="panel-header"><div><h2>返工中心</h2><p>集中展示 needs_retry、upstream_blocking_issues、schema_validation_issues 和低分阶段。</p></div><div class="panel-chip danger-chip">问题集中处理</div></div><div id="retryCenter" class="retry-list"></div></div></section>
 
       <section class="view" id="view-assets">
-        <div class="asset-hero panel">
-          <div>
-            <h2>资产库工作台</h2>
-            <p>每个资产都以卡片呈现，并支持编辑图片生成提示词、保存草稿、重新生成图片。</p>
-          </div>
-          <div class="panel-chip">Prompt Editable</div>
-        </div>
+        <div class="asset-hero panel"><div><h2>资产库工作台</h2><p>每个资产都以卡片呈现，并支持编辑图片生成提示词、保存草稿、重新生成图片。</p></div><div class="panel-chip">Prompt Editable</div></div>
         <div class="grid three-cols">
-          <div class="panel asset-panel character-card" data-output="03_character_system/characters.json">
-            <div class="asset-icon">人</div>
-            <div class="panel-header"><h2>角色库</h2><button class="btn small preview-main-output">预览</button></div>
-            <div id="characterSummary" class="muted">等待 03 输出</div>
-          </div>
-          <div class="panel asset-panel scene-card" data-output="04_scene_system/scenes.json">
-            <div class="asset-icon">景</div>
-            <div class="panel-header"><h2>场景库</h2><button class="btn small preview-main-output">预览</button></div>
-            <div id="sceneSummary" class="muted">等待 04 输出</div>
-          </div>
-          <div class="panel asset-panel prop-card" data-output="05_prop_system/props.json">
-            <div class="asset-icon">物</div>
-            <div class="panel-header"><h2>道具库</h2><button class="btn small preview-main-output">预览</button></div>
-            <div id="propSummary" class="muted">等待 05 输出</div>
-          </div>
+          <div class="panel asset-panel character-card" data-output="03_character_system/characters.json"><div class="asset-icon">人</div><div class="panel-header"><h2>角色库</h2><button class="btn small preview-main-output">预览</button></div><div id="characterSummary" class="muted">等待 03 输出</div></div>
+          <div class="panel asset-panel scene-card" data-output="04_scene_system/scenes.json"><div class="asset-icon">景</div><div class="panel-header"><h2>场景库</h2><button class="btn small preview-main-output">预览</button></div><div id="sceneSummary" class="muted">等待 04 输出</div></div>
+          <div class="panel asset-panel prop-card" data-output="05_prop_system/props.json"><div class="asset-icon">物</div><div class="panel-header"><h2>道具库</h2><button class="btn small preview-main-output">预览</button></div><div id="propSummary" class="muted">等待 05 输出</div></div>
         </div>
         <div id="assetCardGrid" class="editable-card-grid"></div>
       </section>
 
       <section class="view" id="view-images">
-        <div class="panel image-phase-hero">
-          <div>
-            <h2>07 图片阶段工作台</h2>
-            <p>定妆图 → 造型图 → 场景/道具参考图 → 正式分镜图 → 总检与局部重跑。</p>
-          </div>
-          <div class="action-row">
-            <button id="previewImageManifestBtn" class="btn small">预览 image_manifest</button>
-            <button id="previewDependencyBtn" class="btn small">预览 dependency_index</button>
-          </div>
-        </div>
+        <div class="panel image-phase-hero"><div><h2>07 图片阶段工作台</h2><p>定妆图 → 造型图 → 场景/道具参考图 → 正式分镜图 → 总检与局部重跑。</p></div><div class="action-row"><button id="previewImageManifestBtn" class="btn small">预览 image_manifest</button><button id="previewDependencyBtn" class="btn small">预览 dependency_index</button></div></div>
         <div id="imagePhaseSummary" class="grid four-cols"></div>
-        <div class="panel">
-          <div class="panel-header"><h2>角色定妆图</h2><p>07A：文生图锁脸。</p></div>
-          <div id="characterLockGrid" class="media-card-grid"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><h2>角色造型图 / 换装图</h2><p>07B：基于定妆图生成 costume_id + wearable_props。</p></div>
-          <div id="appearanceGrid" class="media-card-grid"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><h2>场景 / 道具参考图</h2><p>07C：本章实际用到的场景与关键道具。</p></div>
-          <div id="referenceAssetGrid" class="media-card-grid"></div>
-        </div>
-        <div class="panel">
-          <div class="panel-header"><h2>正式单帧分镜图</h2><p>07D：锚点帧优先，普通帧可引用锚点/上一帧。</p></div>
-          <div id="storyboardImageGrid" class="media-card-grid"></div>
-        </div>
+        <div class="panel"><div class="panel-header"><h2>角色定妆图</h2><p>07A：文生图锁脸。</p></div><div id="characterLockGrid" class="media-card-grid"></div></div>
+        <div class="panel"><div class="panel-header"><h2>角色造型图 / 换装图</h2><p>07B：基于定妆图生成 costume_id + wearable_props。</p></div><div id="appearanceGrid" class="media-card-grid"></div></div>
+        <div class="panel"><div class="panel-header"><h2>场景 / 道具参考图</h2><p>07C：本章实际用到的场景与关键道具。</p></div><div id="referenceAssetGrid" class="media-card-grid"></div></div>
+        <div class="panel"><div class="panel-header"><h2>正式单帧分镜图</h2><p>07D：锚点帧优先，普通帧可引用锚点/上一帧。</p></div><div id="storyboardImageGrid" class="media-card-grid"></div></div>
       </section>
 
-      <section class="view" id="view-storyboard">
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>分镜工作台</h2>
-              <p>每帧分镜都可以编辑图片生成提示词，07 接入后可查看对应生成图。</p>
-            </div>
-            <button id="previewStoryboardBtn" class="btn small">预览 storyboard.json</button>
-          </div>
-          <div id="storyboardWorkspace" class="storyboard-grid"></div>
-        </div>
-      </section>
-
-      <section class="view" id="view-outputs">
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>产物中心</h2>
-              <p>集中查看每个模块最终产物。JSON 文件可直接预览。</p>
-            </div>
-          </div>
-          <div id="outputList" class="output-list"></div>
-        </div>
-      </section>
-
-      <section class="view" id="view-design">
-        <div class="panel design-doc">
-          <div class="panel-header"><h2>最终版 UI 蓝图</h2></div>
-          <div class="blueprint-grid">
-            <div><h3>1. 生产驾驶舱</h3><p>展示项目、章节、当前模块、整体进度、失败阻塞、最新产物。</p></div>
-            <div><h3>2. 生产控制台</h3><p>小说输入、章节选择、模块选择、本地 LLM、ComfyUI、TTS、视频参数。</p></div>
-            <div><h3>3. 阶段透明区</h3><p>阶段目标、输入摘要、输出、JSON 修复、评分、修改意见、重跑次数。</p></div>
-            <div><h3>4. 返工中心</h3><p>集中展示所有阻塞问题，并从最早问题阶段触发重跑。</p></div>
-            <div><h3>5. 资产库</h3><p>角色卡、场景卡、道具卡，提示词可编辑，支持单资产重绘。</p></div>
-            <div><h3>6. 图片阶段</h3><p>定妆图、造型图、场景/道具参考图、分镜图、依赖图、失败重跑。</p></div>
-            <div><h3>7. 媒体生产区</h3><p>08 音频、09 视频、10 合成的队列、预览、失败重试。</p></div>
-          </div>
-        </div>
-      </section>
+      <section class="view" id="view-storyboard"><div class="panel"><div class="panel-header"><div><h2>分镜工作台</h2><p>每帧分镜都可以编辑图片生成提示词，07 接入后可查看对应生成图。</p></div><button id="previewStoryboardBtn" class="btn small">预览 storyboard.json</button></div><div id="storyboardWorkspace" class="storyboard-grid"></div></div></section>
+      <section class="view" id="view-outputs"><div class="panel"><div class="panel-header"><div><h2>产物中心</h2><p>集中查看每个模块最终产物。JSON 文件可直接预览。</p></div></div><div id="outputList" class="output-list"></div></div></section>
+      <section class="view" id="view-design"><div class="panel design-doc"><div class="panel-header"><h2>最终版 UI 蓝图</h2></div><div class="blueprint-grid"><div><h3>1. 生产驾驶舱</h3><p>展示项目、章节、当前模块、整体进度、失败阻塞、最新产物。</p></div><div><h3>2. 生产控制台</h3><p>小说输入、章节选择、模块选择、本地 LLM、ComfyUI、TTS、视频参数。</p></div><div><h3>3. 阶段透明区</h3><p>阶段目标、输入摘要、输出、JSON 修复、评分、修改意见、重跑次数。</p></div><div><h3>4. 返工中心</h3><p>集中展示所有阻塞问题，并从最早问题阶段触发重跑。</p></div><div><h3>5. 资产库</h3><p>角色卡、场景卡、道具卡，提示词可编辑，支持单资产重绘。</p></div><div><h3>6. 图片阶段</h3><p>定妆图、造型图、场景/道具参考图、分镜图、依赖图、失败重跑。</p></div><div><h3>7. 媒体生产区</h3><p>08 音频、09 视频、10 合成的队列、预览、失败重试。</p></div></div></div></section>
     </main>
   </div>
 
-  <div id="previewModal" class="modal hidden">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h2 id="previewTitle">文件预览</h2>
-        <button id="closePreviewBtn" class="btn ghost">关闭</button>
-      </div>
-      <pre id="previewContent" class="preview-content"></pre>
-    </div>
-  </div>
+  <div id="previewModal" class="modal hidden"><div class="modal-card"><div class="modal-header"><h2 id="previewTitle">文件预览</h2><button id="closePreviewBtn" class="btn ghost">关闭</button></div><pre id="previewContent" class="preview-content"></pre></div></div>
 
   <script src="/app.js"></script>
+  <script src="/image_phase.js"></script>
 </body>
 </html>
