@@ -14,12 +14,7 @@ workflow_adapter = import_module("09_video.core.workflow_adapter")
 
 
 class ComfyUIClient:
-    """ComfyUI queue client for the verified local LTX2.3 audio-slice workflow.
-
-    dry_run creates deterministic placeholder clip files so 10_final_assembly and
-    the controller can validate the pipeline without loading LTX2.3.
-    execute mode injects semantic values into a user-provided ComfyUI API workflow.
-    """
+    """ComfyUI queue client for one-submit-per-window LTX2.3 execution."""
 
     def __init__(self) -> None:
         self.base_url = os.getenv("AI_DRAMA_COMFYUI_BASE_URL", "http://127.0.0.1:8188").rstrip("/")
@@ -56,23 +51,9 @@ class ComfyUIClient:
         inputs[str(input_key)] = value
 
     def _inject_from_env(self, workflow: dict[str, Any], payload: dict[str, Any]) -> None:
-        """Inject semantic values using env mapping.
-
-        Supported mapping examples:
-        AI_DRAMA_VIDEO_NODE_PROMPT=2116:text
-        AI_DRAMA_VIDEO_NODE_IMAGE_PATH=2176:image_path
-        AI_DRAMA_VIDEO_NODE_AUDIO_PATH=2170:audio_path
-        AI_DRAMA_VIDEO_NODE_PROJECT_NAME=2170:project_name
-        AI_DRAMA_VIDEO_NODE_BASE_PATH=2170:base_path
-        AI_DRAMA_VIDEO_NODE_CURRENT_CHUNK=2170:current_chunk
-        AI_DRAMA_VIDEO_NODE_DURATION=2170:duration
-        AI_DRAMA_VIDEO_NODE_FPS=2148:帧率_fps
-        AI_DRAMA_VIDEO_NODE_WIDTH=2148:宽度
-        AI_DRAMA_VIDEO_NODE_HEIGHT=2148:高度
-        AI_DRAMA_VIDEO_NODE_OUTPUT_PREFIX=2186:文件前缀_Prefix
-        """
         mapping = {
             "prompt": "AI_DRAMA_VIDEO_NODE_PROMPT",
+            "negative_prompt": "AI_DRAMA_VIDEO_NODE_NEGATIVE_PROMPT",
             "image_path": "AI_DRAMA_VIDEO_NODE_IMAGE_PATH",
             "audio_path": "AI_DRAMA_VIDEO_NODE_AUDIO_PATH",
             "project_name": "AI_DRAMA_VIDEO_NODE_PROJECT_NAME",
@@ -85,8 +66,12 @@ class ComfyUIClient:
             "height": "AI_DRAMA_VIDEO_NODE_HEIGHT",
             "frame_count": "AI_DRAMA_VIDEO_NODE_FRAME_COUNT",
             "overlap_frames": "AI_DRAMA_VIDEO_NODE_OVERLAP_FRAMES",
+            "window_size": "AI_DRAMA_VIDEO_NODE_WINDOW_SIZE",
+            "stride": "AI_DRAMA_VIDEO_NODE_STRIDE",
             "output_basename": "AI_DRAMA_VIDEO_NODE_OUTPUT_PREFIX",
         }
+        for idx in range(1, 10):
+            mapping[f"image_{idx}"] = f"AI_DRAMA_VIDEO_NODE_IMAGE_{idx}"
         for payload_key, env_name in mapping.items():
             spec = os.getenv(env_name, "").strip()
             if not spec:
@@ -123,13 +108,21 @@ class ComfyUIClient:
             raise RuntimeError(f"ComfyUI {path} response must be object.")
         return value
 
+    def _first_existing_image(self, segment: dict[str, Any]) -> Path | None:
+        for image_path in segment.get("image_paths", []) or []:
+            path = Path(str(image_path))
+            if path.exists():
+                return path
+        path = Path(str(segment.get("image_path") or ""))
+        return path if path.exists() else None
+
     def _make_dry_run_clip(self, segment: dict[str, Any]) -> str:
         output_path = Path(str(segment.get("output_clip_path")))
         output_path.parent.mkdir(parents=True, exist_ok=True)
         duration = max(float(segment.get("duration_seconds") or 1.0), 0.1)
-        image_path = Path(str(segment.get("image_path") or ""))
+        image_path = self._first_existing_image(segment)
         audio_path = Path(str(segment.get("audio_source_path") or ""))
-        if shutil.which(self.ffmpeg) and image_path.exists() and audio_path.exists():
+        if shutil.which(self.ffmpeg) and image_path and audio_path.exists():
             cmd = [
                 self.ffmpeg,
                 "-y",
@@ -164,8 +157,10 @@ class ComfyUIClient:
         output_path.write_text(
             "DRY_RUN_PLACEHOLDER_MP4\n"
             f"segment_id={segment.get('segment_id')}\n"
-            f"image={segment.get('image_path')}\n"
+            f"frame_ids={segment.get('frame_ids')}\n"
+            f"image_paths={segment.get('image_paths')}\n"
             f"audio={segment.get('audio_source_path')}\n"
+            f"prompt={segment.get('ltx_prompt')}\n"
             f"start={segment.get('start_seconds')} end={segment.get('end_seconds')}\n",
             encoding="utf-8",
         )
@@ -193,7 +188,7 @@ class ComfyUIClient:
                 "prompt_id": None,
                 "segment_id": segment.get("segment_id"),
                 "output_clip_path": clip,
-                "note": "Dry run clip generated. Set AI_DRAMA_VIDEO_EXECUTION_MODE=execute and workflow node mappings to run LTX2.3 ComfyUI.",
+                "note": "Dry run clip generated for one keyframe window. Set AI_DRAMA_VIDEO_EXECUTION_MODE=execute and workflow node mappings to run LTX2.3 ComfyUI.",
             }
         workflow = self.build_workflow(segment)
         response = self._post_json("/prompt", {"prompt": workflow, "client_id": self.client_id})
@@ -217,5 +212,5 @@ class ComfyUIClient:
             "segment_id": segment.get("segment_id"),
             "output_clip_path": str(output_path),
             "history": history.get(str(prompt_id), {}),
-            "note": "ComfyUI finished. If the verified workflow saves to its own project directory, set AI_DRAMA_VIDEO_NODE_OUTPUT_PREFIX / absolute output path mapping accordingly.",
+            "note": "ComfyUI finished one keyframe-window segment.",
         }
