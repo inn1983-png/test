@@ -6,7 +6,7 @@ echo 正在启动 AI Drama 00-06 测试控制台...
 echo.
 
 if "%AI_DRAMA_LLM_BASE_URL%"=="" (
-  set "AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions"
+  set "AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8080/v1/chat/completions"
 )
 
 if "%AI_DRAMA_LLM_MODEL%"=="" (
