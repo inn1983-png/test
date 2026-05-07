@@ -27,7 +27,7 @@ class LLMConfig:
         model = os.getenv("AI_DRAMA_LLM_MODEL", "").strip()
         if not base_url or not model:
             raise RuntimeError("03_character_system requires a real local LLM. Please set AI_DRAMA_LLM_BASE_URL and AI_DRAMA_LLM_MODEL.")
-        return cls(base_url=base_url, model=model, api_key=os.getenv("AI_DRAMA_LLM_API_KEY", ""), timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "240")), temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.1")))
+        return cls(base_url=base_url, model=model, api_key=os.getenv("AI_DRAMA_LLM_API_KEY", ""), timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "6000")), temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.1")))
 
 
 class LLMClient:
