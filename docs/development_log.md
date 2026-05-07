@@ -27,6 +27,8 @@
 00 validate_pipeline.py 已修正为识别 run_staged.py，并使用新的 03/04/05 system 模块顺序。
 00 resource_manager.py 已改成阶段感知资源释放：01–06 LLM 常驻，06→07 才释放 LLM。
 configs/local_resource_release.json 已从旧 library 模块名切换为 system 模块名，并新增 phase_commands。
+04_scene_system 已修正 parent_scene 校验：只有 sub_scene 必须非空绑定 parent_scene，main/temporary/background 可为空但字段需存在。
+05_prop_system 已修正 05B prop_type 枚举，与 asset_level 统一为 key_prop/action_prop/background_object/mentioned_only。
 ```
 
 ---
@@ -310,7 +312,7 @@ importance_reason
 source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / scene_value_map / visual_risk_report / paragraphs
 asset_level = main_scene / sub_scene / temporary / background
 needs_reference_image = true / false
-parent_scene
+parent_scene：字段必须存在；只有 sub_scene 必须非空绑定主场景，main_scene/temporary/background 可为空或 self
 reference_image_plan
 ```
 
@@ -358,6 +360,7 @@ asset_importance_score = 0-100
 importance_reason
 source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / asset_binding_hints / visual_risk_report / paragraphs
 asset_level = key_prop / action_prop / background_object / mentioned_only
+prop_type 与 asset_level 使用同一组枚举：key_prop / action_prop / background_object / mentioned_only
 needs_reference_image = true / false
 reference_image_plan
 ```
