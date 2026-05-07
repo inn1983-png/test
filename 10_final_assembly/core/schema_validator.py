@@ -8,6 +8,10 @@ def _path_exists(value: Any) -> bool:
     return isinstance(value, str) and bool(value) and Path(value).exists()
 
 
+def _non_empty_path_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
     issues: list[str] = []
     if data.get("module") != "10_final_assembly":
@@ -23,7 +27,13 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
     if data.get("generates_new_video_segments") is not False:
         issues.append("10_final_assembly must not generate new video segments")
 
-    for key in ("final_video_path", "final_manifest_path", "final_meta_path", "video_manifest_path", "final_audio_path"):
+    # final_manifest_path/final_meta_path are validated as target paths here,
+    # because they are written immediately after merge_stage_outputs returns.
+    for key in ("final_manifest_path", "final_meta_path"):
+        if not _non_empty_path_string(data.get(key)):
+            issues.append(f"{key} must be a non-empty target path")
+
+    for key in ("final_video_path", "video_manifest_path", "final_audio_path"):
         if not _path_exists(data.get(key)):
             issues.append(f"{key} missing or does not exist: {data.get(key)}")
 
