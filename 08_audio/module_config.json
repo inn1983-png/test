@@ -1,0 +1,16 @@
+{
+  "module_name": "08_audio",
+  "display_name": "配音生成系统",
+  "description": "负责读取 02 剧本文本，构建音频台词队列，调用本地根目录 index-tts / IndexTTS2 生成分段音频，并合成为 final_audio.wav。",
+  "status": "implemented",
+  "phase": "AUDIO_PHASE",
+  "schema_version": "1.0",
+  "standalone_input_dir": "08_audio/input",
+  "standalone_output_dir": "08_audio/output",
+  "key_outputs": [
+    "final_audio.wav",
+    "audio_manifest.json",
+    "audio_meta.json"
+  ],
+  "default_execution_mode": "dry_run"
+}
