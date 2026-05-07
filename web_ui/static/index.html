@@ -6,6 +6,7 @@
   <title>AI 短剧工厂 · 总控工作台</title>
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/image_phase.css" />
+  <link rel="stylesheet" href="/quick_controls.css" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -45,6 +46,22 @@
       <section class="view" id="view-runner">
         <div class="panel command-panel"><div class="panel-header"><div><h2>生产控制台</h2><p>先从 00 做检查，再按需启动 01–10 全流程或指定模块。</p></div><div class="panel-chip">00–10 Connected</div></div>
           <div class="action-row"><button id="dataLinkCheckBtn" class="btn primary">00–10 数据链路检查</button><button id="controllerSelfCheckBtn" class="btn">00 总控自检</button><button id="dryRunBtn" class="btn">全流程 dry-run</button><button id="emptyContextBtn" class="btn ghost">只建运行上下文</button></div>
+          <div class="single-module-runner">
+            <div class="single-module-head"><div><h3>单模块运行</h3><div class="muted">这里的按钮只运行一个模块，不会误跑全流程。比如“只运行 01 小说解析”会执行 --only-module 01_novel_parser。</div></div><button id="applyLocalDefaultsBtn" class="btn small ghost" type="button" onclick="document.getElementById('llmBaseUrlInput').value='http://127.0.0.1:8080/v1/chat/completions';document.getElementById('llmModelInput').value='gemma-4-31B-it-Q4_K_M.gguf';document.getElementById('llmTemperatureInput').value='0.1';document.getElementById('llmTimeoutInput').value='6000';">恢复本地 Gemma 默认配置</button></div>
+            <div class="single-module-grid">
+              <button class="module-run-btn primary-module" type="button" onclick="startJob({only_module:'01_novel_parser',from_module:''})"><span class="module-run-title">只运行 01 小说解析</span><span class="module-run-meta">执行类型：LLM</span><span class="module-run-desc">无前置依赖；生成 novel_analysis.json</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'02_script_writer',from_module:''})"><span class="module-run-title">只运行 02 剧本改编</span><span class="module-run-meta">执行类型：LLM</span><span class="module-run-desc">依赖 01；生成 script.json</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'03_character_system',from_module:''})"><span class="module-run-title">只运行 03 角色库</span><span class="module-run-meta">执行类型：LLM</span><span class="module-run-desc">依赖 01 + 02；生成 characters.json</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'04_scene_system',from_module:''})"><span class="module-run-title">只运行 04 场景库</span><span class="module-run-meta">执行类型：LLM</span><span class="module-run-desc">依赖 01 + 02；生成 scenes.json</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'05_prop_system',from_module:''})"><span class="module-run-title">只运行 05 道具库</span><span class="module-run-meta">执行类型：LLM</span><span class="module-run-desc">依赖 01 + 02；生成 props.json</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'06_storyboard',from_module:''})"><span class="module-run-title">只运行 06 单帧分镜</span><span class="module-run-meta">执行类型：LLM</span><span class="module-run-desc">依赖 02 + 03 + 04 + 05；生成 storyboard.json</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'07_storyboard_image',from_module:''})"><span class="module-run-title">只运行 07 分镜图</span><span class="module-run-meta">执行类型：图片</span><span class="module-run-desc">依赖 06；默认 dry_run，可切 execute 调 ComfyUI</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'08_audio',from_module:''})"><span class="module-run-title">只运行 08 音频</span><span class="module-run-meta">执行类型：TTS</span><span class="module-run-desc">依赖 02；生成 final_audio.wav / 字幕 / timeline</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'09_video',from_module:''})"><span class="module-run-title">只运行 09 视频</span><span class="module-run-meta">执行类型：视频</span><span class="module-run-desc">依赖 07 + 08；生成 video_manifest / final_video</span></button>
+              <button class="module-run-btn" type="button" onclick="startJob({only_module:'10_final_assembly',from_module:''})"><span class="module-run-title">只运行 10 最终合成</span><span class="module-run-meta">执行类型：FFmpeg</span><span class="module-run-desc">依赖 08 + 09；不调用模型</span></button>
+            </div>
+            <div class="quick-config-note">默认本地模型：http://127.0.0.1:8080/v1/chat/completions · gemma-4-31B-it-Q4_K_M.gguf · temperature=0.1 · timeout=6000s</div>
+          </div>
           <div class="form-grid">
             <label>运行模式<select id="modeInput"><option value="project">单项目 project</option><option value="book_chapter">长篇章节 book_chapter</option></select></label>
             <label>项目 ID<input id="projectIdInput" placeholder="project_test_001" /></label>
@@ -52,10 +69,10 @@
             <label>章节 ID<input id="chapterIdInput" placeholder="chapter_001" /></label>
             <label>从哪个模块开始<select id="fromModuleInput"></select></label>
             <label>只运行单个模块<select id="onlyModuleInput"></select></label>
-            <label>LLM Base URL<input id="llmBaseUrlInput" placeholder="http://127.0.0.1:8000/v1/chat/completions" /></label>
-            <label>LLM Model<input id="llmModelInput" placeholder="本地 Gemma 模型名" /></label>
+            <label>LLM Base URL<input id="llmBaseUrlInput" value="http://127.0.0.1:8080/v1/chat/completions" placeholder="http://127.0.0.1:8080/v1/chat/completions" /></label>
+            <label>LLM Model<input id="llmModelInput" value="gemma-4-31B-it-Q4_K_M.gguf" placeholder="gemma-4-31B-it-Q4_K_M.gguf" /></label>
             <label>Temperature<input id="llmTemperatureInput" value="0.1" /></label>
-            <label>Timeout 秒<input id="llmTimeoutInput" value="240" /></label>
+            <label>Timeout 秒<input id="llmTimeoutInput" value="6000" /></label>
             <label>07 图片执行模式<select id="imageExecutionModeInput"><option value="dry_run">dry_run 只生成任务清单</option><option value="execute">execute 调用 ComfyUI</option></select></label>
             <label>ComfyUI 地址<input id="comfyuiBaseUrlInput" placeholder="http://127.0.0.1:8188" /></label>
             <label>Workflow Mapping<input id="workflowMappingInput" placeholder="D:\\path\\workflow_mapping.json" /></label>
@@ -68,7 +85,7 @@
           <label class="wide-label">07 负向提示词<textarea id="imageNegativePromptInput" class="small-textarea" placeholder="modern objects, cartoon, 3d render..."></textarea></label>
           <label class="wide-label">小说输入 / 本章正文<textarea id="novelTextInput" placeholder="粘贴小说正文。留空则使用 workspace 对应 input/novel.txt"></textarea></label>
           <div class="checkbox-row"><label><input type="checkbox" id="strictOrderInput" checked /> 严格顺序检查</label><label><input type="checkbox" id="skipValidationInput" /> 跳过 pipeline 校验</label><label><input type="checkbox" id="skipDependencyInput" /> 跳过依赖检查</label></div>
-          <div class="action-row"><button id="startBtn" class="btn primary">启动 01–10 生产</button><button id="startTextPhaseBtn" class="btn">只跑 01–06 文本阶段</button><button id="startImagePhaseBtn" class="btn">只跑 07 图片阶段</button></div>
+          <div class="action-row"><button id="startBtn" class="btn primary">启动 01–10 全流程</button><button id="startTextPhaseBtn" class="btn">范围运行：01–06 文本资产链路</button><button id="startImagePhaseBtn" class="btn">只跑 07 图片阶段</button></div>
         </div>
       </section>
 
