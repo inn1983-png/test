@@ -4,12 +4,15 @@ from typing import Any
 
 REQUIRED_TOP = [
     "schema_version", "module", "status", "stage_mode", "props", "prop_alias_index",
-    "prop_script_usage", "quality_report", "schema_validation"
+    "prop_script_usage", "asset_review_report", "downstream_readiness_for_06",
+    "main_assets_for_06", "optional_assets_for_06", "do_not_reference_as_main_asset",
+    "quality_report", "schema_validation"
 ]
 REQUIRED_PROP_FIELDS = [
     "prop_id", "canonical_prop_name", "aliases", "prop_type", "owner_character",
     "usage_function", "appearance", "material", "risk_notes", "source_evidence", "usage_in_script",
-    "asset_level", "needs_reference_image", "reference_image_plan"
+    "asset_level", "needs_reference_image", "reference_image_plan",
+    "asset_importance_score", "importance_reason", "source_understanding_basis"
 ]
 VALID_ASSET_LEVELS = {"key_prop", "action_prop", "background_object", "mentioned_only"}
 
@@ -45,6 +48,11 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             issues.append(f"canonical_prop_name 重复：{name}")
         if name:
             names.add(name)
+        importance = item.get("asset_importance_score")
+        if not isinstance(importance, (int, float)) or importance < 0 or importance > 100:
+            issues.append(f"asset_importance_score 必须为 0-100：{name or pid}")
+        if not isinstance(item.get("source_understanding_basis"), list) or not item.get("source_understanding_basis"):
+            issues.append(f"source_understanding_basis 必须引用 01 理解依据：{name or pid}")
         asset_level = item.get("asset_level")
         if asset_level not in VALID_ASSET_LEVELS:
             issues.append(f"道具 asset_level 非法：{name or pid} -> {asset_level}")
@@ -67,4 +75,10 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             issues.append(f"道具缺少证据链：{name or pid}")
         if not isinstance(item.get("usage_in_script"), list):
             issues.append(f"usage_in_script 必须为数组：{name or pid}")
+    review = data.get("asset_review_report", {})
+    if not isinstance(review, dict) or not review:
+        issues.append("asset_review_report 为空或不是对象")
+    readiness = data.get("downstream_readiness_for_06", {})
+    if not isinstance(readiness, dict) or "ready" not in readiness:
+        issues.append("downstream_readiness_for_06 必须包含 ready 字段")
     return {"passed": not issues, "issues": issues}
