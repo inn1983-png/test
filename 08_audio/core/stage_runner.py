@@ -5,6 +5,7 @@ from typing import Any
 from importlib import import_module
 
 io_utils = import_module("00_common.io_utils")
+stage_status_writer = import_module("00_common.stage_status")
 script_adapter = import_module("08_audio.core.script_adapter")
 voice_library = import_module("08_audio.core.voice_library")
 emotion_mapper = import_module("08_audio.core.emotion_mapper")
@@ -23,6 +24,7 @@ STAGES: list[dict[str, str]] = [
     {"stage_id": "08C", "name": "tts_execution", "output_file": "08C_tts_execution.json"},
     {"stage_id": "08D", "name": "final_mix_timeline_subtitle", "output_file": "08D_final_mix.json"},
 ]
+STAGE_BY_ID = {stage["stage_id"]: stage for stage in STAGES}
 
 
 def _intermediate_dir(output_dir: str | Path) -> Path:
@@ -47,7 +49,24 @@ def _run_and_score(stage_id: str, data: dict[str, Any], output_dir: str | Path, 
     quality = quality_checker.evaluate_stage(stage_id, data)
     data["stage_quality"] = quality
     output_path = _write_stage(output_dir, output_file, data)
-    return {"stage_id": stage_id, "status": "success" if quality["passed"] else "needs_review", "output_path": output_path, "quality": quality}
+    status = "success" if quality["passed"] else "needs_review"
+    stage = STAGE_BY_ID.get(stage_id, {"name": stage_id})
+    stage_status_writer.mark_stage_finished(
+        "08_audio",
+        output_dir,
+        stage_id,
+        stage["name"],
+        status,
+        output_file=output_path,
+        score=quality.get("score"),
+        issues_count=len(quality.get("issues", []) or []),
+    )
+    return {"stage_id": stage_id, "status": status, "output_path": output_path, "quality": quality}
+
+
+def _mark_started(stage_id: str, output_dir: str | Path) -> None:
+    stage = STAGE_BY_ID.get(stage_id, {"name": stage_id})
+    stage_status_writer.mark_stage_started("08_audio", output_dir, stage_id, stage["name"], "stage started")
 
 
 def build_08b(queue_data: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
@@ -119,15 +138,19 @@ def run_audio_stages(script: dict[str, Any], output_dir: str | Path) -> dict[str
     stage_status: list[dict[str, Any]] = []
     outputs: dict[str, dict[str, Any]] = {}
 
+    _mark_started("08A", output_dir)
     outputs["08A"] = script_adapter.build_voice_queue(script)
     stage_status.append(_run_and_score("08A", outputs["08A"], output_dir, "08A_audio_queue.json"))
 
+    _mark_started("08B", output_dir)
     outputs["08B"] = build_08b(outputs["08A"], output_dir)
     stage_status.append(_run_and_score("08B", outputs["08B"], output_dir, "08B_tts_segment_plan.json"))
 
+    _mark_started("08C", output_dir)
     outputs["08C"] = indextts_client.synthesize_segments(outputs["08B"], output_dir)
     stage_status.append(_run_and_score("08C", outputs["08C"], output_dir, "08C_tts_execution.json"))
 
+    _mark_started("08D", output_dir)
     outputs["08D"] = build_08d(outputs["08C"], output_dir)
     stage_status.append(_run_and_score("08D", outputs["08D"], output_dir, "08D_final_mix.json"))
 

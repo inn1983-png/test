@@ -139,6 +139,8 @@
     const stages = module.stages || [];
     const outputs = getModuleOutputs(module);
     const issues = countIssues(module);
+    const currentStage = module.current_stage || {};
+    const currentStageText = currentStage.current_stage_id ? `${currentStage.current_stage_id} · ${currentStage.current_stage_name || ""} · ${statusLabel(currentStage.status)}` : "暂无阶段运行状态";
     const activeClass = module.name === currentName ? " active" : "";
     const outputButtons = outputs.filter((item) => item.exists && item.path).slice(0, 3).map((item) => `<button onclick="window.previewFile && window.previewFile('${escapeHtml(item.path)}')">${escapeHtml(item.name)}</button>`).join("");
     const fallbackPath = outputs.find((item) => item.path)?.path || "";
@@ -146,6 +148,7 @@
       <article class="nf-module-card ${escapeHtml(module.status || "pending")}${activeClass}" data-module="${escapeHtml(module.name)}">
         <div class="nf-card-top"><div><div class="nf-card-name">${escapeHtml(moduleName(module.name))}</div><div class="nf-card-raw">${escapeHtml(module.name)}</div></div>${statusBadge(module.status)}</div>
         <div class="nf-card-message">${escapeHtml(module.message || (module.name === currentName ? "当前关注步骤" : "等待阶段输出"))}</div>
+        <div class="nf-card-raw">当前阶段：${escapeHtml(currentStageText)}</div>
         <div class="nf-card-stats"><div class="nf-stat"><span>阶段</span><strong>${stages.length}</strong></div><div class="nf-stat"><span>产物</span><strong>${outputs.filter((item) => item.exists).length}</strong></div><div class="nf-stat"><span>问题</span><strong>${issues}</strong></div></div>
         <div class="nf-card-actions">${outputButtons || (fallbackPath ? `<button onclick="window.previewFile && window.previewFile('${escapeHtml(fallbackPath)}')">查看预期产物</button>` : "")}<button onclick="window.nfWorkbenchRunOnly && window.nfWorkbenchRunOnly('${escapeHtml(module.name)}')">只跑这一步</button></div>
       </article>`;
@@ -159,8 +162,11 @@
   }
 
   function renderMappingPanel() {
+    const currentPath = document.getElementById("workflowMappingInput")?.value || "configs/comfyui_workflows/07_storyboard_image_mapping.json";
     const mapping = { image_workflow_mapping: { workflow_file: "AI_DRAMA_COMFYUI_WORKFLOW", mapping_file: "AI_DRAMA_COMFYUI_WORKFLOW_MAPPING", positive_node_id: "AI_DRAMA_COMFYUI_POSITIVE_NODE_ID 或 mapping.positive_prompt", negative_node_id: "AI_DRAMA_COMFYUI_NEGATIVE_NODE_ID 或 mapping.negative_prompt", output_prefix_node_id: "AI_DRAMA_COMFYUI_OUTPUT_PREFIX_NODE_ID 或 mapping.output_prefix", reference_images: "mapping.reference_image_nodes[]" }, principle: "像 AI-NovelFlow 一样，工作流可换，代码只读 mapping，不把节点名写死。" };
-    return `<div class="nf-mapping-box"><div>借鉴 AI-NovelFlow：ComfyUI 工作流不写死节点名，使用 mapping 注入。</div><pre class="nf-mapping-code">${escapeHtml(JSON.stringify(mapping, null, 2))}</pre><button class="nf-mapping-copy" onclick="navigator.clipboard && navigator.clipboard.writeText('${escapeHtml(JSON.stringify(mapping)).replace(/'/g, "&#39;")}')">复制映射模板</button></div>`;
+    const status = window.workflowMappingStatus || {};
+    const missing = Array.isArray(status.missing_nodes) ? status.missing_nodes : [];
+    return `<div class="nf-mapping-box"><div>当前 mapping：${escapeHtml(currentPath)}</div><div>当前 workflow_path：${escapeHtml(status.workflow_path || "-")}</div><div>缺失节点：${missing.length ? escapeHtml(missing.join("，")) : "无"}</div><pre class="nf-mapping-code">${escapeHtml(JSON.stringify(mapping, null, 2))}</pre><button class="nf-mapping-copy" onclick="window.checkWorkflowMapping && window.checkWorkflowMapping()">检查 mapping</button><button class="nf-mapping-copy" onclick="navigator.clipboard && navigator.clipboard.writeText('${escapeHtml(JSON.stringify(mapping)).replace(/'/g, "&#39;")}')">复制映射模板</button></div>`;
   }
 
   function renderWorkbench() {
@@ -209,6 +215,11 @@
   }
 
   async function runOnly(moduleName) {
+    if (typeof window.startJob === "function") {
+      await window.startJob({ only_module: moduleName });
+      await pollState();
+      return;
+    }
     const payload = readPayloadFromForm({ only_module: moduleName });
     const res = await fetch("/api/jobs/start", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     if (!res.ok) return alert(await res.text());
@@ -221,5 +232,10 @@
 
   window.nfWorkbenchRunOnly = runOnly;
   window.renderNovelFlowWorkbench = renderWorkbench;
+  window.checkWorkflowMapping = async function () {
+    const path = document.getElementById("workflowMappingInput")?.value || "";
+    window.workflowMappingStatus = await fetchJson(`/api/comfyui-workflow-mapping/check?path=${encodeURIComponent(path)}`);
+    renderWorkbench();
+  };
   document.addEventListener("DOMContentLoaded", () => { setTimeout(pollState, 200); setInterval(pollState, 1500); });
 })();

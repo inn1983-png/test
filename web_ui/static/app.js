@@ -39,7 +39,7 @@ const moduleName = (name) => MODULE_DISPLAY_NAMES[name] || name || "未知模块
 const stageName = (name) => STAGE_DISPLAY_NAMES[String(name || "").slice(0, 3)] || name || "未命名阶段";
 
 function statusLabel(status) {
-  const map = { success: "完成", running: "运行中", failed: "失败", blocked: "阻塞", skipped: "跳过", pending: "等待", queued: "排队", not_started: "未开始", needs_review: "需复核", stopping: "停止中", pass: "通过", warn: "警告", fail: "失败" };
+  const map = { success: "完成", running: "运行中", failed: "失败", blocked: "阻塞", skipped: "跳过", pending: "等待", queued: "排队", not_started: "未开始", needs_review: "需复核", stopping: "停止中", archived: "已归档", pass: "通过", warn: "警告", fail: "失败" };
   return map[status] || status || "未知";
 }
 function badge(status) { const cls = String(status || "pending").replace(/[^a-zA-Z0-9_-]/g, ""); return `<span class="badge ${cls}">${statusLabel(status)}</span>`; }
@@ -94,7 +94,10 @@ async function loadProjects() {
   const projects = data.projects || [], wrap = $("projectList");
   if (!wrap) return;
   if (!projects.length) { wrap.innerHTML = `<div class="muted">暂无项目。可以先点“00–10 数据链路检查”。</div>`; return; }
-  wrap.innerHTML = projects.slice(0, 12).map((p) => `<div class="list-item"><div><strong>${p.project_id}</strong><div class="muted">${p.run_dir}</div>${p.data_link_check?.total ? `<div class="muted">链路检查：通过 ${p.data_link_check.passed}/${p.data_link_check.total}，失败 ${p.data_link_check.failed}</div>` : ""}</div><div>${badge(p.status)}</div></div>`).join("");
+  wrap.innerHTML = projects.slice(0, 12).map((p) => {
+    const suggestion = ["failed", "blocked"].includes(p.status) ? `<div class="muted">有失败/阻塞记录，建议从失败处继续。</div>` : "";
+    return `<div class="list-item"><div><strong>${escapeHtml(p.project_id)}</strong><div class="muted">${escapeHtml(p.run_dir)}</div>${p.data_link_check?.total ? `<div class="muted">链路检查：通过 ${p.data_link_check.passed}/${p.data_link_check.total}，失败 ${p.data_link_check.failed}</div>` : ""}${suggestion}<div class="card-actions"><button class="btn small primary" onclick="openProject('${escapeAttr(p.project_id)}')">打开项目</button><button class="btn small" onclick="continueProject('${escapeAttr(p.project_id)}')">从失败处继续</button><button class="btn small" onclick="rerunProjectFromStart('${escapeAttr(p.project_id)}')">从 01 重跑</button><button class="btn small ghost" onclick="archiveProject('${escapeAttr(p.project_id)}')">归档项目</button></div></div><div>${badge(p.status)}</div></div>`;
+  }).join("");
 }
 
 function getPayload(extra) {
@@ -106,8 +109,11 @@ function getPayload(extra) {
     from_module: $("fromModuleInput")?.value,
     only_module: $("onlyModuleInput")?.value,
     novel_text: $("novelTextInput")?.value,
+    llm_api_key: $("llmApiKeyInput")?.value,
     llm_base_url: $("llmBaseUrlInput")?.value,
     llm_model: $("llmModelInput")?.value,
+    llm_max_tokens: $("llmMaxTokensInput")?.value,
+    llm_input_compact: $("llmInputCompactInput")?.value,
     llm_temperature: $("llmTemperatureInput")?.value,
     llm_timeout_sec: $("llmTimeoutInput")?.value,
     image_execution_mode: $("imageExecutionModeInput")?.value,
@@ -128,15 +134,84 @@ function getPayload(extra) {
   return payload;
 }
 
-async function startJob(extra, endpoint = "/api/jobs/start") {
-  const payload = getPayload(extra);
+function safeSegment(value) { return String(value || "").trim().replace(/[^a-zA-Z0-9_-]/g, "_").replace(/^_+|_+$/g, ""); }
+function targetRunDirForPayload(payload) {
+  if (payload.mode === "book_chapter" && safeSegment(payload.book_id) && safeSegment(payload.chapter_id)) return `workspace/books/${safeSegment(payload.book_id)}/chapters/${safeSegment(payload.chapter_id)}`;
+  if (safeSegment(payload.project_id)) return `workspace/projects/${safeSegment(payload.project_id)}`;
+  return currentRunDir();
+}
+function formatRequirePath(item) { return `${item?.module || "上游模块"}/${item?.name || "未知产物"}`; }
+function requirementSummary(payload, data) {
+  const missing = (data.missing_requires || []).map(formatRequirePath);
+  const first = missing[0] || "上游关键产物";
+  return `${moduleName(payload.only_module)} 缺少 ${first}，建议先从 ${moduleName(data.recommended_from_module)} 开始运行。`;
+}
+function ensureRequirementModal() {
+  let modal = $("moduleRequirementModal");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "moduleRequirementModal";
+  modal.className = "modal hidden";
+  document.body.appendChild(modal);
+  return modal;
+}
+function showRequirementDecision(payload, data) {
+  return new Promise((resolve) => {
+    const modal = ensureRequirementModal();
+    const missingRows = (data.missing_requires || []).map((item) => `<li>${escapeHtml(formatRequirePath(item))}</li>`).join("");
+    modal.innerHTML = `<div class="modal-card"><div class="modal-header"><h2>运行前依赖检查</h2><button id="moduleRequirementCancelBtn" class="btn ghost">关闭</button></div><div class="preview-content"><p>${escapeHtml(requirementSummary(payload, data))}</p><div class="muted">缺失文件</div><ul>${missingRows || "<li>未识别到缺失项</li>"}</ul></div><div class="action-row"><button id="moduleRequirementForceBtn" class="btn danger">仍然强制只跑当前模块</button><button id="moduleRequirementRecommendedBtn" class="btn primary">从推荐模块开始运行</button></div></div>`;
+    modal.classList.remove("hidden");
+    $("moduleRequirementCancelBtn").onclick = () => { modal.classList.add("hidden"); resolve("cancel"); };
+    $("moduleRequirementForceBtn").onclick = () => { modal.classList.add("hidden"); resolve("force"); };
+    $("moduleRequirementRecommendedBtn").onclick = () => { modal.classList.add("hidden"); resolve("recommended"); };
+  });
+}
+async function checkSingleModuleRequirements(payload, endpoint) {
+  if (endpoint !== "/api/jobs/start" || !payload.only_module || payload.force_only_module) return payload;
+  const runDir = targetRunDirForPayload(payload);
+  if (!runDir) {
+    alert("只跑单个模块前需要先填写项目 ID，或打开一个已有项目。");
+    return null;
+  }
+  const data = await api(`/api/module-requirements?run_dir=${encodeURIComponent(runDir)}&module=${encodeURIComponent(payload.only_module)}`);
+  if (data.can_run) return payload;
+  const decision = await showRequirementDecision(payload, data);
+  if (decision === "force") return { ...payload, skip_dependency_check: true, force_only_module: true };
+  if (decision === "recommended") return { ...payload, only_module: "", from_module: data.recommended_from_module || payload.only_module };
+  return null;
+}
+async function launchJob(payload, endpoint = "/api/jobs/start") {
   const data = await api(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   state.currentJob = data.job; state.logLines = [];
   $("liveLog").textContent = "任务已启动，等待输出...";
   if ($("stopBtn")) $("stopBtn").disabled = false;
   connectEvents(state.currentJob.id); updateJobMini(); switchView("dashboard");
+  return data.job;
+}
+async function startJob(extra, endpoint = "/api/jobs/start") {
+  const payload = await checkSingleModuleRequirements(getPayload(extra), endpoint);
+  if (!payload) return null;
+  return launchJob(payload, endpoint);
 }
 async function stopCurrentJob() { if (state.currentJob) await api(`/api/jobs/${state.currentJob.id}/stop`, { method: "POST" }); }
+async function openProject(projectId) {
+  const data = await api(`/api/projects/${encodeURIComponent(projectId)}/snapshot`);
+  state.currentSnapshot = data.snapshot;
+  state.currentJob = null;
+  await renderSnapshot();
+  switchView("dashboard");
+}
+async function continueProject(projectId) {
+  const data = await api(`/api/projects/${encodeURIComponent(projectId)}/snapshot`);
+  const repair = data.snapshot?.repair_index || {};
+  const moduleName = repair.earliest_problem_module || "01_novel_parser";
+  return startJob({ project_id: projectId, from_module: moduleName, only_module: "" });
+}
+async function rerunProjectFromStart(projectId) { return startJob({ project_id: projectId, from_module: "01_novel_parser", only_module: "" }); }
+async function archiveProject(projectId) {
+  await api(`/api/projects/${encodeURIComponent(projectId)}/archive`, { method: "POST" });
+  await loadProjects();
+}
 
 function connectEvents(jobId) {
   if (state.eventSource) state.eventSource.close();
@@ -160,7 +235,7 @@ async function renderSnapshot() {
   $("metricOutputs").textContent = (snap.important_outputs || []).length;
   $("metricIssues").textContent = issues.length + Number(snap.data_link_check?.summary?.failed || 0);
   const heroBadge = $("heroStatusBadge"); if (heroBadge) heroBadge.outerHTML = badge(snap.summary_status).replace("badge", "badge").replace(">", ` id="heroStatusBadge">`);
-  renderProgress(snap.modules || []); renderTimeline(snap.modules || []); renderStages(snap.modules || []); renderOutputs(snap.important_outputs || []); renderAssetSummaries(snap); renderRetryCenter([...issues, ...collectDataLinkIssues(snap)]);
+  renderProgress(snap.modules || []); renderTimeline(snap.modules || []); renderStages(snap.modules || []); renderOutputs(snap.important_outputs || []); renderAssetSummaries(snap); renderRetryCenter([...issues, ...collectDataLinkIssues(snap)]); renderStructuredEvents(snap.events || []);
   await renderAssetCardGrid(snap); await renderStoryboardWorkspace(snap);
 }
 function renderProgress(modules) { const total = modules.length || state.displayPipeline.length || 1; const done = modules.filter((m) => ["success", "skipped"].includes(m.status)).length; const bar = $("pipelineProgressBar"); if (bar) bar.style.width = `${Math.round((done / total) * 100)}%`; }
@@ -174,16 +249,18 @@ function renderStages(modules) {
   $("stageExplorer").innerHTML = groups.map((m) => {
     const stages = m.stages || [];
     if (m.name === "00_main_controller" && state.currentSnapshot?.data_link_check?.results) return renderDataLinkGroup(state.currentSnapshot.data_link_check);
-    return `<div class="module-stage-group"><div class="module-stage-header"><div><strong>${moduleName(m.name)}</strong><div class="muted">${escapeHtml(m.name)} · 阶段 ${stages.length} 个</div></div>${badge(m.status)}</div><div class="stage-grid detailed-stage-grid">${stages.map((s) => renderStageCard(s)).join("")}</div></div>`;
+    const current = m.current_stage?.current_stage_id ? ` · 当前 ${m.current_stage.current_stage_id} ${m.current_stage.current_stage_name || ""}（${statusLabel(m.current_stage.status)}）` : "";
+    return `<div class="module-stage-group"><div class="module-stage-header"><div><strong>${moduleName(m.name)}</strong><div class="muted">${escapeHtml(m.name)} · 阶段 ${stages.length} 个${escapeHtml(current)}</div></div>${badge(m.status)}</div><div class="stage-grid detailed-stage-grid">${stages.map((s) => renderStageCard(s, m.current_stage)).join("")}</div></div>`;
   }).join("");
 }
 function renderDataLinkGroup(report) {
   const results = report.results || [];
   return `<div class="module-stage-group"><div class="module-stage-header"><div><strong>00–10 数据链路检查</strong><div class="muted">总数 ${report.summary?.total || 0} · 通过 ${report.summary?.passed || 0} · 失败 ${report.summary?.failed || 0}</div></div>${badge(report.summary?.passed_all ? "success" : "failed")}</div><div class="stage-grid detailed-stage-grid">${results.slice(0, 120).map((r) => `<div class="stage-card detailed-stage-card"><div class="stage-name">${escapeHtml(r.item)}</div><div class="muted">${escapeHtml(r.message)}</div>${badge(r.status)}${r.path ? `<div class="card-actions"><button class="btn small" onclick="previewFile('${escapeAttr(r.path)}')">查看文件</button></div>` : ""}</div>`).join("")}</div></div>`;
 }
-function renderStageCard(s) {
+function renderStageCard(s, currentStage = {}) {
   const sid = s.stage_id || s.name || "stage"; const status = s.passed === true ? "success" : s.passed === false ? "needs_review" : "pending";
-  return `<div class="stage-card detailed-stage-card"><div class="stage-name">${escapeHtml(stageName(sid))}</div><div class="muted">文件：${escapeHtml(s.name || "-")}</div><div class="stage-score-row"><div><div class="score">${s.score ?? "-"}</div><div class="muted">阶段评分</div></div><div>${badge(status)}</div></div><div class="card-meta-grid"><div class="card-meta"><span>问题数</span><strong>${s.issues_count ?? 0}</strong></div><div class="card-meta"><span>通过</span><strong>${s.passed === true ? "是" : s.passed === false ? "否" : "待定"}</strong></div></div><div class="card-actions"><button class="btn small" onclick="previewFile('${s.path}')">查看阶段输出</button></div></div>`;
+  const active = String(currentStage?.current_stage_id || "") === String(sid).slice(0, 3);
+  return `<div class="stage-card detailed-stage-card ${active ? "active" : ""}"><div class="stage-name">${escapeHtml(stageName(sid))}</div><div class="muted">文件：${escapeHtml(s.name || "-")}</div><div class="stage-score-row"><div><div class="score">${s.score ?? "-"}</div><div class="muted">阶段评分</div></div><div>${badge(active ? currentStage.status : status)}</div></div><div class="card-meta-grid"><div class="card-meta"><span>问题数</span><strong>${s.issues_count ?? 0}</strong></div><div class="card-meta"><span>通过</span><strong>${s.passed === true ? "是" : s.passed === false ? "否" : "待定"}</strong></div></div><div class="card-actions"><button class="btn small" onclick="previewFile('${s.path}')">查看阶段输出</button></div></div>`;
 }
 
 function collectIssues(modules) {
@@ -197,6 +274,34 @@ function collectIssues(modules) {
 }
 function collectDataLinkIssues(snap) { return (snap.data_link_check?.results || []).filter((r) => r.status === "fail").map((r) => ({ title: `链路检查失败：${r.item}`, detail: r.message, level: "problem", path: r.path })); }
 function renderRetryCenter(issues) { const wrap = $("retryCenter"); if (!wrap) return; if (!issues.length) { wrap.innerHTML = `<div class="retry-item ok"><div class="retry-title">暂无集中返工问题</div><div class="muted">运行后如果出现低分、schema 校验失败、上游阻塞，这里会集中显示。</div></div>`; return; } wrap.innerHTML = issues.map((item) => `<div class="retry-item ${item.level}"><div class="retry-title">${escapeHtml(item.title)}</div><div class="muted">${escapeHtml(item.detail || "")}</div>${item.path ? `<button class="btn small" onclick="previewFile('${escapeAttr(item.path)}')">查看问题文件</button>` : ""}</div>`).join(""); }
+function classifyEvent(event) {
+  const type = String(event.event_type || "");
+  if (type.includes("failed") || type.includes("error") || type.includes("validation")) return "错误事件";
+  if (type.includes("stage")) return "阶段事件";
+  if (type.includes("artifact") || type.includes("written")) return "产物事件";
+  return "普通日志";
+}
+function ensureStructuredEventsPanel() {
+  let panel = $("structuredEventsPanel");
+  if (panel) return panel;
+  const liveLog = $("liveLog");
+  if (!liveLog?.parentElement) return null;
+  panel = document.createElement("div");
+  panel.id = "structuredEventsPanel";
+  panel.className = "retry-list";
+  liveLog.parentElement.appendChild(panel);
+  return panel;
+}
+function renderStructuredEvents(events) {
+  const panel = ensureStructuredEventsPanel();
+  if (!panel) return;
+  const groups = { "普通日志": [], "阶段事件": [], "错误事件": [], "产物事件": [] };
+  for (const event of events.slice(-80)) (groups[classifyEvent(event)] || groups["普通日志"]).push(event);
+  panel.innerHTML = Object.entries(groups).map(([title, rows]) => {
+    const body = rows.slice(-8).map((event) => `<div class="muted">${escapeHtml(event.time || "")} · ${escapeHtml(event.module || "")} ${event.stage_id ? `· ${escapeHtml(event.stage_id)}` : ""} · ${escapeHtml(event.event_type || "")} · ${escapeHtml(event.message || "")}</div>`).join("");
+    return `<div class="retry-item"><div class="retry-title">${title}（${rows.length}）</div>${body || '<div class="muted">暂无</div>'}</div>`;
+  }).join("");
+}
 function renderOutputs(outputs) { if (!outputs.length) { $("outputList").innerHTML = `<div class="muted">暂无最终产物。</div>`; return; } $("outputList").innerHTML = outputs.map((o) => `<div class="output-item"><div><div class="output-name">${escapeHtml(o.name)}</div><div class="output-path">${escapeHtml(o.path)}</div></div><button class="btn small" onclick="previewFile('${o.path}')">预览</button></div>`).join(""); }
 function renderAssetSummaries(snap) { const outputs = snap.important_outputs || []; const has = (suffix) => outputs.some((o) => o.path.endsWith(suffix)); $("characterSummary").textContent = has("03_character_system/characters.json") ? "角色资产已生成，可在下方编辑每个角色提示词。" : "等待 03 输出"; $("sceneSummary").textContent = has("04_scene_system/scenes.json") ? "场景资产已生成，可在下方编辑每个场景提示词。" : "等待 04 输出"; $("propSummary").textContent = has("05_prop_system/props.json") ? "道具资产已生成，可在下方编辑每个道具提示词。" : "等待 05 输出"; }
 async function loadJsonFromRun(relPath) { const rel = currentRunDir(); if (!rel) return null; try { const data = await api(`/api/file?path=${encodeURIComponent(`${rel}/${relPath}`)}`); return data.type === "json" ? data.content : null; } catch (_) { return null; } }
@@ -223,4 +328,11 @@ function cssEscape(value) { return String(value).replace(/\\/g, "\\\\").replace(
 window.previewFile = previewFile;
 window.savePromptDraft = savePromptDraft;
 window.regenerateImage = regenerateImage;
+window.getPayload = getPayload;
+window.startJob = startJob;
+window.connectEvents = connectEvents;
+window.openProject = openProject;
+window.continueProject = continueProject;
+window.rerunProjectFromStart = rerunProjectFromStart;
+window.archiveProject = archiveProject;
 init().catch((err) => { console.error(err); if ($("liveLog")) $("liveLog").textContent = String(err); });

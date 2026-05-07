@@ -5,6 +5,7 @@ from typing import Any
 from importlib import import_module
 
 io_utils = import_module("00_common.io_utils")
+stage_status_writer = import_module("00_common.stage_status")
 llm_client_module = import_module("04_scene_system.core.llm_client")
 quality_checker = import_module("04_scene_system.core.quality_checker")
 json_repair = import_module("04_scene_system.core.json_repair")
@@ -104,6 +105,7 @@ def _complete_json(client: Any, system_prompt: str, payload: dict[str, Any]) -> 
 
 def _run_one_stage(client: Any, stage: dict[str, str], novel_analysis: dict[str, Any], script: dict[str, Any], outputs: dict[str, dict[str, Any]], output_dir: str | Path, max_retries: int, final_revision_context: dict[str, Any] | None = None) -> dict[str, Any]:
     stage_id = stage["stage_id"]
+    stage_status_writer.mark_stage_started("04_scene_system", output_dir, stage_id, stage["name"], "stage started")
     system_prompt = _read_prompt(stage["prompt_file"])
     payload = build_stage_payload(stage_id, novel_analysis, script, outputs, final_revision_context)
     attempts = []
@@ -125,7 +127,18 @@ def _run_one_stage(client: Any, stage: dict[str, str], novel_analysis: dict[str,
     current_output["stage_attempts"] = attempts
     outputs[stage_id] = current_output
     output_path = _write_stage(output_dir, stage["output_file"], current_output)
-    return {**stage, "status": "success" if quality.get("passed") else "needs_review", "output_path": output_path, "quality": quality, "attempts": attempts, "final_revision_context": final_revision_context}
+    status = "success" if quality.get("passed") else "needs_review"
+    stage_status_writer.mark_stage_finished(
+        "04_scene_system",
+        output_dir,
+        stage_id,
+        stage["name"],
+        status,
+        output_file=output_path,
+        score=quality.get("score"),
+        issues_count=len(quality.get("issues", []) or []),
+    )
+    return {**stage, "status": status, "output_path": output_path, "quality": quality, "attempts": attempts, "final_revision_context": final_revision_context}
 
 
 def _run_stage_range(client: Any, novel_analysis: dict[str, Any], script: dict[str, Any], outputs: dict[str, dict[str, Any]], output_dir: str | Path, start_index: int, max_retries: int, final_revision_context: dict[str, Any] | None = None) -> list[dict[str, Any]]:

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 io_utils = import_module("00_common.io_utils")
+stage_status_writer = import_module("00_common.stage_status")
 ffmpeg_client = import_module("10_final_assembly.core.ffmpeg_client")
 quality_checker = import_module("10_final_assembly.core.quality_checker")
 schema_validator = import_module("10_final_assembly.core.schema_validator")
@@ -20,6 +21,7 @@ STAGES: list[dict[str, str]] = [
     {"stage_id": "10C", "name": "audio_subtitle_align", "output_file": "10C_audio_subtitle_align.json"},
     {"stage_id": "10D", "name": "final_export", "output_file": "10D_final_export.json"},
 ]
+STAGE_BY_ID = {stage["stage_id"]: stage for stage in STAGES}
 
 
 def _intermediate_dir(output_dir: str | Path) -> Path:
@@ -38,7 +40,24 @@ def _run_and_score(stage_id: str, data: dict[str, Any], output_dir: str | Path, 
     quality = quality_checker.evaluate_stage(stage_id, data)
     data["stage_quality"] = quality
     output_path = _write_stage(output_dir, output_file, data)
-    return {"stage_id": stage_id, "status": "success" if quality["passed"] else "needs_review", "output_path": output_path, "quality": quality}
+    status = "success" if quality["passed"] else "needs_review"
+    stage = STAGE_BY_ID.get(stage_id, {"name": stage_id})
+    stage_status_writer.mark_stage_finished(
+        "10_final_assembly",
+        output_dir,
+        stage_id,
+        stage["name"],
+        status,
+        output_file=output_path,
+        score=quality.get("score"),
+        issues_count=len(quality.get("issues", []) or []),
+    )
+    return {"stage_id": stage_id, "status": status, "output_path": output_path, "quality": quality}
+
+
+def _mark_started(stage_id: str, output_dir: str | Path) -> None:
+    stage = STAGE_BY_ID.get(stage_id, {"name": stage_id})
+    stage_status_writer.mark_stage_started("10_final_assembly", output_dir, stage_id, stage["name"], "stage started")
 
 
 def _valid_media(path: Path | None, min_bytes: int = MIN_VALID_FINAL_BYTES) -> bool:
@@ -265,12 +284,16 @@ def run_10d(video_prepare: dict[str, Any], audio_subtitle: dict[str, Any], outpu
 def run_final_assembly_stages(video_manifest: dict[str, Any], paths: dict[str, Path], output_dir: str | Path) -> dict[str, Any]:
     stage_status: list[dict[str, Any]] = []
     outputs: dict[str, dict[str, Any]] = {}
+    _mark_started("10A", output_dir)
     outputs["10A"] = run_10a(video_manifest, paths, output_dir)
     stage_status.append(_run_and_score("10A", outputs["10A"], output_dir, "10A_input_check.json"))
+    _mark_started("10B", output_dir)
     outputs["10B"] = run_10b(outputs["10A"], output_dir)
     stage_status.append(_run_and_score("10B", outputs["10B"], output_dir, "10B_video_prepare.json"))
+    _mark_started("10C", output_dir)
     outputs["10C"] = run_10c(outputs["10A"], output_dir)
     stage_status.append(_run_and_score("10C", outputs["10C"], output_dir, "10C_audio_subtitle_align.json"))
+    _mark_started("10D", output_dir)
     outputs["10D"] = run_10d(outputs["10B"], outputs["10C"], output_dir)
     stage_status.append(_run_and_score("10D", outputs["10D"], output_dir, "10D_final_export.json"))
     return {"schema_version": SCHEMA_VERSION, "stage_mode": "final_assembly", "stage_status": stage_status, "outputs": outputs}

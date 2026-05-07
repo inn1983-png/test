@@ -11,6 +11,8 @@ from importlib import import_module
 
 workspace_manager = import_module("00_common.workspace_manager")
 run_status = import_module("00_common.run_status")
+module_contracts = import_module("00_common.module_contracts")
+event_writer = import_module("00_common.event_writer")
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 
@@ -55,6 +57,13 @@ def run_module(module_name: str, context: Any | None = None) -> int:
             start_time=start_time,
             message=f"module started: {run_file.name}",
         )
+        event_writer.write_event(
+            context.run_dir,
+            module=module_name,
+            event_type="module_started",
+            message=f"module started: {run_file.name}",
+            payload={"run_file": run_file.name},
+        )
 
     print(f"[RUN] {module_name} via {run_file.name}")
     result = subprocess.run([sys.executable, str(run_file)], cwd=str(ROOT_DIR), env=env)
@@ -75,7 +84,51 @@ def run_module(module_name: str, context: Any | None = None) -> int:
                 return_code=result.returncode,
                 message=f"return code {result.returncode}",
             )
+            event_writer.write_event(
+                context.run_dir,
+                module=module_name,
+                event_type="module_finished",
+                message=f"module failed: return code {result.returncode}",
+                payload={"status": "failed", "return_code": result.returncode, "duration_seconds": duration_seconds},
+            )
     else:
+        output_messages: list[str] = []
+        outputs_ok = True
+        if context is not None:
+            contracts = module_contracts.load_contracts()
+            outputs_ok, output_messages = module_contracts.check_module_produces(
+                context.run_dir,
+                module_name,
+                contracts,
+            )
+            for message in output_messages:
+                print(f"[OUTPUT] {message}")
+
+        if not outputs_ok:
+            missing_messages = [message for message in output_messages if message.startswith("Missing required output")]
+            message = "missing required outputs"
+            if missing_messages:
+                message = f"{message}: {'; '.join(missing_messages)}"
+            print(f"[FAIL] {module_name}: {message}")
+            if context is not None:
+                run_status.mark_module(
+                    context.run_dir,
+                    module_name,
+                    status="failed",
+                    end_time=end_time,
+                    duration_seconds=duration_seconds,
+                    return_code=1,
+                    message=message,
+                )
+                event_writer.write_event(
+                    context.run_dir,
+                    module=module_name,
+                    event_type="module_finished",
+                    message=message,
+                    payload={"status": "failed", "return_code": 1, "duration_seconds": duration_seconds},
+                )
+            return 1
+
         print(f"[DONE] {module_name}")
         if context is not None:
             run_status.mark_module(
@@ -86,6 +139,13 @@ def run_module(module_name: str, context: Any | None = None) -> int:
                 duration_seconds=duration_seconds,
                 return_code=0,
                 message=f"module finished: {run_file.name}",
+            )
+            event_writer.write_event(
+                context.run_dir,
+                module=module_name,
+                event_type="module_finished",
+                message=f"module finished: {run_file.name}",
+                payload={"status": "success", "return_code": 0, "duration_seconds": duration_seconds},
             )
 
     return result.returncode

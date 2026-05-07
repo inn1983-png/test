@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 io_utils = import_module("00_common.io_utils")
+stage_status_writer = import_module("00_common.stage_status")
 workflow_adapter = import_module("09_video.core.workflow_adapter")
 comfyui_client = import_module("09_video.core.comfyui_client")
 quality_checker = import_module("09_video.core.quality_checker")
@@ -22,6 +23,7 @@ STAGES: list[dict[str, str]] = [
     {"stage_id": "09C", "name": "breakpoint_resume_scan", "output_file": "09C_resume_scan.json"},
     {"stage_id": "09D", "name": "final_merge_and_manifest_check", "output_file": "09D_final_merge.json"},
 ]
+STAGE_BY_ID = {stage["stage_id"]: stage for stage in STAGES}
 
 
 def _utf8_env() -> dict[str, str]:
@@ -48,7 +50,24 @@ def _run_and_score(stage_id: str, data: dict[str, Any], output_dir: str | Path, 
     quality = quality_checker.evaluate_stage(stage_id, data)
     data["stage_quality"] = quality
     output_path = _write_stage(output_dir, output_file, data)
-    return {"stage_id": stage_id, "status": "success" if quality["passed"] else "needs_review", "output_path": output_path, "quality": quality}
+    status = "success" if quality["passed"] else "needs_review"
+    stage = STAGE_BY_ID.get(stage_id, {"name": stage_id})
+    stage_status_writer.mark_stage_finished(
+        "09_video",
+        output_dir,
+        stage_id,
+        stage["name"],
+        status,
+        output_file=output_path,
+        score=quality.get("score"),
+        issues_count=len(quality.get("issues", []) or []),
+    )
+    return {"stage_id": stage_id, "status": status, "output_path": output_path, "quality": quality}
+
+
+def _mark_started(stage_id: str, output_dir: str | Path) -> None:
+    stage = STAGE_BY_ID.get(stage_id, {"name": stage_id})
+    stage_status_writer.mark_stage_started("09_video", output_dir, stage_id, stage["name"], "stage started")
 
 
 def _image_missing_reasons(segment: dict[str, Any]) -> list[str]:
@@ -173,14 +192,18 @@ def run_09d(plan: dict[str, Any], resume: dict[str, Any], final_audio_path: str 
 def run_video_stages(image_manifest: dict[str, Any], audio_timeline: dict[str, Any], final_audio_path: str | Path, output_dir: str | Path, storyboard: dict[str, Any] | None = None) -> dict[str, Any]:
     stage_status: list[dict[str, Any]] = []
     outputs: dict[str, dict[str, Any]] = {}
+    _mark_started("09A", output_dir)
     outputs["09A"] = workflow_adapter.build_segment_plan(image_manifest, audio_timeline, final_audio_path, output_dir, storyboard=storyboard or {})
     io_utils.write_json(Path(output_dir) / "video_plan.json", outputs["09A"])
     outputs["09A_PROMPTS"] = build_prompt_manifest(outputs["09A"], output_dir)
     stage_status.append(_run_and_score("09A", outputs["09A"], output_dir, "09A_video_segment_plan.json"))
+    _mark_started("09B", output_dir)
     outputs["09B"] = run_09b(outputs["09A"], output_dir)
     stage_status.append(_run_and_score("09B", outputs["09B"], output_dir, "09B_ltx23_execution.json"))
+    _mark_started("09C", output_dir)
     outputs["09C"] = run_09c(outputs["09A"], outputs["09B"], output_dir)
     stage_status.append(_run_and_score("09C", outputs["09C"], output_dir, "09C_resume_scan.json"))
+    _mark_started("09D", output_dir)
     outputs["09D"] = run_09d(outputs["09A"], outputs["09C"], final_audio_path, output_dir)
     stage_status.append(_run_and_score("09D", outputs["09D"], output_dir, "09D_final_merge.json"))
     return {"schema_version": SCHEMA_VERSION, "stage_mode": "video_execution", "stage_status": stage_status, "outputs": outputs}

@@ -1,0 +1,1082 @@
+## 2026-05-07 本轮执行记录（Codex）
+
+已按顺序完成到任务 9，后续请从 **任务 10：07 支持失败帧局部重跑** 继续。
+
+已完成内容：
+
+1. 任务 1：`module_runner` 成功后不再只看 return code，已新增 produces 校验；支持 manifest、artifacts.db、常规路径解析，文件/目录类型检查，缺必需产物会把模块标记为 failed 并返回 1。
+2. 任务 2：新增 `GET /api/module-requirements?run_dir=...&module=...`，返回 can_run、missing/available requires、recommended_action、recommended_from_module。
+3. 任务 3：Web UI 的 `only_module` 启动入口已先调用依赖检查；缺依赖时显示缺失文件、推荐模块，并提供“强制只跑当前模块 / 从推荐模块开始运行”。
+4. 任务 4：新增 `00_common/repair_index.py`，生成 `repair_index.json`；Web snapshot 与 `GET /api/projects/{project_id}/repair-index` 已接入。
+5. 任务 5：新增 `00_common/stage_status.py`，01-10 staged 模块写入 `current_stage_status.json`；snapshot 加入 `modules[].current_stage`，NovelFlow 卡片和分步页显示当前阶段。
+6. 任务 6：新增 `00_common/event_writer.py`，runner/stage 状态会写 `events.jsonl`；snapshot 返回最近 events，日志区按普通日志、阶段事件、错误事件、产物事件分类显示。
+7. 任务 7：新增项目级 `GET /api/projects/{project_id}/snapshot` 与归档标记接口；最近项目卡片增加打开项目、从失败处继续、从 01 重跑、归档项目。
+8. 任务 8：增强 `07_storyboard_image/core/comfyui_client.py`，execute 后解析 ComfyUI history outputs，按 filename/subfolder/type 在 ComfyUI output 目录查找并复制到 expected path，写 `output_resolution_report.json`。
+9. 任务 9：新增 `configs/comfyui_workflows/07_storyboard_image_mapping.example.json`；`workflow_router` 支持默认读取 `configs/comfyui_workflows/07_storyboard_image_mapping.json`，Web UI 可检查 mapping、显示缺失节点和 workflow_path。
+
+已验证：
+
+- `python -m py_compile` 覆盖本轮新增/修改的 Python 文件。
+- `node --check` 覆盖本轮修改的前端脚本。
+- 模拟“子模块返回 0 但缺少 produces”时，runner 返回 1 且 run_status 标记 failed。
+- `test_runner_check` 的 module requirements、repair index、project snapshot API 辅助函数已直接验证。
+- `event_writer`、`stage_status`、07 ComfyUI history outputs 提取、workflow mapping 检查已做轻量 smoke test。
+
+注意：
+
+- 本轮没有继续执行任务 10。
+- `test_runner_check` 是本轮用于验证的工作区项目，因缺少 `input/novel.txt`，01 按原逻辑失败。
+- ComfyUI execute 输出查找需要实际设置 `AI_DRAMA_COMFYUI_OUTPUT_DIR` 或 `COMFYUI_OUTPUT_DIR` 才能从 ComfyUI output 目录复制真实图片。
+
+下面这份你可以**直接复制给本地 Codex**，让它按顺序完成。
+我已经按“先保证能稳定跑，再优化 UI，再处理 07/09/08/10”的顺序排好了。
+
+---
+
+# Codex 任务总清单：AI 短剧工厂项目精修
+
+请继续处理当前本地项目。
+不要推翻现有 00–10 模块架构。
+不要改变 pipeline.json 的模块顺序。
+不要把 03/04/05 合并。
+不要让 06 直接生成图片提示词。
+不要让 09 失败时回滚 06/07/08，除非上游产物本身缺失。
+
+当前目标不是继续扩展新功能，而是把项目精修成：
+
+```text
+能定位问题
+能断点恢复
+能局部重跑
+能稳定执行
+UI 能看清每一步
+07/09 ComfyUI 输出可追踪
+08/10 媒体产物真实可校验
+```
+
+请严格按下面顺序执行。
+
+---
+
+# 第一轮：执行可靠性
+
+## 任务 1：module_runner 成功后检查 produces
+
+修改：
+
+```text
+00_common/module_runner.py
+00_common/module_contracts.py 如有必要
+configs/module_contracts.json 不要随意改结构
+```
+
+要求：
+
+```text
+1. 子模块 return code 为 0 后，不要立刻标记 success。
+2. 根据 configs/module_contracts.json 中该模块 produces 检查关键产物是否存在。
+3. 如果必需产物不存在：
+   - run_status 标记 failed
+   - message 写明 missing required outputs
+   - return 1
+4. optional=true 的产物不强制。
+5. 支持文件、目录类型检查：
+   - json/audio/video/subtitle：检查文件存在
+   - video_dir/image_dir/audio_dir：检查目录存在且至少有一个文件
+6. dry_run 模式也必须有 placeholder 文件，不能完全没有产物。
+7. 不破坏现有 run_staged.py 优先逻辑。
+```
+
+验收：
+
+```bash
+python 00_main_controller/run_pipeline.py --mode project --project-id test_runner_check --only-module 01_novel_parser
+```
+
+如果 01 没生成 `01_novel_parser/novel_analysis.json`，必须标记 failed，而不是 success。
+
+---
+
+## 任务 2：新增单模块运行前依赖检查 API
+
+修改：
+
+```text
+web_ui/server.py
+00_common/module_contracts.py 如有必要
+```
+
+新增 API：
+
+```text
+GET /api/module-requirements?run_dir=...&module=...
+```
+
+返回格式：
+
+```json
+{
+  "module": "07_storyboard_image",
+  "can_run": false,
+  "missing_requires": [],
+  "available_requires": [],
+  "recommended_action": "run_from_module",
+  "recommended_from_module": "06_storyboard"
+}
+```
+
+逻辑：
+
+```text
+1. 读取 configs/module_contracts.json。
+2. 检查该 module 的 requires。
+3. 支持从 manifest / artifacts.db / workspace 常规路径检查。
+4. 如果缺上游产物，返回 missing_requires。
+5. 推荐从最早缺失模块开始运行：
+   - 缺 01 产物 → 01_novel_parser
+   - 缺 02 产物 → 02_script_writer
+   - 缺 03/04/05 产物 → 03_character_system
+   - 缺 06 产物 → 06_storyboard
+   - 缺 07 产物 → 07_storyboard_image
+   - 缺 08 产物 → 08_audio
+```
+
+---
+
+## 任务 3：Web UI 单模块运行前先检查依赖
+
+修改：
+
+```text
+web_ui/static/novelflow_workbench.js
+web_ui/static/app.js 如有必要
+```
+
+要求：
+
+```text
+1. 用户点击“只跑这一步”时，不要直接启动。
+2. 先调用 /api/module-requirements。
+3. 如果 can_run=true，正常启动 only_module。
+4. 如果 can_run=false，弹出或显示面板：
+   - 缺哪个文件
+   - 应该先跑哪个模块
+   - 提供按钮：
+     A. 仍然强制只跑当前模块
+     B. 从推荐模块开始运行
+5. UI 文案要直观：
+   “07 分镜图片缺少 06_storyboard/storyboard.json，建议先从 06 单帧分镜开始运行。”
+```
+
+---
+
+## 任务 4：生成统一 repair_index.json
+
+新增：
+
+```text
+00_common/repair_index.py
+```
+
+修改：
+
+```text
+web_ui/server.py
+```
+
+功能：
+
+扫描当前 run_dir 下：
+
+```text
+run_status.json
+*/intermediate/*.json
+*/*_meta.json
+*/*_manifest.json
+*/image_manifest.json
+*/audio_manifest.json
+*/video_manifest.json
+```
+
+提取字段：
+
+```text
+needs_retry
+needs_review
+retry_plan
+retry_stages
+upstream_blocking_issues
+schema_validation_issues
+failed_frames
+failed_audio_segments
+failed_video_segments
+missing_segments
+invalid_segments
+```
+
+输出：
+
+```text
+workspace/.../repair_index.json
+```
+
+格式：
+
+```json
+{
+  "earliest_problem_module": "07_storyboard_image",
+  "earliest_problem_stage": "07D",
+  "recommended_action": "rerun_module",
+  "recommended_command": "python 00_main_controller/run_pipeline.py --mode project --project-id xxx --only-module 07_storyboard_image",
+  "issues": []
+}
+```
+
+新增 API：
+
+```text
+GET /api/projects/{project_id}/repair-index
+```
+
+或在 snapshot 中加入：
+
+```json
+"repair_index": {}
+```
+
+---
+
+# 第二轮：UI 生产体验
+
+## 任务 5：新增 current_stage_status.json
+
+给所有 staged 模块增加当前阶段状态写入机制。
+
+涉及模块：
+
+```text
+01_novel_parser
+02_script_writer
+03_character_system
+04_scene_system
+05_prop_system
+06_storyboard
+07_storyboard_image
+08_audio
+09_video
+10_final_assembly
+```
+
+统一输出路径：
+
+```text
+workspace/.../<module>/current_stage_status.json
+```
+
+阶段开始时写：
+
+```json
+{
+  "module": "01_novel_parser",
+  "current_stage_id": "01C",
+  "current_stage_name": "故事理解与冲突梳理",
+  "status": "running",
+  "started_at": "",
+  "message": ""
+}
+```
+
+阶段结束时更新：
+
+```json
+{
+  "module": "01_novel_parser",
+  "current_stage_id": "01C",
+  "current_stage_name": "故事理解与冲突梳理",
+  "status": "success",
+  "started_at": "",
+  "ended_at": "",
+  "duration_seconds": 0,
+  "output_file": "",
+  "score": 0,
+  "issues_count": 0
+}
+```
+
+Web UI 修改：
+
+```text
+1. snapshot 读取 current_stage_status.json。
+2. modules[].current_stage 加入该数据。
+3. NovelFlow 看板模块卡片显示当前阶段。
+4. 分步输出页当前阶段高亮。
+5. 阶段开始即显示，不要等 intermediate 文件生成后才显示。
+```
+
+---
+
+## 任务 6：新增结构化 events.jsonl
+
+新增：
+
+```text
+00_common/event_writer.py
+```
+
+每个模块可写：
+
+```text
+workspace/.../events.jsonl
+```
+
+每行 JSON：
+
+```json
+{
+  "time": "",
+  "module": "07_storyboard_image",
+  "stage_id": "07D",
+  "event_type": "comfyui_submitted",
+  "message": "",
+  "payload": {}
+}
+```
+
+事件类型至少支持：
+
+```text
+module_started
+module_finished
+stage_started
+stage_finished
+llm_request_started
+llm_response_received
+json_parse_failed
+json_repair_started
+quality_scored
+retry_started
+schema_validation_failed
+artifact_written
+comfyui_submitted
+comfyui_finished
+tts_segment_started
+tts_segment_finished
+video_segment_started
+video_segment_finished
+```
+
+Web UI：
+
+```text
+1. server.py snapshot 增加最近 events。
+2. 日志区增加事件分类显示：
+   - 普通日志
+   - 阶段事件
+   - 错误事件
+   - 产物事件
+3. 不要替代 stdout 日志，只是增强。
+```
+
+---
+
+## 任务 7：最近项目一键打开 / 继续运行
+
+修改：
+
+```text
+web_ui/server.py
+web_ui/static/app.js
+web_ui/static/novelflow_workbench.js
+```
+
+新增 API：
+
+```text
+GET /api/projects/{project_id}/snapshot
+```
+
+UI 要求：
+
+```text
+1. 最近项目卡片增加按钮：
+   - 打开项目
+   - 从失败处继续
+   - 从 01 重跑
+   - 归档项目
+2. 点击“打开项目”：
+   - 不启动任务
+   - 加载该项目 snapshot
+   - 总览看板切换到该项目状态
+   - 分步输出/资产库/产物中心都读取该项目
+3. 如果 run_status 有 failed/blocked：
+   - 显示建议从哪个模块继续
+4. 归档项目先不要删除文件，只移动或标记 archived。
+```
+
+---
+
+# 第三轮：07 分镜图阶段精修
+
+## 任务 8：07 ComfyUI execute 输出查找增强
+
+修改：
+
+```text
+07_storyboard_image/core/comfyui_client.py
+```
+
+现在 execute 后不能只判断 expected output_path 是否存在。需要：
+
+```text
+1. 提交 ComfyUI 前记录：
+   - expected_output_path
+   - output_basename
+   - workflow_path
+   - submit_time
+2. ComfyUI 完成后，如果 expected_output_path 不存在：
+   - 解析 history outputs
+   - 提取 images / filenames / subfolder / type
+   - 在 ComfyUI output 目录查找最新匹配文件
+   - 找到则复制到 expected_output_path
+3. 如果仍找不到：
+   - status=failed
+   - error 写清楚：
+     expected_output_path
+     output_basename
+     history outputs
+     workflow save node 配置建议
+4. 生成：
+   07_storyboard_image/output_resolution_report.json
+```
+
+---
+
+## 任务 9：07 workflow mapping 文件化
+
+新增目录：
+
+```text
+configs/comfyui_workflows/
+```
+
+新增示例文件：
+
+```text
+configs/comfyui_workflows/07_storyboard_image_mapping.example.json
+```
+
+内容示例：
+
+```json
+{
+  "workflow_path": "workflow_api.json",
+  "positive_node_id": "",
+  "positive_input": "text",
+  "negative_node_id": "",
+  "negative_input": "text",
+  "output_prefix_node_id": "",
+  "output_prefix_input": "filename_prefix",
+  "reference_image_nodes": [
+    {
+      "slot": "scene",
+      "node_id": "",
+      "input": "image"
+    },
+    {
+      "slot": "character_1",
+      "node_id": "",
+      "input": "image"
+    },
+    {
+      "slot": "character_2",
+      "node_id": "",
+      "input": "image"
+    },
+    {
+      "slot": "prop_1",
+      "node_id": "",
+      "input": "image"
+    }
+  ]
+}
+```
+
+读取优先级：
+
+```text
+1. task.workflow_config
+2. AI_DRAMA_COMFYUI_WORKFLOW_MAPPING
+3. configs/comfyui_workflows/07_storyboard_image_mapping.json
+4. 环境变量兜底
+```
+
+UI 增加：
+
+```text
+1. 选择 mapping 文件
+2. 检查 mapping
+3. 显示缺失节点
+4. 显示当前 workflow_path
+```
+
+---
+
+## 任务 10：07 支持失败帧局部重跑
+
+修改：
+
+```text
+07_storyboard_image/run_staged.py
+07_storyboard_image/core/stage_runner.py
+07_storyboard_image/core/retry_manager.py
+web_ui/static/image_phase.js
+web_ui/static/novelflow_workbench.js
+```
+
+新增参数：
+
+```bash
+--retry-scope all|failed|frame|character_lock|appearance|reference_asset
+--frame-id shot_001
+--asset-key xxx
+--force
+```
+
+要求：
+
+```text
+1. retry_scope=failed：只重跑失败图片任务。
+2. retry_scope=frame：只重跑指定 frame_id。
+3. retry_scope=character_lock：只重跑指定角色定妆照。
+4. retry_scope=appearance：只重跑指定造型照。
+5. retry_scope=reference_asset：只重跑指定场景/道具参考图。
+6. 已成功图片默认不覆盖，除非 --force。
+7. image_manifest.json 增加 retry_history。
+8. UI 中每张图卡片显示：
+   - 当前状态
+   - 输出路径
+   - 重跑本帧
+   - 执行生成
+```
+
+---
+
+# 第四轮：09 视频阶段精修
+
+## 任务 11：09 禁止生成假的 final_video.mp4
+
+修改：
+
+```text
+09_video/core/stage_runner.py
+09_video/core/schema_validator.py
+10_final_assembly 如有必要
+```
+
+要求：
+
+```text
+1. dry_run 模式：
+   - 不生成假的 final_video.mp4
+   - 可以生成 final_video.placeholder.txt
+   - video_manifest.json 写 final_video_ready=false
+2. execute 模式：
+   - 只有 ffmpeg 合成成功且 ffprobe 校验通过，才生成 final_video.mp4
+3. ffprobe 校验：
+   - duration > 0
+   - video stream 存在
+   - 文件大小 > 阈值
+4. 如果合成失败：
+   - status=needs_retry
+   - final_video_ready=false
+   - merge_error 写入 09D_final_merge.json
+```
+
+---
+
+## 任务 12：09 ComfyUI execute 输出查找增强
+
+修改：
+
+```text
+09_video/core/comfyui_client.py
+```
+
+要求：
+
+```text
+1. ComfyUI 执行完成后解析 history。
+2. 查找视频输出节点返回的 filename/subfolder/type。
+3. 从 ComfyUI output 目录复制真实视频到 expected output_clip_path。
+4. 如果 expected clip 不存在：
+   - status=failed
+   - error=ComfyUI finished but clip not found
+   - 写明 history 输出
+5. 09C 扫描时：
+   - submitted 不能算成功
+   - 必须 clip_valid=true 才算成功
+```
+
+---
+
+## 任务 13：09 motion_policy 强制稳态运动
+
+修改：
+
+```text
+09_video/core/workflow_adapter.py
+```
+
+目标：
+
+把所有复杂动作转成 LTX2.3 更稳定的“动态电影分镜”。
+
+默认允许动作：
+
+```text
+slow push in
+subtle breathing
+slight cloth movement
+candle flicker
+snow/rain/fog movement
+slow eye movement
+slight head turn
+hand grip close-up
+static confrontation
+reaction close-up
+insert shot
+```
+
+禁止直接生成：
+
+```text
+running
+fighting
+hugging with body movement
+spinning camera
+large body turn
+multi-person physical interaction
+complex hand action
+fast camera movement
+```
+
+复杂动作转译规则：
+
+```text
+抓住手腕 → 手腕特写 / 两人对峙 / 手指收紧
+奔跑追逐 → 远景定格 + 衣摆风动 + 镜头缓推
+打斗 → 武器特写 + 眼神 + 破碎道具
+拥抱 → 静态近景 + 肩背轻微起伏
+争吵 → 交替特写 + 眼神压迫
+转身离开 → 背影定格 + 衣摆轻动
+```
+
+`prompt_manifest.json` 增加字段：
+
+```json
+{
+  "original_action": "",
+  "stabilized_action": "",
+  "stabilization_reason": "",
+  "motion_policy": {}
+}
+```
+
+---
+
+# 第五轮：08 音频阶段精修
+
+## 任务 14：08 增加超长句预警
+
+修改：
+
+```text
+08_audio/core/stage_runner.py
+08_audio/core/quality_checker.py
+08_audio/core/schema_validator.py
+```
+
+新增输出：
+
+```text
+08_audio/audio_timing_review.json
+```
+
+规则：
+
+```text
+1. 08D 生成 audio_timeline 后检查每条 voice_line 时长。
+2. 非静音 voice_line > 8 秒：
+   warning
+3. 非静音 voice_line > 12 秒：
+   needs_review=true
+   issue_type=voice_line_too_long
+   recommended_action=return_to_02_split_sentence
+4. 输出超长句列表：
+   - line_id
+   - speaker
+   - text
+   - duration
+   - suggested_split
+```
+
+Web UI 音频阶段显示：
+
+```text
+总时长
+每段时长
+超长句列表
+建议拆分文本
+```
+
+---
+
+## 任务 15：08 输出 edit_rhythm.json
+
+新增输出：
+
+```text
+08_audio/edit_rhythm.json
+```
+
+每个音频段输出：
+
+```json
+{
+  "segment_id": "",
+  "start": 0,
+  "end": 0,
+  "duration": 0,
+  "line_type": "N/D/M/S",
+  "speaker": "",
+  "text": "",
+  "suggested_visual_role": "establishing|closeup|reaction|insert|empty_scene|transition",
+  "intensity": 0,
+  "needs_visual_pause": false
+}
+```
+
+规则：
+
+```text
+S 留白 → empty_scene / transition
+OS/M → closeup / reaction
+强对白 → closeup
+旁白交代地点 → establishing
+道具/动作描写 → insert
+情绪爆发 → closeup + intensity 高
+```
+
+09 可以读取 edit_rhythm.json，用于辅助视频段规划。
+
+---
+
+# 第六轮：01–06 文本阶段减少重跑浪费
+
+## 任务 16：LLM trace 落盘
+
+涉及：
+
+```text
+01_novel_parser
+02_script_writer
+03_character_system
+04_scene_system
+05_prop_system
+06_storyboard
+```
+
+每次 LLM 调用写入：
+
+```text
+workspace/.../<module>/llm_traces/<stage_id>_<attempt>/
+  request.json
+  raw_response.txt
+  parsed_before_clean.json
+  parsed_after_clean.json
+  repair_request.json
+  repair_response.txt
+  final_stage_output.json
+```
+
+要求：
+
+```text
+1. API key 不允许写入。
+2. raw_response 可截断到 200k 字符。
+3. 如果没有 repair，对应文件可不生成。
+4. UI 阶段卡片增加“查看 LLM trace”。
+5. 不改变现有 JSON 清理规则。
+```
+
+---
+
+## 任务 17：01–06 增加阶段缓存 / resume
+
+涉及：
+
+```text
+01_novel_parser/run_staged.py
+02_script_writer/run_staged.py
+03_character_system/run_staged.py
+04_scene_system/run_staged.py
+05_prop_system/run_staged.py
+06_storyboard/run_staged.py
+各自 core/stage_runner.py
+```
+
+新增参数：
+
+```bash
+--resume
+--force
+--force-stage 01C
+```
+
+逻辑：
+
+```text
+1. 如果 intermediate/<stage>.json 已存在，并且：
+   - stage_quality.passed=true
+   - 基础 schema 字段存在
+   - 未指定 --force
+   - 未指定 --force-stage 当前阶段
+   则跳过该阶段，直接复用。
+2. 如果某阶段 failed/needs_review，则从该阶段开始继续。
+3. 后续阶段依赖前面阶段输出。
+4. UI 增加：
+   - 从失败阶段继续
+   - 强制重跑当前阶段
+   - 复用已通过阶段
+```
+
+---
+
+# 第七轮：10 最终合成真实校验
+
+## 任务 18：10 final.mp4 必须 ffprobe 校验
+
+修改：
+
+```text
+10_final_assembly/core/stage_runner.py
+10_final_assembly/core/ffmpeg_client.py
+10_final_assembly/core/quality_checker.py
+10_final_assembly/core/schema_validator.py
+```
+
+要求：
+
+```text
+1. final.mp4 生成后必须 ffprobe 校验：
+   - duration > 0
+   - video stream exists
+   - audio stream exists
+   - 分辨率非 0
+2. 如果字幕文件存在：
+   - final_manifest 标记 subtitle_source
+3. 如果 09_video/final_video.mp4 不存在但 clips 存在：
+   - 合并 clips
+4. 如果 clips 是 placeholder：
+   - 不生成 fake final.mp4
+   - 输出 final_status=not_ready
+5. final_meta.json 增加：
+   - playable
+   - duration
+   - video_codec
+   - audio_codec
+   - has_subtitle
+   - source_video_mode: final_video | clips_merge | not_ready
+```
+
+---
+
+# 第八轮：配置管理统一
+
+## 任务 19：新增 config_snapshot.json
+
+新增：
+
+```text
+00_common/config_snapshot.py
+```
+
+在 pipeline 启动时写入：
+
+```text
+workspace/.../config_snapshot.json
+```
+
+内容包括：
+
+```json
+{
+  "llm": {
+    "base_url": "",
+    "model": "",
+    "temperature": "",
+    "timeout_sec": "",
+    "has_api_key": true
+  },
+  "image": {
+    "execution_mode": "",
+    "comfyui_base_url": "",
+    "workflow": "",
+    "workflow_mapping": ""
+  },
+  "audio": {
+    "execution_mode": "",
+    "index_tts_root": "",
+    "voice_map": ""
+  },
+  "video": {
+    "execution_mode": "",
+    "workflow": "",
+    "workflow_mapping": "",
+    "ffmpeg": ""
+  },
+  "resource_release": {},
+  "created_at": ""
+}
+```
+
+要求：
+
+```text
+1. 不写 API key 明文。
+2. 只写 has_api_key=true/false。
+3. Web UI 产物中心显示 config_snapshot.json。
+4. NovelFlow 看板右侧显示当前 dry_run/execute 状态。
+```
+
+---
+
+# 第九轮：文档同步
+
+## 任务 20：更新文档
+
+修改：
+
+```text
+docs/development_log.md
+00_main_controller/README.md
+07_storyboard_image/README.md
+08_audio/README.md
+09_video/README.md
+10_final_assembly/README.md
+web_ui/README.md 如不存在则创建
+```
+
+要求记录：
+
+```text
+1. module_runner 产物检查规则。
+2. 单模块运行前依赖检查。
+3. repair_index.json。
+4. current_stage_status.json。
+5. events.jsonl。
+6. NovelFlow 风格生产看板。
+7. 07 workflow mapping 文件化。
+8. 07 失败帧局部重跑。
+9. 09 不生成 fake final_video.mp4。
+10. 09 稳态 motion_policy。
+11. 08 超长句预警和 edit_rhythm.json。
+12. 10 ffprobe 校验。
+13. config_snapshot.json。
+```
+
+---
+
+# 最终验收流程
+
+完成全部任务后，按顺序执行：
+
+```bash
+python web_ui/server.py --host 127.0.0.1 --port 1144
+```
+
+打开：
+
+```text
+http://127.0.0.1:1144
+```
+
+准备测试小说：
+
+```text
+workspace/projects/project_test_001/input/novel.txt
+```
+
+执行：
+
+```bash
+python 00_main_controller/validate_pipeline.py --pipeline pipeline.json --strict-order
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 01_novel_parser
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 02_script_writer
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 03_character_system
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 04_scene_system
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 05_prop_system
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 06_storyboard
+set AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 07_storyboard_image
+set AI_DRAMA_AUDIO_EXECUTION_MODE=dry_run
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 08_audio
+set AI_DRAMA_VIDEO_EXECUTION_MODE=dry_run
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 09_video
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 10_final_assembly
+```
+
+最后检查必须存在：
+
+```text
+workspace/projects/project_test_001/run_status.json
+workspace/projects/project_test_001/config_snapshot.json
+workspace/projects/project_test_001/repair_index.json
+workspace/projects/project_test_001/01_novel_parser/current_stage_status.json
+workspace/projects/project_test_001/07_storyboard_image/image_manifest.json
+workspace/projects/project_test_001/08_audio/audio_timing_review.json
+workspace/projects/project_test_001/08_audio/edit_rhythm.json
+workspace/projects/project_test_001/09_video/video_manifest.json
+workspace/projects/project_test_001/10_final_assembly/final_meta.json
+```
+
+UI 验收：
+
+```text
+1. 总览页 NovelFlow 看板出现。
+2. 当前运行模块高亮。
+3. 当前运行阶段高亮。
+4. 每个模块卡片显示阶段数、产物数、问题数。
+5. 点击“只跑这一步”会先检查依赖。
+6. 缺依赖时显示推荐从哪个模块开始。
+7. 返工中心显示 repair_index。
+8. 07 图片阶段可以看到失败帧并局部重跑。
+9. 08 音频阶段可以看到超长句预警。
+10. 09 视频阶段不再生成假的 final_video.mp4。
+11. 10 final_meta 显示 playable=true/false。
+```
+
+---
+
+# 禁止事项
+
+```text
+1. 不要推翻 00–10 架构。
+2. 不要改变 pipeline.json 顺序。
+3. 不要把 03/04/05 合并。
+4. 不要让 06 直接生成图片 prompt。
+5. 不要让 09 因视频失败自动回滚 06/07/08。
+6. 不要生成假的 final_video.mp4 冒充真实成片。
+7. 不要把 API key 写入 trace/config/log。
+8. 不要删除已有模块，除非明确确认。
+```
+
+完成后总结：
+
+```text
+1. 修改了哪些文件
+2. 新增了哪些文件
+3. 每个任务完成情况
+4. 哪些功能已测试
+5. 哪些功能仍需人工配置，例如 ComfyUI mapping
+```

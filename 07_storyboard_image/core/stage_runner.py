@@ -5,6 +5,7 @@ from typing import Any
 from importlib import import_module
 
 io_utils = import_module("00_common.io_utils")
+stage_status_writer = import_module("00_common.stage_status")
 quality_checker = import_module("07_storyboard_image.core.quality_checker")
 schema_validator = import_module("07_storyboard_image.core.schema_validator")
 planner = import_module("07_storyboard_image.core.planner")
@@ -25,6 +26,7 @@ STAGES: list[dict[str, str]] = [
     {"stage_id": "07D", "name": "storyboard_frame", "output_file": "07D_storyboard_frame.json"},
     {"stage_id": "07E", "name": "finalize", "output_file": "07E_finalize.json"},
 ]
+STAGE_BY_ID = {stage["stage_id"]: stage for stage in STAGES}
 
 
 def _intermediate_dir(output_dir: str | Path) -> Path:
@@ -48,7 +50,24 @@ def _run_and_score(stage_id: str, data: dict[str, Any], output_dir: str | Path, 
     quality = quality_checker.evaluate_stage(stage_id, data)
     data["stage_quality"] = quality
     output_path = _write_stage(output_dir, output_file, data)
-    return {"stage_id": stage_id, "status": "success" if quality["passed"] else "needs_review", "output_path": output_path, "quality": quality}
+    status = "success" if quality["passed"] else "needs_review"
+    stage = STAGE_BY_ID.get(stage_id, {"name": stage_id})
+    stage_status_writer.mark_stage_finished(
+        "07_storyboard_image",
+        output_dir,
+        stage_id,
+        stage["name"],
+        status,
+        output_file=output_path,
+        score=quality.get("score"),
+        issues_count=len(quality.get("issues", []) or []),
+    )
+    return {"stage_id": stage_id, "status": status, "output_path": output_path, "quality": quality}
+
+
+def _mark_started(stage_id: str, output_dir: str | Path) -> None:
+    stage = STAGE_BY_ID.get(stage_id, {"name": stage_id})
+    stage_status_writer.mark_stage_started("07_storyboard_image", output_dir, stage_id, stage["name"], "stage started")
 
 
 def build_07e(
@@ -104,21 +123,26 @@ def run_image_stages(
     stage_status: list[dict[str, Any]] = []
     outputs: dict[str, dict[str, Any]] = {}
 
+    _mark_started("07P", output_dir)
     outputs["07P"] = planner.build_plan(storyboard, characters, scenes, props)
     stage_status.append(_run_and_score("07P", outputs["07P"], output_dir, "07P_plan.json"))
 
+    _mark_started("07A", output_dir)
     outputs["07A"] = phase_07a.run(outputs["07P"], characters, output_dir)
     stage_status.append(_run_and_score("07A", outputs["07A"], output_dir, "07A_character_lock.json"))
     _write_json(Path(output_dir) / "character_lock_manifest.json", outputs["07A"].get("character_lock_manifest", {}))
 
+    _mark_started("07B", output_dir)
     outputs["07B"] = phase_07b.run(outputs["07P"], characters, outputs["07A"].get("character_lock_manifest", {}), output_dir)
     stage_status.append(_run_and_score("07B", outputs["07B"], output_dir, "07B_character_appearance.json"))
     _write_json(Path(output_dir) / "appearance_manifest.json", outputs["07B"].get("appearance_manifest", {}))
 
+    _mark_started("07C", output_dir)
     outputs["07C"] = phase_07c.run(outputs["07P"], output_dir)
     stage_status.append(_run_and_score("07C", outputs["07C"], output_dir, "07C_reference_assets.json"))
     _write_json(Path(output_dir) / "reference_asset_manifest.json", outputs["07C"].get("reference_asset_manifest", {}))
 
+    _mark_started("07D", output_dir)
     outputs["07D"] = phase_07d.run(
         outputs["07P"],
         storyboard,
@@ -129,6 +153,7 @@ def run_image_stages(
     stage_status.append(_run_and_score("07D", outputs["07D"], output_dir, "07D_storyboard_frame.json"))
     _write_json(Path(output_dir) / "image_manifest.json", outputs["07D"].get("image_manifest", {}))
 
+    _mark_started("07E", output_dir)
     outputs["07E"] = build_07e(
         outputs["07P"],
         outputs["07A"].get("character_lock_manifest", {}),

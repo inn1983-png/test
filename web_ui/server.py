@@ -12,6 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
@@ -20,6 +21,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 WEB_DIR = Path(__file__).resolve().parent
 PIPELINE_FILE = ROOT_DIR / "pipeline.json"
 WORKSPACE_DIR = ROOT_DIR / "workspace"
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+module_contracts = import_module("00_common.module_contracts")
+repair_index = import_module("00_common.repair_index")
+event_writer = import_module("00_common.event_writer")
 
 TEXT_MIME = {
     ".html": "text/html; charset=utf-8",
@@ -113,6 +120,20 @@ def rel_path(path: Path) -> str:
         return str(path.relative_to(ROOT_DIR)).replace("\\", "/")
     except ValueError:
         return str(path).replace("\\", "/")
+
+
+def resolve_run_dir(raw: str | None) -> Path | None:
+    value = unquote(str(raw or "").strip())
+    if not value:
+        return None
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        candidate = ROOT_DIR / safe_rel_path(value)
+    candidate = candidate.resolve()
+    workspace = WORKSPACE_DIR.resolve()
+    if candidate == workspace or workspace in candidate.parents:
+        return candidate
+    return None
 
 
 @dataclass
@@ -211,11 +232,13 @@ def discover_projects() -> list[dict[str, Any]]:
             continue
         status = read_json(item / "run_status.json", {})
         link_report = read_json(item / "00_data_link_check_report.json", {})
+        archived = (item / "project_archived.json").exists()
         rows.append({
             "project_id": item.name,
             "run_dir": rel_path(item),
             "updated_at": datetime.fromtimestamp(item.stat().st_mtime).isoformat(timespec="seconds"),
-            "status": summarize_run_status(status),
+            "status": "archived" if archived else summarize_run_status(status),
+            "archived": archived,
             "data_link_check": link_report.get("summary", {}) if isinstance(link_report, dict) else {},
         })
     return rows[:100]
@@ -323,8 +346,14 @@ def discover_run_snapshot(run_dir: Path) -> dict[str, Any]:
             "exists": module_dir.exists(),
             "outputs": discover_module_outputs(module_dir),
             "stages": discover_stage_outputs(module_dir),
+            "current_stage": read_json(module_dir / "current_stage_status.json", {}),
             "quality": discover_quality(module_dir),
         })
+    repair = {}
+    try:
+        repair = repair_index.write_repair_index(run_dir)
+    except Exception as exc:
+        repair = {"error": str(exc), "issues": []}
     return {
         "run_dir": rel_path(run_dir),
         "run_status": status,
@@ -332,7 +361,100 @@ def discover_run_snapshot(run_dir: Path) -> dict[str, Any]:
         "modules": modules,
         "important_outputs": discover_important_outputs(run_dir),
         "data_link_check": read_json(run_dir / "00_data_link_check_report.json", {}),
+        "repair_index": repair,
+        "events": event_writer.read_recent_events(run_dir, limit=200),
     }
+
+
+def inspect_module_requirements(query: str) -> tuple[dict[str, Any], int]:
+    params = parse_qs(query)
+    run_dir = resolve_run_dir((params.get("run_dir") or [""])[0])
+    module_name = str((params.get("module") or [""])[0] or "").strip()
+    if not run_dir:
+        return {"error": "invalid run_dir"}, 400
+    if not module_name:
+        return {"error": "module is required"}, 400
+
+    contracts = module_contracts.load_contracts()
+    data = module_contracts.inspect_module_requirements(run_dir, module_name, contracts)
+    data["run_dir"] = rel_path(run_dir)
+    return data, 200
+
+
+def project_repair_index(project_id: str) -> tuple[dict[str, Any], int]:
+    raw_project_id = unquote(str(project_id or "")).strip()
+    if not raw_project_id:
+        return {"error": "project_id is required"}, 400
+    safe_project_id = safe_id(raw_project_id, "project")
+    run_dir = project_run_dir(safe_project_id)
+    if not run_dir.exists():
+        return {"error": "project not found"}, 404
+    try:
+        return repair_index.write_repair_index(run_dir), 200
+    except Exception as exc:
+        return {"error": str(exc)}, 500
+
+
+def project_snapshot(project_id: str) -> tuple[dict[str, Any], int]:
+    raw_project_id = unquote(str(project_id or "")).strip()
+    if not raw_project_id:
+        return {"error": "project_id is required"}, 400
+    run_dir = project_run_dir(safe_id(raw_project_id, "project"))
+    if not run_dir.exists():
+        return {"error": "project not found"}, 404
+    return {"snapshot": discover_run_snapshot(run_dir)}, 200
+
+
+def archive_project(project_id: str) -> tuple[dict[str, Any], int]:
+    raw_project_id = unquote(str(project_id or "")).strip()
+    if not raw_project_id:
+        return {"error": "project_id is required"}, 400
+    run_dir = project_run_dir(safe_id(raw_project_id, "project"))
+    if not run_dir.exists():
+        return {"error": "project not found"}, 404
+    marker = {
+        "project_id": run_dir.name,
+        "archived": True,
+        "archived_at": now_iso(),
+        "mode": "marker_only",
+    }
+    (run_dir / "project_archived.json").write_text(json.dumps(marker, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"project_id": run_dir.name, "archived": True}, 200
+
+
+def check_workflow_mapping(query: str) -> tuple[dict[str, Any], int]:
+    params = parse_qs(query)
+    raw_path = str((params.get("path") or [""])[0] or "").strip()
+    path = Path(unquote(raw_path)) if raw_path else ROOT_DIR / "configs" / "comfyui_workflows" / "07_storyboard_image_mapping.json"
+    if not path.is_absolute():
+        path = ROOT_DIR / safe_rel_path(str(path))
+    if not path.exists():
+        return {"exists": False, "path": str(path), "workflow_path": "", "missing_nodes": ["mapping file not found"]}, 200
+    data = read_json(path, {})
+    if not isinstance(data, dict):
+        return {"exists": True, "path": str(path), "workflow_path": "", "missing_nodes": ["mapping root must be object"]}, 200
+
+    missing: list[str] = []
+    workflow_path = ""
+    if "workflow_path" in data:
+        workflow_path = str(data.get("workflow_path") or "")
+        for key in ("positive_node_id", "negative_node_id", "output_prefix_node_id"):
+            if not str(data.get(key) or "").strip():
+                missing.append(key)
+        refs = data.get("reference_image_nodes", [])
+        if isinstance(refs, list):
+            for index, item in enumerate(refs):
+                if isinstance(item, dict) and not str(item.get("node_id") or "").strip():
+                    missing.append(f"reference_image_nodes[{index}].node_id")
+    else:
+        for route_name, route in data.items():
+            if not isinstance(route, dict):
+                continue
+            workflow_path = workflow_path or str(route.get("workflow_path") or "")
+            for key in ("workflow_path", "positive_node_id", "negative_node_id", "output_prefix_node_id"):
+                if not str(route.get(key) or "").strip():
+                    missing.append(f"{route_name}.{key}")
+    return {"exists": True, "path": str(path), "workflow_path": workflow_path, "missing_nodes": missing, "mapping": data}, 200
 
 
 def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], dict[str, str], str]:
@@ -472,6 +594,12 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(load_pipeline())
         if path == "/api/projects":
             return self.send_json({"projects": discover_projects()})
+        if path == "/api/module-requirements":
+            data, status = inspect_module_requirements(parsed.query)
+            return self.send_json(data, status=status)
+        if path == "/api/comfyui-workflow-mapping/check":
+            data, status = check_workflow_mapping(parsed.query)
+            return self.send_json(data, status=status)
         if path == "/api/jobs":
             return self.send_json({"jobs": [job_summary(job) for job in JOBS.list()]})
         if path == "/api/system/snapshot":
@@ -483,6 +611,16 @@ class Handler(SimpleHTTPRequestHandler):
             if not job:
                 return self.send_json({"error": "job not found"}, status=404)
             return self.send_json({"job": job_summary(job), "snapshot": discover_run_snapshot(job.run_dir)})
+        if path.startswith("/api/projects/") and path.endswith("/repair-index"):
+            parts = path.split("/")
+            project_id = parts[3] if len(parts) > 3 else ""
+            data, status = project_repair_index(project_id)
+            return self.send_json(data, status=status)
+        if path.startswith("/api/projects/") and path.endswith("/snapshot"):
+            parts = path.split("/")
+            project_id = parts[3] if len(parts) > 3 else ""
+            data, status = project_snapshot(project_id)
+            return self.send_json(data, status=status)
         if path.startswith("/api/file"):
             return self.send_file_preview(parsed.query)
         if path.startswith("/media/"):
@@ -510,6 +648,11 @@ class Handler(SimpleHTTPRequestHandler):
                 job.status = "stopping"
                 job.publish("job_stopping", {"message": "terminate requested"})
             return self.send_json({"job": job_summary(job)})
+        if parsed.path.startswith("/api/projects/") and parsed.path.endswith("/archive"):
+            parts = parsed.path.split("/")
+            project_id = parts[3] if len(parts) > 3 else ""
+            data, status = archive_project(project_id)
+            return self.send_json(data, status=status)
         return self.send_json({"error": "not found"}, status=404)
 
     def read_body_json(self) -> dict[str, Any]:
