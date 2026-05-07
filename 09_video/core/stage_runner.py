@@ -14,6 +14,7 @@ quality_checker = import_module("09_video.core.quality_checker")
 schema_validator = import_module("09_video.core.schema_validator")
 
 SCHEMA_VERSION = "1.1"
+MIN_VALID_CLIP_BYTES = int(os.getenv("AI_DRAMA_VIDEO_MIN_VALID_CLIP_BYTES", "1024"))
 
 STAGES: list[dict[str, str]] = [
     {"stage_id": "09A", "name": "window_segment_plan", "output_file": "09A_video_segment_plan.json"},
@@ -42,12 +43,87 @@ def _run_and_score(stage_id: str, data: dict[str, Any], output_dir: str | Path, 
     return {"stage_id": stage_id, "status": "success" if quality["passed"] else "needs_review", "output_path": output_path, "quality": quality}
 
 
+def _image_missing_reasons(segment: dict[str, Any]) -> list[str]:
+    reasons: list[str] = []
+    for idx, image_path in enumerate(segment.get("image_paths", []) or [], start=1):
+        path = Path(str(image_path))
+        if not image_path:
+            reasons.append(f"image_{idx} path is empty")
+        elif not path.exists():
+            reasons.append(f"image_{idx} missing: {path}")
+    return reasons
+
+
+def _clip_valid(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        return path.stat().st_size >= MIN_VALID_CLIP_BYTES
+    except OSError:
+        return False
+
+
+def build_prompt_manifest(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = []
+    for seg in plan.get("segments", []) or []:
+        if not isinstance(seg, dict):
+            continue
+        rows.append(
+            {
+                "segment_id": seg.get("segment_id"),
+                "segment_index": seg.get("segment_index"),
+                "segment_role": seg.get("segment_role"),
+                "window_mode": seg.get("window_mode"),
+                "window_size": seg.get("window_size"),
+                "stride": seg.get("stride"),
+                "frame_ids": seg.get("frame_ids", []),
+                "image_paths": seg.get("image_paths", []),
+                "start_seconds": seg.get("start_seconds"),
+                "end_seconds": seg.get("end_seconds"),
+                "prompt_parts": seg.get("prompt_parts", {}),
+                "ltx_prompt": seg.get("ltx_prompt"),
+                "negative_prompt": seg.get("negative_prompt"),
+                "motion_policy": seg.get("motion_policy", {}),
+                "is_padded_window": seg.get("is_padded_window", False),
+                "padded_frame_count": seg.get("padded_frame_count", 0),
+            }
+        )
+    manifest = {
+        "schema_version": SCHEMA_VERSION,
+        "stage": "09A_prompt_manifest",
+        "status": "success",
+        "window_mode": plan.get("window_mode"),
+        "window_size": plan.get("window_size"),
+        "stride": plan.get("stride"),
+        "prompt_count": len(rows),
+        "prompts": rows,
+    }
+    path = Path(output_dir) / "prompt_manifest.json"
+    io_utils.write_json(path, manifest)
+    return {**manifest, "prompt_manifest_path": str(path)}
+
+
 def run_09b(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
     client = comfyui_client.ComfyUIClient()
     results: list[dict[str, Any]] = []
     failed: list[dict[str, Any]] = []
+    skipped_missing_assets: list[dict[str, Any]] = []
     for segment in plan.get("segments", []) or []:
         if not isinstance(segment, dict):
+            continue
+        missing_reasons = _image_missing_reasons(segment)
+        if missing_reasons:
+            result = {
+                "status": "failed",
+                "execution_mode": "skipped_before_comfyui",
+                "segment_id": segment.get("segment_id"),
+                "output_clip_path": segment.get("output_clip_path"),
+                "error": "missing required keyframe images",
+                "missing_reasons": missing_reasons,
+            }
+            results.append(result)
+            failed.append(result)
+            skipped_missing_assets.append(result)
             continue
         try:
             result = client.submit_segment(segment, output_dir)
@@ -68,8 +144,10 @@ def run_09b(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
         "execution_mode": "dry_run" if client.dry_run else "execute",
         "execution_results": results,
         "failed_video_segments": failed,
+        "skipped_missing_assets": skipped_missing_assets,
         "notes": [
             "09B 采用外部 Python 一段一提交；ComfyUI 每次只跑一组关键帧窗口。",
+            "缺少关键帧图片时不会提交 ComfyUI，会直接写入 failed_video_segments。",
             "已有 clip 文件默认跳过，形成断点续跑；需要重抽卡时设置 AI_DRAMA_VIDEO_FORCE_RERUN=1。",
         ],
     }
@@ -79,26 +157,32 @@ def run_09c(plan: dict[str, Any], execution: dict[str, Any], output_dir: str | P
     results_by_id = {r.get("segment_id"): r for r in execution.get("execution_results", []) or [] if isinstance(r, dict)}
     rows: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
+    invalid: list[dict[str, Any]] = []
     for segment in plan.get("segments", []) or []:
         if not isinstance(segment, dict):
             continue
         result = results_by_id.get(segment.get("segment_id"), {})
         clip_path = Path(str(result.get("output_clip_path") or segment.get("output_clip_path")))
         exists = clip_path.exists()
-        status = "success" if exists else "missing"
-        row = {**segment, "status": status, "resume_hit": bool(result.get("resume_hit")), "prompt_id": result.get("prompt_id"), "output_clip_path": str(clip_path), "execution_result": result}
+        valid = _clip_valid(clip_path)
+        status = "success" if valid else ("invalid" if exists else "missing")
+        row = {**segment, "status": status, "resume_hit": bool(result.get("resume_hit")), "prompt_id": result.get("prompt_id"), "output_clip_path": str(clip_path), "clip_exists": exists, "clip_valid": valid, "clip_min_valid_bytes": MIN_VALID_CLIP_BYTES, "execution_result": result}
         rows.append(row)
         if not exists:
             missing.append({"segment_id": segment.get("segment_id"), "output_clip_path": str(clip_path), "reason": "clip file missing"})
+        elif not valid:
+            invalid.append({"segment_id": segment.get("segment_id"), "output_clip_path": str(clip_path), "reason": f"clip smaller than {MIN_VALID_CLIP_BYTES} bytes"})
     resume_manifest = {
         "schema_version": SCHEMA_VERSION,
         "stage": "09C_breakpoint_resume_scan",
-        "status": "needs_retry" if missing else "success",
-        "completed_count": len(rows) - len(missing),
+        "status": "needs_retry" if missing or invalid else "success",
+        "completed_count": len([row for row in rows if row.get("status") == "success"]),
         "missing_count": len(missing),
+        "invalid_count": len(invalid),
         "segments": rows,
         "missing_segments": missing,
-        "resume_policy": {"skip_existing_clips": True, "force_rerun_env": "AI_DRAMA_VIDEO_FORCE_RERUN=1", "retry_scope": "failed_video_segments_only" if missing else "none"},
+        "invalid_segments": invalid,
+        "resume_policy": {"skip_existing_valid_clips": True, "force_rerun_env": "AI_DRAMA_VIDEO_FORCE_RERUN=1", "retry_scope": "failed_video_segments_only" if missing or invalid else "none"},
     }
     path = Path(output_dir) / "resume_manifest.json"
     io_utils.write_json(path, resume_manifest)
@@ -113,7 +197,7 @@ def _merge_with_ffmpeg(segments: list[dict[str, Any]], final_path: Path) -> bool
     lines: list[str] = []
     for seg in segments:
         path = Path(str(seg.get("output_clip_path") or ""))
-        if not path.exists():
+        if not _clip_valid(path):
             return False
         lines.append(f"file '{path.as_posix()}'")
     list_path.write_text("\n".join(lines), encoding="utf-8")
@@ -147,6 +231,7 @@ def run_09d(plan: dict[str, Any], resume: dict[str, Any], final_audio_path: str 
         "clip_count": len(segments),
         "expected_clip_count": len(plan.get("segments", []) or []),
         "missing_segments": resume.get("missing_segments", []),
+        "invalid_segments": resume.get("invalid_segments", []),
     }
     path = output_dir / "merge_result.json"
     io_utils.write_json(path, merge_data)
@@ -158,6 +243,7 @@ def run_video_stages(image_manifest: dict[str, Any], audio_timeline: dict[str, A
     outputs: dict[str, dict[str, Any]] = {}
     outputs["09A"] = workflow_adapter.build_segment_plan(image_manifest, audio_timeline, final_audio_path, output_dir, storyboard=storyboard or {})
     io_utils.write_json(Path(output_dir) / "video_plan.json", outputs["09A"])
+    outputs["09A_PROMPTS"] = build_prompt_manifest(outputs["09A"], output_dir)
     stage_status.append(_run_and_score("09A", outputs["09A"], output_dir, "09A_video_segment_plan.json"))
     outputs["09B"] = run_09b(outputs["09A"], output_dir)
     stage_status.append(_run_and_score("09B", outputs["09B"], output_dir, "09B_ltx23_execution.json"))
@@ -171,17 +257,19 @@ def run_video_stages(image_manifest: dict[str, Any], audio_timeline: dict[str, A
 def merge_stage_outputs(image_manifest: dict[str, Any], audio_timeline: dict[str, Any], final_audio_path: str | Path, config: dict[str, Any], stage_result: dict[str, Any], output_dir: str | Path, storyboard: dict[str, Any] | None = None) -> dict[str, Any]:
     outputs = stage_result["outputs"]
     a = outputs["09A"]
+    prompts = outputs.get("09A_PROMPTS", {})
     b = outputs["09B"]
     c = outputs["09C"]
     d = outputs["09D"]
     stage_scores = {item["stage_id"]: (item.get("quality") or {}).get("score") for item in stage_result.get("stage_status", [])}
     failed = c.get("missing_segments", []) if isinstance(c.get("missing_segments"), list) else []
+    invalid = c.get("invalid_segments", []) if isinstance(c.get("invalid_segments"), list) else []
     retry_plan = {
-        "needs_retry": bool(failed) or bool(b.get("failed_video_segments")),
-        "retry_scope": "failed_video_segments_only" if failed or b.get("failed_video_segments") else "none",
-        "failed_segment_ids": [item.get("segment_id") for item in failed if isinstance(item, dict)] + [item.get("segment_id") for item in b.get("failed_video_segments", []) if isinstance(item, dict)],
+        "needs_retry": bool(failed) or bool(invalid) or bool(b.get("failed_video_segments")),
+        "retry_scope": "failed_video_segments_only" if failed or invalid or b.get("failed_video_segments") else "none",
+        "failed_segment_ids": [item.get("segment_id") for item in failed if isinstance(item, dict)] + [item.get("segment_id") for item in invalid if isinstance(item, dict)] + [item.get("segment_id") for item in b.get("failed_video_segments", []) if isinstance(item, dict)],
         "do_not_rerun_06_07_08": True,
-        "notes": ["09 失败只重跑缺失视频段；除非 image_manifest/final_audio/audio_timeline 本身缺失，否则不回滚上游。"],
+        "notes": ["09 失败只重跑缺失/无效视频段；除非 image_manifest/final_audio/audio_timeline 本身缺失，否则不回滚上游。"],
     }
     data = {
         "schema_version": SCHEMA_VERSION,
@@ -200,6 +288,7 @@ def merge_stage_outputs(image_manifest: dict[str, Any], audio_timeline: dict[str
         },
         "final_audio_path": str(final_audio_path),
         "video_plan_path": str(Path(output_dir) / "video_plan.json"),
+        "prompt_manifest_path": prompts.get("prompt_manifest_path"),
         "resume_manifest_path": c.get("resume_manifest_path"),
         "merge_result_path": d.get("merge_result_path"),
         "final_video_path": d.get("final_video_path"),
@@ -210,11 +299,12 @@ def merge_stage_outputs(image_manifest: dict[str, Any], audio_timeline: dict[str
         "retry_plan": retry_plan,
         "settings": a.get("settings", {}),
         "stage_status": stage_result.get("stage_status", []),
-        "quality_report": {"needs_retry": retry_plan["needs_retry"], "stage_scores": stage_scores, "completed_count": c.get("completed_count"), "missing_count": c.get("missing_count")},
+        "quality_report": {"needs_retry": retry_plan["needs_retry"], "stage_scores": stage_scores, "completed_count": c.get("completed_count"), "missing_count": c.get("missing_count"), "invalid_count": c.get("invalid_count")},
         "notes": [
             "09 采用滑动窗口关键帧方案：4图为 1-4、4-7、7-10；6图为 1-6、6-11；9图为 1-9、9-17。",
             "09 采用外部 Python 一段一提交，ComfyUI 每次只运行一组关键帧窗口。",
             "每段 ltx_prompt/negative_prompt/motion_policy 由 09 根据 06/07/08 自动生成并注入工作流。",
+            "prompt_manifest.json 单独导出每段 prompt，便于测试和 UI 展示。",
         ],
         "config": config,
     }
