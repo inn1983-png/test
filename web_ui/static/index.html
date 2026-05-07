@@ -3,100 +3,110 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AI 短剧工厂 · 总控工作台</title>
+  <title>AI 短剧工厂</title>
   <link rel="stylesheet" href="/styles.css" />
-  <link rel="stylesheet" href="/image_phase.css" />
-  <link rel="stylesheet" href="/quick_controls.css" />
-  <link rel="stylesheet" href="/final_cockpit.css" />
-  <link rel="stylesheet" href="/novelflow_workbench.css" />
 </head>
 <body>
-  <div class="ambient ambient-a"></div>
-  <div class="ambient ambient-b"></div>
-  <div class="app-shell">
+  <div class="app">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">影</div>
         <div>
           <div class="brand-title">AI 短剧工厂</div>
-          <div class="brand-subtitle">分系统生产工作台</div>
+          <div class="brand-sub">实时流水线工作台</div>
         </div>
       </div>
-      <nav class="nav"></nav>
-      <div class="sidebar-card status-orb-card"><div class="sidebar-card-title">当前运行</div><div id="currentJobMini" class="muted">暂无任务</div></div>
-      <div class="sidebar-foot">默认端口 1144 · 文本 LLM 默认 DeepSeek V4 Pro</div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">项目 ID</div>
+        <input id="projectIdInput" placeholder="project_test_001" />
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">小说输入</div>
+        <textarea id="novelTextInput" placeholder="粘贴小说正文，留空则使用已有文件" class="novel-input"></textarea>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">LLM 配置</div>
+        <input id="llmBaseUrlInput" placeholder="Base URL（留空用环境变量）" />
+        <input id="llmModelInput" placeholder="Model（留空用环境变量）" />
+        <input id="llmApiKeyInput" type="password" placeholder="API Key（留空用环境变量）" autocomplete="off" />
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">执行模式</div>
+        <select id="imageModeInput"><option value="dry_run">图片：dry_run</option><option value="execute">图片：execute</option></select>
+        <select id="audioModeInput"><option value="dry_run">音频：dry_run</option><option value="execute">音频：execute</option></select>
+        <select id="videoModeInput"><option value="dry_run">视频：dry_run</option><option value="execute">视频：execute</option></select>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">快捷操作</div>
+        <button class="btn primary full" id="startFullBtn">启动全流程 (01→10)</button>
+        <button class="btn full" id="startTextBtn">文本链路 (01→06)</button>
+        <button class="btn full" id="dataLinkBtn">数据链路检查</button>
+        <button class="btn ghost full" id="selfCheckBtn">总控自检</button>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">分步运行</div>
+        <div id="stepRunGrid" class="step-run-grid"></div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">已有项目</div>
+        <div id="projectList" class="project-list"></div>
+      </div>
+
+      <div class="sidebar-foot">
+        <button class="btn danger full" id="stopBtn" disabled>停止当前任务</button>
+      </div>
     </aside>
 
     <main class="main">
-      <header class="hero"><div><div class="eyebrow">小说 → 剧本 → 资产 → 分镜 → 图片 → 音频 → 视频 → 成片</div><h1>分系统生产工作台</h1><p>左侧选择一个子系统，中间查看该系统的分步、实时输出、评分、修改意见和产物。</p></div><div class="topbar-actions"><button id="refreshBtn" class="btn ghost">刷新</button><button id="stopBtn" class="btn danger" disabled>停止当前任务</button></div></header>
+      <header class="topbar">
+        <div class="topbar-left">
+          <span id="jobStatusBadge" class="status-dot"></span>
+          <span id="jobStatusText">空闲</span>
+        </div>
+        <div class="topbar-right">
+          <button class="btn small" id="refreshBtn">刷新</button>
+        </div>
+      </header>
 
-      <section class="view" id="view-dashboard"><div class="grid two-cols"><div class="panel"><div class="panel-header"><h2>最近项目</h2><p>自动读取 workspace/projects。</p></div><div id="projectList" class="list"></div></div><div class="panel"><div class="panel-header"><h2>实时日志</h2><p>能看到模型输出、JSON 解析、评分和重跑日志。</p></div><pre id="liveLog" class="log-box">暂无日志</pre></div></div><div id="pipelineTimeline" class="timeline" style="display:none"></div><div id="pipelineProgressBar" style="display:none"></div><span id="heroStatusBadge" style="display:none"></span><span id="metricModules" style="display:none"></span><span id="metricJob" style="display:none"></span><span id="metricRunStatus" style="display:none"></span><span id="metricOutputs" style="display:none"></span><span id="metricIssues" style="display:none"></span></section>
+      <section class="pipeline-flow" id="pipelineFlow"></section>
 
-      <section class="view" id="view-runner">
-        <div class="panel command-panel"><div class="panel-header"><div><h2>生产控制台</h2><p>这里保留完整控制项。平时建议直接从左侧选择子系统运行。</p></div><div class="panel-chip">文本 LLM 默认 DeepSeek V4 Pro</div></div>
-          <div class="action-row"><button id="dataLinkCheckBtn" class="btn primary">数据链路检查</button><button id="controllerSelfCheckBtn" class="btn">总控自检</button><button id="dryRunBtn" class="btn">全流程 dry-run</button><button id="emptyContextBtn" class="btn ghost">只建运行上下文</button></div>
-          <div class="form-grid">
-            <label>运行模式<select id="modeInput"><option value="project">单项目 project</option><option value="book_chapter">长篇章节 book_chapter</option></select></label>
-            <label>项目 ID<input id="projectIdInput" placeholder="project_test_001" /></label>
-            <label>书籍 ID<input id="bookIdInput" placeholder="book_001" /></label>
-            <label>章节 ID<input id="chapterIdInput" placeholder="chapter_001" /></label>
-            <label>从哪个模块开始<select id="fromModuleInput"></select></label>
-            <label>只运行单个模块<select id="onlyModuleInput"></select></label>
-            <label>DeepSeek API Key<input id="llmApiKeyInput" type="password" placeholder="填入 DeepSeek API Key；留空则使用系统环境变量" autocomplete="off" /></label>
-            <label>LLM Base URL<input id="llmBaseUrlInput" value="https://api.deepseek.com/chat/completions" /></label>
-            <label>LLM Model<input id="llmModelInput" value="deepseek-v4-pro" /></label>
-            <label>Max Tokens<input id="llmMaxTokensInput" value="8192" /></label>
-            <label>Temperature<input id="llmTemperatureInput" value="0.1" /></label>
-            <label>Timeout 秒<input id="llmTimeoutInput" value="6000" /></label>
-            <label>输入压缩<select id="llmInputCompactInput"><option value="0">关闭：DeepSeek Pro 质量优先</option><option value="1">开启：本地小上下文备用</option></select></label>
-            <label>图片执行模式<select id="imageExecutionModeInput"><option value="dry_run">dry_run</option><option value="execute">execute 调用 ComfyUI</option></select></label>
-            <label>ComfyUI 地址<input id="comfyuiBaseUrlInput" placeholder="http://127.0.0.1:8188" /></label>
-            <label>Workflow Mapping<input id="workflowMappingInput" placeholder="configs/comfyui_workflows/07_storyboard_image_mapping.json" /></label>
-            <label>图片统一风格后缀<input id="imageStyleSuffixInput" placeholder="Chinese historical drama..." /></label>
-            <label>音频执行模式<select id="audioExecutionModeInput"><option value="dry_run">dry_run</option><option value="execute">execute 调用 IndexTTS2</option></select></label>
-            <label>IndexTTS 根目录<input id="indexTtsRootInput" placeholder="index-tts" /></label>
-            <label>视频执行模式<select id="videoExecutionModeInput"><option value="dry_run">dry_run</option><option value="execute">execute 调用视频工作流</option></select></label>
-            <label>FFmpeg 路径<input id="ffmpegBinInput" placeholder="ffmpeg" /></label>
+      <section class="output-panel">
+        <div class="output-header">
+          <h2>实时输出</h2>
+          <div class="output-tabs">
+            <button class="tab active" data-tab="stream">流水线日志</button>
+            <button class="tab" data-tab="stage">阶段详情</button>
           </div>
-          <div class="wide-label muted">文本阶段 01–06 默认使用 DeepSeek V4 Pro API；本地 LLM 后续只作为视觉理解 / 图片反推 / 多模态检查模型使用。</div>
-          <label class="wide-label">负向提示词<textarea id="imageNegativePromptInput" class="small-textarea" placeholder="modern objects, cartoon, 3d render..."></textarea></label>
-          <label class="wide-label">小说输入 / 本章正文<textarea id="novelTextInput" placeholder="粘贴小说正文。留空则使用 workspace 对应 input/novel.txt"></textarea></label>
-          <div class="checkbox-row"><label><input type="checkbox" id="strictOrderInput" checked /> 严格顺序检查</label><label><input type="checkbox" id="skipValidationInput" /> 跳过 pipeline 校验</label><label><input type="checkbox" id="skipDependencyInput" /> 跳过依赖检查</label></div>
-          <div class="action-row"><button id="startBtn" class="btn primary">启动全流程</button><button id="startTextPhaseBtn" class="btn">范围运行：文本资产链路</button><button id="startImagePhaseBtn" class="btn">只跑分镜图</button></div>
+        </div>
+        <div class="output-body">
+          <div class="tab-content active" id="tabStream">
+            <pre id="liveLog" class="log-box">等待任务...</pre>
+          </div>
+          <div class="tab-content" id="tabStage">
+            <div id="stageDetail" class="stage-detail">点击模块查看阶段详情</div>
+          </div>
         </div>
       </section>
-
-      <section class="view" id="view-stages"><div class="panel"><div class="panel-header"><div><h2>分步输出</h2><p>查看每个子系统的阶段输出、评分、是否通过、问题数量。</p></div></div><div id="stageExplorer" class="stage-explorer"></div></div></section>
-      <section class="view" id="view-retry"><div class="panel"><div class="panel-header"><div><h2>返工中心</h2><p>集中展示低分、JSON 修复、schema 校验、上游缺失等问题。</p></div><div class="panel-chip danger-chip">问题集中处理</div></div><div id="retryCenter" class="retry-list"></div></div></section>
-      <section class="view" id="view-assets"><div class="asset-hero panel"><div><h2>资产库工作台</h2><p>角色卡、场景卡、道具卡。</p></div><div class="panel-chip">Prompt Editable</div></div><div class="grid three-cols"><div class="panel asset-panel character-card" data-output="03_character_system/characters.json"><div class="asset-icon">人</div><div class="panel-header"><h2>角色库</h2><button class="btn small preview-main-output">预览</button></div><div id="characterSummary" class="muted">等待输出</div></div><div class="panel asset-panel scene-card" data-output="04_scene_system/scenes.json"><div class="asset-icon">景</div><div class="panel-header"><h2>场景库</h2><button class="btn small preview-main-output">预览</button></div><div id="sceneSummary" class="muted">等待输出</div></div><div class="panel asset-panel prop-card" data-output="05_prop_system/props.json"><div class="asset-icon">物</div><div class="panel-header"><h2>道具库</h2><button class="btn small preview-main-output">预览</button></div><div id="propSummary" class="muted">等待输出</div></div></div><div id="assetCardGrid" class="editable-card-grid"></div></section>
-      <section class="view" id="view-images"><div class="panel image-phase-hero"><div><h2>分镜图阶段</h2><p>参考资产、图片任务、正式分镜图、失败帧重跑。</p></div><div class="action-row"><button id="previewImageManifestBtn" class="btn small">预览 image_manifest</button><button id="previewDependencyBtn" class="btn small">预览 dependency_index</button></div></div><div id="imagePhaseSummary" class="grid four-cols"></div><div id="characterLockGrid" class="media-card-grid"></div><div id="appearanceGrid" class="media-card-grid"></div><div id="referenceAssetGrid" class="media-card-grid"></div><div id="storyboardImageGrid" class="media-card-grid"></div></section>
-      <section class="view" id="view-storyboard"><div class="panel"><div class="panel-header"><div><h2>分镜工作台</h2><p>每帧分镜提示词和生成图。</p></div><button id="previewStoryboardBtn" class="btn small">预览 storyboard.json</button></div><div id="storyboardWorkspace" class="storyboard-grid"></div></div></section>
-      <section class="view" id="view-outputs"><div class="panel"><div class="panel-header"><div><h2>产物中心</h2><p>集中查看关键产物。</p></div></div><div id="outputList" class="output-list"></div></div></section>
-      <section class="view" id="view-design"><div class="panel design-doc"><div class="panel-header"><h2>UI 蓝图</h2></div><p>按分系统导航，子系统中展示分步、实时输出、评分、返工意见和产物。</p></div></section>
     </main>
   </div>
 
-  <div id="previewModal" class="modal hidden"><div class="modal-card"><div class="modal-header"><h2 id="previewTitle">文件预览</h2><button id="closePreviewBtn" class="btn ghost">关闭</button></div><pre id="previewContent" class="preview-content"></pre></div></div>
+  <div id="previewModal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="previewTitle">预览</h2>
+        <button class="btn ghost small" id="closePreviewBtn">关闭</button>
+      </div>
+      <pre id="previewContent" class="preview-content"></pre>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
-  <script>
-    (function () {
-      const originalGetPayload = window.getPayload;
-      window.getPayload = function (extra) {
-        const payload = originalGetPayload ? originalGetPayload(extra || {}) : { ...(extra || {}) };
-        payload.llm_api_key = document.getElementById("llmApiKeyInput")?.value || "";
-        payload.llm_max_tokens = document.getElementById("llmMaxTokensInput")?.value || "";
-        payload.llm_input_compact = document.getElementById("llmInputCompactInput")?.value || "0";
-        if (!payload.llm_base_url) payload.llm_base_url = "https://api.deepseek.com/chat/completions";
-        if (!payload.llm_model) payload.llm_model = "deepseek-v4-pro";
-        return payload;
-      };
-    })();
-  </script>
-  <script src="/image_phase.js"></script>
-  <script src="/stage_monitor.js"></script>
-  <script src="/final_cockpit.js"></script>
-  <script src="/system_workbench.js"></script>
-  <script src="/novelflow_workbench.js"></script>
 </body>
 </html>

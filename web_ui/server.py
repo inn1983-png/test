@@ -563,7 +563,8 @@ def run_job_thread(job: Job, env: dict[str, str]) -> None:
         assert process.stdout is not None
         last_snapshot = 0.0
         for line in process.stdout:
-            clean = repair_mojibake_text(line.rstrip("\n"))
+            raw = line.rstrip("\n")
+            clean = repair_mojibake_text(raw)
             if clean:
                 job.publish("log", {"line": clean})
             if time.time() - last_snapshot > 1.5:

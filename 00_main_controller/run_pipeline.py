@@ -68,6 +68,9 @@ def select_pipeline(
 ) -> tuple[list[str], list[str]]:
     messages: list[str] = []
 
+    if not pipeline:
+        return [], []
+
     if only_module and (from_module or to_module):
         return [], ["Cannot use --only-module together with --from-module or --to-module."]
 
