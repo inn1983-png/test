@@ -4,13 +4,16 @@ from typing import Any
 
 REQUIRED_TOP = [
     "schema_version", "module", "status", "stage_mode", "scenes", "scene_alias_index",
-    "scene_script_usage", "quality_report", "schema_validation"
+    "scene_script_usage", "asset_review_report", "downstream_readiness_for_06",
+    "main_assets_for_06", "optional_assets_for_06", "do_not_reference_as_main_asset",
+    "quality_report", "schema_validation"
 ]
 REQUIRED_SCENE_FIELDS = [
     "scene_id", "canonical_scene_name", "aliases", "scene_type", "time_period",
     "lighting", "weather", "atmosphere", "layout", "key_visual_elements",
     "continuity_rules", "source_evidence", "usage_in_script",
-    "asset_level", "needs_reference_image", "reference_image_plan", "parent_scene"
+    "asset_level", "needs_reference_image", "reference_image_plan", "parent_scene",
+    "asset_importance_score", "importance_reason", "source_understanding_basis"
 ]
 VALID_ASSET_LEVELS = {"main_scene", "sub_scene", "temporary", "background"}
 
@@ -46,6 +49,11 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             issues.append(f"canonical_scene_name 重复：{name}")
         if name:
             names.add(name)
+        importance = item.get("asset_importance_score")
+        if not isinstance(importance, (int, float)) or importance < 0 or importance > 100:
+            issues.append(f"asset_importance_score 必须为 0-100：{name or sid}")
+        if not isinstance(item.get("source_understanding_basis"), list) or not item.get("source_understanding_basis"):
+            issues.append(f"source_understanding_basis 必须引用 01 理解依据：{name or sid}")
         asset_level = item.get("asset_level")
         if asset_level not in VALID_ASSET_LEVELS:
             issues.append(f"场景 asset_level 非法：{name or sid} -> {asset_level}")
@@ -70,4 +78,10 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             issues.append(f"场景缺少证据链：{name or sid}")
         if not isinstance(item.get("usage_in_script"), list):
             issues.append(f"usage_in_script 必须为数组：{name or sid}")
+    review = data.get("asset_review_report", {})
+    if not isinstance(review, dict) or not review:
+        issues.append("asset_review_report 为空或不是对象")
+    readiness = data.get("downstream_readiness_for_06", {})
+    if not isinstance(readiness, dict) or "ready" not in readiness:
+        issues.append("downstream_readiness_for_06 必须包含 ready 字段")
     return {"passed": not issues, "issues": issues}
