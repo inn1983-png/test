@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 CLOUD_DEFAULT_BASE_URL = "https://api.deepseek.com/v1/chat/completions"
-CLOUD_DEFAULT_MODEL = "deepseek-chat"
+CLOUD_DEFAULT_MODEL = "deepseek-v4-flash"
 LEGACY_DEFAULT_MODELS = {"deepseek-v4-pro", "deepseek-v4", "deepseek-pro"}
 
 
