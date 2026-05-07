@@ -22,7 +22,7 @@
       </div>
       <nav class="nav"></nav>
       <div class="sidebar-card status-orb-card"><div class="sidebar-card-title">当前运行</div><div id="currentJobMini" class="muted">暂无任务</div></div>
-      <div class="sidebar-foot">默认端口 1144 · 本地生产环境</div>
+      <div class="sidebar-foot">默认端口 1144 · 文本 LLM 默认 DeepSeek V4 Pro</div>
     </aside>
 
     <main class="main">
@@ -31,7 +31,7 @@
       <section class="view" id="view-dashboard"><div class="grid two-cols"><div class="panel"><div class="panel-header"><h2>最近项目</h2><p>自动读取 workspace/projects。</p></div><div id="projectList" class="list"></div></div><div class="panel"><div class="panel-header"><h2>实时日志</h2><p>能看到模型输出、JSON 解析、评分和重跑日志。</p></div><pre id="liveLog" class="log-box">暂无日志</pre></div></div><div id="pipelineTimeline" class="timeline" style="display:none"></div><div id="pipelineProgressBar" style="display:none"></div><span id="heroStatusBadge" style="display:none"></span><span id="metricModules" style="display:none"></span><span id="metricJob" style="display:none"></span><span id="metricRunStatus" style="display:none"></span><span id="metricOutputs" style="display:none"></span><span id="metricIssues" style="display:none"></span></section>
 
       <section class="view" id="view-runner">
-        <div class="panel command-panel"><div class="panel-header"><div><h2>生产控制台</h2><p>这里保留完整控制项。平时建议直接从左侧选择子系统运行。</p></div><div class="panel-chip">本地 Gemma 默认配置已填入</div></div>
+        <div class="panel command-panel"><div class="panel-header"><div><h2>生产控制台</h2><p>这里保留完整控制项。平时建议直接从左侧选择子系统运行。</p></div><div class="panel-chip">文本 LLM 默认 DeepSeek V4 Pro</div></div>
           <div class="action-row"><button id="dataLinkCheckBtn" class="btn primary">数据链路检查</button><button id="controllerSelfCheckBtn" class="btn">总控自检</button><button id="dryRunBtn" class="btn">全流程 dry-run</button><button id="emptyContextBtn" class="btn ghost">只建运行上下文</button></div>
           <div class="form-grid">
             <label>运行模式<select id="modeInput"><option value="project">单项目 project</option><option value="book_chapter">长篇章节 book_chapter</option></select></label>
@@ -40,10 +40,13 @@
             <label>章节 ID<input id="chapterIdInput" placeholder="chapter_001" /></label>
             <label>从哪个模块开始<select id="fromModuleInput"></select></label>
             <label>只运行单个模块<select id="onlyModuleInput"></select></label>
-            <label>LLM Base URL<input id="llmBaseUrlInput" value="http://127.0.0.1:8080/v1/chat/completions" /></label>
-            <label>LLM Model<input id="llmModelInput" value="gemma-4-31B-it-Q4_K_M.gguf" /></label>
+            <label>DeepSeek API Key<input id="llmApiKeyInput" type="password" placeholder="填入 DeepSeek API Key；留空则使用系统环境变量" autocomplete="off" /></label>
+            <label>LLM Base URL<input id="llmBaseUrlInput" value="https://api.deepseek.com/chat/completions" /></label>
+            <label>LLM Model<input id="llmModelInput" value="deepseek-v4-pro" /></label>
+            <label>Max Tokens<input id="llmMaxTokensInput" value="8192" /></label>
             <label>Temperature<input id="llmTemperatureInput" value="0.1" /></label>
             <label>Timeout 秒<input id="llmTimeoutInput" value="6000" /></label>
+            <label>输入压缩<select id="llmInputCompactInput"><option value="0">关闭：DeepSeek Pro 质量优先</option><option value="1">开启：本地小上下文备用</option></select></label>
             <label>图片执行模式<select id="imageExecutionModeInput"><option value="dry_run">dry_run</option><option value="execute">execute 调用 ComfyUI</option></select></label>
             <label>ComfyUI 地址<input id="comfyuiBaseUrlInput" placeholder="http://127.0.0.1:8188" /></label>
             <label>Workflow Mapping<input id="workflowMappingInput" placeholder="D:\\path\\workflow_mapping.json" /></label>
@@ -53,6 +56,7 @@
             <label>视频执行模式<select id="videoExecutionModeInput"><option value="dry_run">dry_run</option><option value="execute">execute 调用视频工作流</option></select></label>
             <label>FFmpeg 路径<input id="ffmpegBinInput" placeholder="ffmpeg" /></label>
           </div>
+          <div class="wide-label muted">文本阶段 01–06 默认使用 DeepSeek V4 Pro API；本地 LLM 后续只作为视觉理解 / 图片反推 / 多模态检查模型使用。</div>
           <label class="wide-label">负向提示词<textarea id="imageNegativePromptInput" class="small-textarea" placeholder="modern objects, cartoon, 3d render..."></textarea></label>
           <label class="wide-label">小说输入 / 本章正文<textarea id="novelTextInput" placeholder="粘贴小说正文。留空则使用 workspace 对应 input/novel.txt"></textarea></label>
           <div class="checkbox-row"><label><input type="checkbox" id="strictOrderInput" checked /> 严格顺序检查</label><label><input type="checkbox" id="skipValidationInput" /> 跳过 pipeline 校验</label><label><input type="checkbox" id="skipDependencyInput" /> 跳过依赖检查</label></div>
@@ -73,6 +77,20 @@
   <div id="previewModal" class="modal hidden"><div class="modal-card"><div class="modal-header"><h2 id="previewTitle">文件预览</h2><button id="closePreviewBtn" class="btn ghost">关闭</button></div><pre id="previewContent" class="preview-content"></pre></div></div>
 
   <script src="/app.js"></script>
+  <script>
+    (function () {
+      const originalGetPayload = window.getPayload;
+      window.getPayload = function (extra) {
+        const payload = originalGetPayload ? originalGetPayload(extra || {}) : { ...(extra || {}) };
+        payload.llm_api_key = document.getElementById("llmApiKeyInput")?.value || "";
+        payload.llm_max_tokens = document.getElementById("llmMaxTokensInput")?.value || "";
+        payload.llm_input_compact = document.getElementById("llmInputCompactInput")?.value || "0";
+        if (!payload.llm_base_url) payload.llm_base_url = "https://api.deepseek.com/chat/completions";
+        if (!payload.llm_model) payload.llm_model = "deepseek-v4-pro";
+        return payload;
+      };
+    })();
+  </script>
   <script src="/image_phase.js"></script>
   <script src="/system_workbench.js"></script>
 </body>
