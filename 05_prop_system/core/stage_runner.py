@@ -19,8 +19,10 @@ STAGES: list[dict[str, str]] = [
     {"stage_id": "05B", "name": "prop_cards", "prompt_file": "prompts/05B_prop_cards.md", "output_file": "05B_prop_cards.json"},
     {"stage_id": "05C", "name": "script_usage_binding", "prompt_file": "prompts/05C_script_usage_binding.md", "output_file": "05C_script_usage_binding.json"},
     {"stage_id": "05D", "name": "quality_check", "prompt_file": "prompts/05D_quality_check.md", "output_file": "05D_quality_check.json"},
+    {"stage_id": "05E", "name": "asset_review", "prompt_file": "prompts/05E_asset_review.md", "output_file": "05E_asset_review.json"},
 ]
 STAGE_INDEX = {stage["stage_id"]: index for index, stage in enumerate(STAGES)}
+REVIEW_STAGE_ID = "05E"
 
 
 def _module_dir() -> Path:
@@ -53,14 +55,21 @@ def initial_context() -> dict[str, dict[str, Any]]:
 
 def _source_summary(novel_analysis: dict[str, Any], script: dict[str, Any]) -> dict[str, Any]:
     return {
-        "from_01": {
-            "candidate_props": novel_analysis.get("candidate_props", []),
-            "paragraphs": novel_analysis.get("paragraphs", []),
+        "from_01_understanding": {
+            "story_understanding": novel_analysis.get("story_understanding", {}),
+            "story_spine": novel_analysis.get("story_spine", {}),
             "events": novel_analysis.get("events", []) or novel_analysis.get("event_graph", {}).get("events", []),
+            "event_graph": novel_analysis.get("event_graph", {}),
+            "conflicts": novel_analysis.get("conflicts", []),
+            "high_retention_segments": novel_analysis.get("high_retention_segments", []),
             "asset_binding_hints": novel_analysis.get("asset_binding_hints", []),
             "visual_risk_report": novel_analysis.get("visual_risk_report", {}),
         },
-        "from_02": {
+        "from_01_candidates": {
+            "candidate_props": novel_analysis.get("candidate_props", []),
+            "paragraphs": novel_analysis.get("paragraphs", []),
+        },
+        "from_02_script": {
             "segments": script.get("segments", []),
             "visual_dramatic_units": script.get("visual_dramatic_units", []),
             "storyboard_hints": script.get("storyboard_hints", []),
@@ -73,13 +82,15 @@ def _source_summary(novel_analysis: dict[str, Any], script: dict[str, Any]) -> d
 def build_stage_payload(stage_id: str, novel_analysis: dict[str, Any], script: dict[str, Any], outputs: dict[str, dict[str, Any]], final_revision_context: dict[str, Any] | None = None) -> dict[str, Any]:
     source = _source_summary(novel_analysis, script)
     if stage_id == "05A":
-        payload: dict[str, Any] = {"source": source, "task": "合并同一道具的不同说法，区分关键道具、普通道具、背景物件，输出道具归并计划。"}
+        payload: dict[str, Any] = {"source": source, "task": "合并同一道具的不同说法，区分关键道具、动作道具、背景物件，输出道具归并计划。"}
     elif stage_id == "05B":
-        payload = {"source": source, "prop_merge_plan": outputs["05A"], "task": "生成稳定道具卡。只做道具资产标准化，不生成图片、分镜、图像提示词。"}
+        payload = {"source": source, "prop_merge_plan": outputs["05A"], "task": "生成稳定道具卡、资产分级、重要性评分和参考图计划。只做道具资产标准化，不生成图片、分镜、图像提示词。"}
     elif stage_id == "05C":
         payload = {"source": source, "props": outputs["05B"].get("props", []), "task": "把道具库绑定到 02 剧本使用，输出 script_usage_map 和覆盖报告，服务 06 单帧分镜引用稳定道具名。"}
     elif stage_id == "05D":
         payload = {"source": source, "stage_outputs": outputs, "task": "总检道具库是否去重正确、类型清晰、归属合理、证据充分，并可指定 retry_stages。"}
+    elif stage_id == "05E":
+        payload = {"source": source, "stage_outputs": outputs, "task": "站在 06 单帧分镜角度进行资产复核。必须使用 01 story_understanding/story_spine/events/conflicts/asset_binding_hints 判断遗漏、误合并、误分级、过度资产化，并输出 downstream_readiness_for_06。"}
     else:
         raise ValueError(stage_id)
     if final_revision_context:
@@ -99,7 +110,8 @@ def _run_one_stage(client: Any, stage: dict[str, str], novel_analysis: dict[str,
     current_output: dict[str, Any] | None = None
     quality: dict[str, Any] | None = None
     for attempt in range(1, max_retries + 2):
-        current_output = _complete_json(client, system_prompt, payload if attempt == 1 else quality_checker.build_revision_payload(stage_id, payload, current_output or {}, quality or {}))
+        revision_payload = payload if attempt == 1 else quality_checker.build_revision_payload(stage_id, payload, current_output or {}, quality or {})
+        current_output = _complete_json(client, system_prompt, revision_payload)
         current_output.setdefault("schema_version", SCHEMA_VERSION)
         current_output.setdefault("stage", stage["name"])
         current_output["status"] = "llm"
@@ -120,10 +132,13 @@ def _run_stage_range(client: Any, novel_analysis: dict[str, Any], script: dict[s
     return [_run_one_stage(client, stage, novel_analysis, script, outputs, output_dir, max_retries, final_revision_context) for stage in STAGES[start_index:]]
 
 
-def _extract_retry_stage_ids(stage_d_output: dict[str, Any]) -> list[str]:
-    quality_report = stage_d_output.get("quality_report", {}) if isinstance(stage_d_output, dict) else {}
-    retry_stages = quality_report.get("retry_stages", []) if isinstance(quality_report, dict) else []
-    return [stage_id for stage_id in retry_stages if stage_id in STAGE_INDEX and stage_id != "05D"]
+def _extract_retry_stage_ids(outputs: dict[str, Any]) -> list[str]:
+    retry_stage_ids: list[str] = []
+    for stage_id, report_key in [("05D", "quality_report"), ("05E", "review_report")]:
+        report = outputs.get(stage_id, {}).get(report_key, {}) if isinstance(outputs.get(stage_id), dict) else {}
+        if isinstance(report, dict):
+            retry_stage_ids.extend(report.get("retry_stages", []) or [])
+    return [stage_id for stage_id in retry_stage_ids if stage_id in STAGE_INDEX and stage_id != REVIEW_STAGE_ID]
 
 
 def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], output_dir: str | Path, max_retries: int = DEFAULT_MAX_RETRIES, max_final_revision_rounds: int = DEFAULT_MAX_FINAL_REVISION_ROUNDS) -> dict[str, Any]:
@@ -134,12 +149,13 @@ def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], outpu
     stage_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, 0, max_retries)
     final_revision_rounds = []
     for round_index in range(1, max_final_revision_rounds + 1):
-        retry_stage_ids = _extract_retry_stage_ids(outputs.get("05D", {}))
+        retry_stage_ids = _extract_retry_stage_ids(outputs)
         if not retry_stage_ids:
             break
         start_index = min(STAGE_INDEX[stage_id] for stage_id in retry_stage_ids)
-        quality_report = outputs.get("05D", {}).get("quality_report", {})
-        final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_report, "instruction": "05D 总检要求重跑。请从最早问题阶段修正，并保持字段完整。"}
+        review_context = outputs.get("05E", {}).get("review_report", {})
+        quality_context = outputs.get("05D", {}).get("quality_report", {})
+        final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_context, "review_report": review_context, "instruction": "05D/05E 要求重跑。请从最早问题阶段修正，并保持字段完整。"}
         rerun_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, start_index, max_retries, final_revision_context)
         final_revision_rounds.append({"round": round_index, "retry_stage_ids": retry_stage_ids, "rerun_status": rerun_status})
         stage_status.extend(rerun_status)
@@ -148,10 +164,11 @@ def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], outpu
 
 def merge_stage_outputs(novel_analysis: dict[str, Any], script: dict[str, Any], config: dict[str, Any], stage_result: dict[str, Any]) -> dict[str, Any]:
     outputs = stage_result["outputs"]
-    a, b, c, d = outputs["05A"], outputs["05B"], outputs["05C"], outputs["05D"]
+    a, b, c, d, e = outputs["05A"], outputs["05B"], outputs["05C"], outputs["05D"], outputs["05E"]
     latest_status_by_stage = {item["stage_id"]: item for item in stage_result["stage_status"]}
     stage_scores = {stage_id: (item.get("quality") or {}).get("score") for stage_id, item in latest_status_by_stage.items()}
     quality_report = d.get("quality_report", {}) if isinstance(d.get("quality_report", {}), dict) else {}
+    review_report = e.get("review_report", {}) if isinstance(e.get("review_report", {}), dict) else {}
     props = b.get("props", [])
     alias_index = {}
     for item in props or []:
@@ -176,16 +193,22 @@ def merge_stage_outputs(novel_analysis: dict[str, Any], script: dict[str, Any], 
         "prop_alias_index": alias_index,
         "prop_script_usage": c.get("script_usage_map", []),
         "coverage_report": c.get("coverage_report", {}),
+        "asset_review_report": review_report,
+        "downstream_readiness_for_06": e.get("downstream_readiness_for_06", {}),
+        "main_assets_for_06": e.get("main_assets_for_06", []),
+        "optional_assets_for_06": e.get("optional_assets_for_06", []),
+        "do_not_reference_as_main_asset": e.get("do_not_reference_as_main_asset", []),
+        "upstream_blocking_issues": e.get("upstream_blocking_issues", []),
         "risk_report": d.get("risk_report", b.get("risk_report", {})),
         "evidence_index": d.get("evidence_index", []),
         "revision_plan": d.get("revision_plan", {}),
-        "warnings": d.get("warnings", []),
+        "warnings": list(d.get("warnings", [])) + list(e.get("warnings", [])),
         "quality_report": {**quality_report, "stage_scores": stage_scores},
         "notes": ["05 只输出稳定道具库，供 06 单帧分镜引用；不生成图片、不生成分镜、不生成图像提示词。"],
         "config": config,
     }
     validation = schema_validator.validate_final_output(data)
-    needs_review = any(item.get("status") != "success" for item in latest_status_by_stage.values()) or bool(quality_report.get("needs_retry")) or not validation["passed"]
+    needs_review = any(item.get("status") != "success" for item in latest_status_by_stage.values()) or bool(quality_report.get("needs_retry")) or bool(review_report.get("needs_retry")) or not validation["passed"]
     data["schema_validation"] = validation
     data["quality_report"] = {**data["quality_report"], "needs_review": needs_review, "schema_validation_passed": validation["passed"], "schema_validation_issues": validation["issues"]}
     data["status"] = "needs_review" if needs_review else "success"
