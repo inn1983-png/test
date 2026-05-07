@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 LOCAL_GEMMA_JSON_GUARD = """
-# 本地 Gemma JSON 输出护栏
+# 本地/远程 LLM JSON 输出护栏
 
-你运行在本地量化模型环境，默认模型可能是 Gemma 4 31B Q4。为保证自动流水线稳定，必须严格遵守：
+你运行在自动化视频流水线环境。为保证 01/02/03/04/05/06 等 LLM_TEXT_PHASE 稳定，必须严格遵守：
 
 1. 只输出一个合法 JSON object。
 2. 第一个非空字符必须是 {，最后一个非空字符必须是 }。
@@ -17,7 +17,11 @@ LOCAL_GEMMA_JSON_GUARD = """
 8. 不要把 JSON 放入数组顶层；顶层必须是 object。
 9. 只输出当前阶段提示词模板需要的字段；不要额外添加说明字段、调试字段、思考字段、analysis 字段、reasoning 字段。
 10. 输入里的 _local_model_output_contract 只是约束说明，绝对不能复制到输出 JSON。
-11. 输出前自检：JSON 能被 json.loads 直接解析，并且没有模板外的多余顶层字段。
+11. 严禁复述完整原文、完整 paragraphs、完整 stage_outputs；只引用必要短证据。
+12. 数组必须克制：除非阶段提示词明确要求逐条完整输出，否则单个数组建议不超过 80 项。
+13. 字符串必须短：说明类字段尽量 1-3 句；不要写长篇分析散文。
+14. 如果内容很多，优先输出结构化摘要、id、短证据、风险点，不要输出大段原文。
+15. 输出前自检：JSON 能被 json.loads 直接解析，没有模板外多余顶层字段，没有超长无意义文本。
 """.strip()
 
 INTERNAL_OUTPUT_FIELD_NAMES = {
@@ -48,18 +52,20 @@ def compact_payload_hint(payload: dict[str, Any]) -> dict[str, Any]:
             "no_markdown": True,
             "keep_required_fields": True,
             "do_not_copy_this_field_to_output": True,
+            "do_not_repeat_full_input": True,
+            "avoid_long_arrays_unless_required": True,
+            "avoid_long_strings": True,
         },
         **payload,
     }
 
 
 def remove_internal_output_fields(value: Any) -> Any:
-    """Remove guard / reasoning fields that local models may copy into business JSON.
+    """Remove guard / reasoning fields that local or remote models may copy into business JSON.
 
-    The prompt guard asks Gemma-style local models not to emit these fields, but
-    this is the final runtime safety net after json.loads and JSON repair. It is
-    intentionally recursive because copied control fields often appear inside
-    stage reports or nested objects, not only at the top level.
+    The prompt guard asks models not to emit these fields, but this is the final
+    runtime safety net after json.loads and JSON repair. It is intentionally
+    recursive because copied control fields often appear inside nested objects.
     """
     if isinstance(value, dict):
         return {
