@@ -61,6 +61,30 @@ def _name_list(items: list[Any], key: str) -> list[str]:
     return names
 
 
+def _character_costumes(characters: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in characters.get("characters", []) or []:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("canonical_name")
+        if not name:
+            continue
+        costume_ids = []
+        for costume in item.get("costume_variants", []) or []:
+            if isinstance(costume, dict) and costume.get("costume_id"):
+                costume_ids.append(str(costume["costume_id"]))
+        rows.append({"canonical_name": str(name), "costume_ids": costume_ids, "default_costume_id": item.get("default_costume_id", "")})
+    return rows
+
+
+def _prop_names_by_policy(props: dict[str, Any], policies: set[str]) -> list[str]:
+    names: list[str] = []
+    for item in props.get("props", []) or []:
+        if isinstance(item, dict) and item.get("canonical_prop_name") and item.get("wearable_policy") in policies:
+            names.append(str(item["canonical_prop_name"]))
+    return names
+
+
 def _asset_summary(characters: dict[str, Any], scenes: dict[str, Any], props: dict[str, Any]) -> dict[str, Any]:
     return {
         "characters": characters.get("characters", []),
@@ -68,8 +92,11 @@ def _asset_summary(characters: dict[str, Any], scenes: dict[str, Any], props: di
         "props": props.get("props", []),
         "allowed_asset_names": {
             "characters": _name_list(characters.get("characters", []), "canonical_name"),
+            "character_costumes": _character_costumes(characters),
             "scenes": _name_list(scenes.get("scenes", []), "canonical_scene_name"),
             "props": _name_list(props.get("props", []), "canonical_prop_name"),
+            "mergeable_wearable_props": _prop_names_by_policy(props, {"merge_into_appearance_asset", "both"}),
+            "independent_prop_refs": _prop_names_by_policy(props, {"not_wearable", "independent_prop_reference", "both"}),
         },
         "asset_readiness": {
             "characters": characters.get("downstream_readiness_for_06", {}),
@@ -131,7 +158,7 @@ def build_stage_payload(
     if stage_id == "06A":
         payload: dict[str, Any] = {
             "source": source,
-            "task": "检查 02 剧本中的角色/场景/道具需求是否都能被 03/04/05 稳定资产库覆盖。不能新增资产；缺资产必须输出 upstream_blocking_issues，并建议对应 03/04/05 阶段重跑。",
+            "task": "检查 02 剧本中的角色/服装/场景/道具需求是否都能被 03/04/05 稳定资产库覆盖。不能新增资产；缺资产或 costume_id 必须输出 upstream_blocking_issues，并建议对应 03/04/05 阶段重跑。",
         }
     elif stage_id == "06B":
         payload = {
@@ -144,7 +171,7 @@ def build_stage_payload(
             "source": source,
             "asset_gate": outputs["06A"],
             "storyboard_plan": outputs["06B"],
-            "task": "生成正式单帧分镜 JSON。每一帧只能引用 allowed_asset_names 中的稳定角色名、稳定场景名、稳定道具名；不要写图像提示词，只输出 reference_requirements / composition_notes / continuity_notes。",
+            "task": "生成正式单帧分镜 JSON。每一帧只能引用 allowed_asset_names 中的稳定角色名、角色 costume_id、稳定场景名、稳定道具名；输出 character_lock_reference 与 appearance_asset_requirements，但不要写图像提示词。",
         }
     elif stage_id == "06D":
         payload = {
@@ -152,13 +179,14 @@ def build_stage_payload(
             "asset_gate": outputs["06A"],
             "storyboard_plan": outputs["06B"],
             "frames": outputs["06C"].get("frames", []),
-            "task": "为单帧分镜补充连续性绑定、上一帧/下一帧承接、四宫格预览组。四宫格只是检查单位，不是图片生成。",
+            "appearance_asset_requirements": outputs["06C"].get("appearance_asset_requirements", []),
+            "task": "为单帧分镜补充连续性绑定、上一帧/下一帧承接、四宫格预览组。必须检查同一角色 costume_id/appearance_asset_key 的连续性。四宫格只是检查单位，不是图片生成。",
         }
     elif stage_id == "06E":
         payload = {
             "source": source,
             "stage_outputs": outputs,
-            "task": "总检 06 单帧分镜：资产引用、剧情覆盖、顺序、连续性、07 可用性、越界字段、缺资产阻塞问题，并可指定 retry_stages。",
+            "task": "总检 06 单帧分镜：资产引用、角色定妆照引用、角色造型引用、剧情覆盖、顺序、连续性、07 可用性、越界字段、缺资产阻塞问题，并可指定 retry_stages。",
         }
     else:
         raise ValueError(stage_id)
@@ -311,6 +339,7 @@ def merge_stage_outputs(
         "storyboard_plan": b.get("storyboard_plan", {}),
         "frame_group_plan": b.get("frame_group_plan", []),
         "coverage_plan": b.get("coverage_plan", []),
+        "appearance_asset_requirements": c.get("appearance_asset_requirements", []),
         "frames": c.get("frames", []),
         "continuity_map": d.get("continuity_map", []),
         "four_grid_preview_groups": d.get("four_grid_preview_groups", []),
@@ -322,7 +351,8 @@ def merge_stage_outputs(
         "quality_report": {**quality_report, "stage_scores": stage_scores},
         "notes": [
             "06 只输出单帧分镜 JSON，服务 07 图片生成；不生成图片、不调用 ComfyUI、不生成最终视频。",
-            "06 分镜只能引用 03/04/05 稳定资产名；缺资产必须通过 upstream_blocking_issues 建议上游重跑。",
+            "06 分镜只能引用 03/04/05 稳定资产名和 03 costume_id；缺资产必须通过 upstream_blocking_issues 建议上游重跑。",
+            "appearance_asset_requirements 是 07 后续先生成角色定妆/造型参考图的需求索引，不是图片输出。",
         ],
         "config": config,
     }
