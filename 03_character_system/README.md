@@ -15,7 +15,7 @@
 
 ```text
 01 = 提取一切，宁可多提，不漏掉
-03 = 先合并，再分级，不简单删除候选
+03 = 先合并，再分级，再复核，不简单删除候选
 06 = 只引用 03 输出的稳定角色名和主资产角色
 ```
 
@@ -24,22 +24,57 @@
 03B 必须给每个角色输出：
 
 ```text
+asset_importance_score = 0-100
+importance_reason
+source_understanding_basis
 asset_level = main / supporting / extra_group / mentioned_only
 needs_fixed_face = true / false
 reference_image_priority = required / optional / not_needed
 reference_image_plan
 ```
 
-分级规则：
+分级必须参考 01 的真正理解：
 
 ```text
-main：核心角色，有名字、多次出场、有对白/动作、影响剧情，必须固定脸。
-supporting：功能角色，有出场或对白，可简化但仍应固定脸。
-extra_group：龙套/群体角色，不单独建脸。
-mentioned_only：仅被提及，不进入主生图资产。
+story_understanding
+story_spine
+events / event_graph
+conflicts
+high_retention_segments
+character_arc_map
+paragraphs
 ```
 
-参考图策略：
+## 复核机制
+
+03E 是面向 06 的资产可用性复核，不是格式检查。
+
+03E 必须检查：
+
+```text
+是否漏掉主角/反派/关键配角
+是否把同一角色拆成多个
+是否把不同角色错误合并
+是否按年龄段/称谓/职务拆角色
+是否把龙套误升为主资产
+asset_level / fixed face / reference plan 是否合理
+06 是否能直接引用 canonical_name
+```
+
+03E 输出：
+
+```text
+asset_review_report
+downstream_readiness_for_06
+main_assets_for_06
+optional_assets_for_06
+do_not_reference_as_main_asset
+upstream_blocking_issues
+```
+
+如果 03E 发现遗漏或误分级，不直接补资产，而是输出 retry_stages 和 revision_instructions，触发前置阶段连锁重跑。
+
+## 参考图策略
 
 ```text
 main：front_face_half_body + full_body_front
@@ -50,9 +85,11 @@ extra_group / mentioned_only：不强制参考图
 最高图像资产规则：
 
 ```text
+03 不生成图片，只写参考图计划。
 先单视图稳定，不要一开始做三视图。
 不要把正面/侧面/背面拼成一张三视图图板。
 如后续确实需要三视图，必须拆成 front / side / back 多张独立图。
+图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
 ## 绝对边界
@@ -68,6 +105,7 @@ extra_group / mentioned_only：不强制参考图
 证据链
 角色连续性规则
 角色库质量评分
+面向 06 的资产复核
 ```
 
 03 禁止做：
@@ -94,9 +132,10 @@ python 03_character_system/run_staged.py
 
 ```text
 03A alias_merge_plan：合并同一角色的不同称呼
-03B character_cards：输出稳定角色卡 + 资产分级
+03B character_cards：输出稳定角色卡 + 资产分级 + 重要性评分
 03C script_usage_binding：绑定 02 剧本里的角色使用
-03D quality_check：总检评分，可触发连锁重跑
+03D quality_check：模块内部总检评分
+03E asset_review：基于 01 真正理解，面向 06 复核资产可用性
 ```
 
 ## 评分与重跑
@@ -105,22 +144,10 @@ python 03_character_system/run_staged.py
 
 低于阈值时会生成 `revision_instructions`，并把修改意见传回同阶段 LLM 自动重跑。
 
-03D 如果输出：
-
-```json
-{
-  "quality_report": {
-    "needs_retry": true,
-    "retry_stages": ["03A"],
-    "revision_instructions": []
-  }
-}
-```
-
-系统会从最早问题阶段开始连锁重跑：
+03D / 03E 如果输出 `needs_retry=true`，系统会从最早问题阶段开始连锁重跑：
 
 ```text
-03A → 03B → 03C → 03D
+03A → 03B → 03C → 03D → 03E
 ```
 
 ## 最终硬规则校验
@@ -133,10 +160,14 @@ character_id 是否重复
 canonical_name 是否重复
 aliases 是否互相冲突
 是否按年龄段拆角色
+asset_importance_score 是否为 0-100
+source_understanding_basis 是否引用 01 理解依据
 asset_level 是否合法
 主/配角是否 needs_fixed_face=true
 龙套/仅提及角色是否错误强制参考图
 核心角色 reference_image_plan 是否包含 front_face_half_body
+asset_review_report 是否存在
+downstream_readiness_for_06 是否存在
 source_evidence 是否存在
 usage_in_script 是否为数组
 ```
@@ -155,6 +186,9 @@ appearance
 costume
 temperament
 role_function
+asset_importance_score
+importance_reason
+source_understanding_basis
 asset_level
 needs_fixed_face
 reference_image_priority
@@ -162,15 +196,6 @@ reference_image_plan
 source_evidence
 usage_in_script
 anti_contamination_notes
-```
-
-## 最高规则
-
-```text
-同一角色只输出一次。
-禁止按年龄段拆角色。
-禁止把身份称谓、昵称、职务称谓拆成新角色。
-角色描述必须稳定、清晰、不可互相污染，服务 06 单帧分镜引用稳定角色名。
 ```
 
 ## LLM 配置
