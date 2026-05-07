@@ -6,10 +6,11 @@ import shutil
 import subprocess
 import time
 import urllib.request
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-workflow_adapter = __import__("09_video.core.workflow_adapter", fromlist=["build_comfyui_workflow_payload"])
+workflow_adapter = import_module("09_video.core.workflow_adapter")
 
 
 class ComfyUIClient:
