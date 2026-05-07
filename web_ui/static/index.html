@@ -7,34 +7,40 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">影</div>
         <div>
           <div class="brand-title">AI 短剧工厂</div>
-          <div class="brand-subtitle">最终版总控工作台</div>
+          <div class="brand-subtitle">Final Production Console</div>
         </div>
       </div>
       <nav class="nav">
-        <button class="nav-item active" data-view="dashboard">总览</button>
-        <button class="nav-item" data-view="runner">生产控制台</button>
-        <button class="nav-item" data-view="stages">阶段透明区</button>
-        <button class="nav-item" data-view="assets">资产库</button>
-        <button class="nav-item" data-view="outputs">产物中心</button>
-        <button class="nav-item" data-view="design">最终 UI 设计</button>
+        <button class="nav-item active" data-view="dashboard"><span>◎</span>生产驾驶舱</button>
+        <button class="nav-item" data-view="runner"><span>▶</span>生产控制台</button>
+        <button class="nav-item" data-view="stages"><span>▦</span>阶段透明区</button>
+        <button class="nav-item" data-view="retry"><span>!</span>返工中心</button>
+        <button class="nav-item" data-view="assets"><span>◆</span>资产库</button>
+        <button class="nav-item" data-view="storyboard"><span>▤</span>分镜工作台</button>
+        <button class="nav-item" data-view="outputs"><span>⌁</span>产物中心</button>
+        <button class="nav-item" data-view="design"><span>✦</span>UI 设计蓝图</button>
       </nav>
-      <div class="sidebar-card">
+      <div class="sidebar-card status-orb-card">
         <div class="sidebar-card-title">当前运行</div>
         <div id="currentJobMini" class="muted">暂无任务</div>
       </div>
+      <div class="sidebar-foot">默认端口 1144 · 本地生产环境</div>
     </aside>
 
     <main class="main">
-      <header class="topbar">
+      <header class="hero">
         <div>
+          <div class="eyebrow">Novel → Script → Assets → Storyboard → Image → Audio → Video</div>
           <h1>总控工作台</h1>
-          <p>从小说输入到 01–10 全流程生产，每一步都有状态、输出、评分和返工记录。</p>
+          <p>最终版生产 UI：每一步都有状态、输出、评分、返工、产物和后续媒体生产入口。</p>
         </div>
         <div class="topbar-actions">
           <button id="refreshBtn" class="btn ghost">刷新</button>
@@ -43,58 +49,51 @@
       </header>
 
       <section class="view active" id="view-dashboard">
-        <div class="grid cards-4">
-          <div class="metric-card">
-            <span>流程阶段</span>
-            <strong id="metricModules">0</strong>
-            <em>pipeline.json</em>
-          </div>
-          <div class="metric-card">
-            <span>当前任务</span>
-            <strong id="metricJob">无</strong>
-            <em id="metricJobSub">未运行</em>
-          </div>
-          <div class="metric-card">
-            <span>项目状态</span>
-            <strong id="metricRunStatus">待开始</strong>
-            <em>run_status.json</em>
-          </div>
-          <div class="metric-card">
-            <span>关键产物</span>
-            <strong id="metricOutputs">0</strong>
-            <em>可预览文件</em>
-          </div>
-        </div>
-
-        <div class="panel">
-          <div class="panel-header">
-            <div>
-              <h2>01–10 流程总览</h2>
-              <p>模块状态会跟随运行自动刷新，正在运行时每 2 秒同步一次快照。</p>
+        <div class="hero-grid">
+          <div class="panel hero-panel">
+            <div class="panel-header compact">
+              <div>
+                <h2>生产进度</h2>
+                <p>实时跟踪 01–10 模块状态。</p>
+              </div>
+              <div id="heroStatusBadge" class="badge pending">待开始</div>
             </div>
+            <div class="progress-shell"><div id="pipelineProgressBar" class="progress-bar" style="width:0%"></div></div>
+            <div id="pipelineTimeline" class="timeline"></div>
           </div>
-          <div id="pipelineTimeline" class="timeline"></div>
+          <div class="panel insight-panel">
+            <div class="panel-header compact"><h2>运行洞察</h2></div>
+            <div class="insight-stack">
+              <div class="insight-row"><span>流程阶段</span><strong id="metricModules">0</strong></div>
+              <div class="insight-row"><span>当前任务</span><strong id="metricJob">无</strong></div>
+              <div class="insight-row"><span>项目状态</span><strong id="metricRunStatus">待开始</strong></div>
+              <div class="insight-row"><span>关键产物</span><strong id="metricOutputs">0</strong></div>
+              <div class="insight-row"><span>返工问题</span><strong id="metricIssues">0</strong></div>
+            </div>
+            <button class="btn primary wide" data-jump="runner">进入生产控制台</button>
+          </div>
         </div>
 
         <div class="grid two-cols">
           <div class="panel">
-            <div class="panel-header"><h2>最近项目</h2></div>
+            <div class="panel-header"><h2>最近项目</h2><p>自动读取 workspace/projects。</p></div>
             <div id="projectList" class="list"></div>
           </div>
           <div class="panel">
-            <div class="panel-header"><h2>实时日志</h2></div>
+            <div class="panel-header"><h2>实时日志</h2><p>LLM 长时间运行时可以看到 stdout。</p></div>
             <pre id="liveLog" class="log-box">暂无日志</pre>
           </div>
         </div>
       </section>
 
       <section class="view" id="view-runner">
-        <div class="panel">
+        <div class="panel command-panel">
           <div class="panel-header">
             <div>
               <h2>生产控制台</h2>
-              <p>最终版入口：输入小说、选择运行范围、配置本地 LLM，一键启动全流程或指定模块。</p>
+              <p>输入小说、选择运行范围、配置本地 LLM，一键启动全流程或指定模块。</p>
             </div>
+            <div class="panel-chip">LLM TEXT PHASE 01–06</div>
           </div>
           <div class="form-grid">
             <label>运行模式
@@ -158,20 +157,55 @@
         </div>
       </section>
 
+      <section class="view" id="view-retry">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>返工中心</h2>
+              <p>集中展示 needs_retry、upstream_blocking_issues、schema_validation_issues 和低分阶段。</p>
+            </div>
+            <div class="panel-chip danger-chip">问题集中处理</div>
+          </div>
+          <div id="retryCenter" class="retry-list"></div>
+        </div>
+      </section>
+
       <section class="view" id="view-assets">
+        <div class="asset-hero panel">
+          <div>
+            <h2>资产库工作台</h2>
+            <p>角色、场景、道具先以 JSON 资产卡呈现；后续 07 接入后显示定妆照、造型照、场景图、道具图。</p>
+          </div>
+        </div>
         <div class="grid three-cols">
-          <div class="panel asset-panel" data-output="03_character_system/characters.json">
+          <div class="panel asset-panel character-card" data-output="03_character_system/characters.json">
+            <div class="asset-icon">人</div>
             <div class="panel-header"><h2>角色库</h2><button class="btn small preview-main-output">预览</button></div>
             <div id="characterSummary" class="muted">等待 03 输出</div>
           </div>
-          <div class="panel asset-panel" data-output="04_scene_system/scenes.json">
+          <div class="panel asset-panel scene-card" data-output="04_scene_system/scenes.json">
+            <div class="asset-icon">景</div>
             <div class="panel-header"><h2>场景库</h2><button class="btn small preview-main-output">预览</button></div>
             <div id="sceneSummary" class="muted">等待 04 输出</div>
           </div>
-          <div class="panel asset-panel" data-output="05_prop_system/props.json">
+          <div class="panel asset-panel prop-card" data-output="05_prop_system/props.json">
+            <div class="asset-icon">物</div>
             <div class="panel-header"><h2>道具库</h2><button class="btn small preview-main-output">预览</button></div>
             <div id="propSummary" class="muted">等待 05 输出</div>
           </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-storyboard">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>分镜工作台</h2>
+              <p>06 当前先显示分镜 JSON 摘要；07 图片生成后这里升级为图文分镜表。</p>
+            </div>
+            <button id="previewStoryboardBtn" class="btn small">预览 storyboard.json</button>
+          </div>
+          <div id="storyboardWorkspace" class="storyboard-grid"></div>
         </div>
       </section>
 
@@ -189,21 +223,16 @@
 
       <section class="view" id="view-design">
         <div class="panel design-doc">
-          <div class="panel-header"><h2>最终版 UI 结构</h2></div>
-          <h3>1. 首页：项目生产总览</h3>
-          <p>展示项目、章节、当前模块、整体进度、失败阻塞、最新产物。用户一眼知道系统跑到哪一步。</p>
-          <h3>2. 生产控制台</h3>
-          <p>支持粘贴小说、选择 project/book_chapter、从某模块继续、只重跑某模块、本地 LLM 参数、后续 ComfyUI/TTS/视频参数。</p>
-          <h3>3. 阶段透明区</h3>
-          <p>每个模块独立展开：阶段目标、LLM 是否运行、原始输出、JSON 修复、评分、修改意见、重跑次数、总检结果。</p>
-          <h3>4. 资产库工作台</h3>
-          <p>03/04/05 不再只是 JSON 文件，而是可视化角色卡、场景卡、道具卡。后续 07 可在这里绑定定妆照、造型照、场景参考图、道具参考图。</p>
-          <h3>5. 分镜工作台</h3>
-          <p>06 输出帧序列、角色引用、costume_id、appearance_asset_key、连续性说明、四宫格预览组。后续 07 图片出来后变成图文分镜表。</p>
-          <h3>6. 媒体生产区</h3>
-          <p>07 图片、08 音频、09 视频、10 合成会有独立队列、预览、失败重试、显存资源状态和最终导出。</p>
-          <h3>7. 返工中心</h3>
-          <p>把所有 needs_retry、upstream_blocking_issues、schema_validation_issues 集中展示，用户可以一键从最早问题阶段重跑。</p>
+          <div class="panel-header"><h2>最终版 UI 蓝图</h2></div>
+          <div class="blueprint-grid">
+            <div><h3>1. 生产驾驶舱</h3><p>展示项目、章节、当前模块、整体进度、失败阻塞、最新产物。</p></div>
+            <div><h3>2. 生产控制台</h3><p>小说输入、章节选择、模块选择、本地 LLM、ComfyUI、TTS、视频参数。</p></div>
+            <div><h3>3. 阶段透明区</h3><p>阶段目标、输入摘要、LLM 输出、JSON 修复、评分、修改意见、重跑次数。</p></div>
+            <div><h3>4. 返工中心</h3><p>集中展示所有阻塞问题，并从最早问题阶段触发重跑。</p></div>
+            <div><h3>5. 资产库</h3><p>角色卡、场景卡、道具卡，以及 07 后的参考图绑定。</p></div>
+            <div><h3>6. 分镜工作台</h3><p>帧序列、角色引用、服装版本、造型引用、连续性和图文预览。</p></div>
+            <div><h3>7. 媒体生产区</h3><p>07 图片、08 音频、09 视频、10 合成的队列、预览、失败重试。</p></div>
+          </div>
         </div>
       </section>
     </main>
