@@ -44,13 +44,10 @@ class LLMConfig:
 
 
 class LLMClient:
-    """OpenAI-compatible text LLM client for staged script writing.
-
-    Text phases default to DeepSeek V4 Pro API. Local models should be used
-    separately for vision / multimodal understanding.
-    """
+    """OpenAI-compatible text LLM client for staged script writing."""
 
     def __init__(self, config: LLMConfig | None = None) -> None:
+        llm_streaming.force_utf8_stdio()
         self.config = config or LLMConfig.from_env()
 
     def complete_text(self, system_prompt: str, user_prompt: str, trace_label: str = "02_script_writer") -> str:
@@ -78,21 +75,21 @@ class LLMClient:
         text = self.complete_text(guarded_prompt, user_prompt, trace_label=trace_label)
         try:
             parsed = parse_json_from_text(text)
-            print(f"[JSON_PARSE] {trace_label} JSON 解析成功 keys={list(parsed.keys())[:12]}", flush=True)
+            llm_streaming.safe_print(f"[JSON_PARSE] {trace_label} JSON 解析成功 keys={list(parsed.keys())[:12]}")
             return parsed
         except Exception as exc:
-            print(f"[JSON_PARSE_ERROR] {trace_label} JSON 解析失败：{exc}", flush=True)
+            llm_streaming.safe_print(f"[JSON_PARSE_ERROR] {trace_label} JSON 解析失败：{exc}")
             if repair_callback is None:
                 raise
-            print(f"[JSON_REPAIR] {trace_label} 开始调用 JSON 修复", flush=True)
+            llm_streaming.safe_print(f"[JSON_REPAIR] {trace_label} 开始调用 JSON 修复")
             repaired = repair_callback(text, str(exc))
             cleaned = prompt_guard.remove_internal_output_fields(repaired)
-            print(f"[JSON_REPAIR_DONE] {trace_label} 修复完成 keys={list(cleaned.keys())[:12]}", flush=True)
+            llm_streaming.safe_print(f"[JSON_REPAIR_DONE] {trace_label} 修复完成 keys={list(cleaned.keys())[:12]}")
             return cleaned
 
 
 def parse_json_from_text(text: str) -> dict[str, Any]:
-    stripped = text.strip()
+    stripped = llm_streaming.repair_mojibake_text(text).strip()
     match = JSON_RE.search(stripped)
     if match:
         stripped = match.group(1).strip()
