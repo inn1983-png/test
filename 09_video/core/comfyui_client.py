@@ -12,6 +12,8 @@ from typing import Any
 
 workflow_adapter = import_module("09_video.core.workflow_adapter")
 
+MIN_PLACEHOLDER_BYTES = int(os.getenv("AI_DRAMA_VIDEO_DRY_RUN_PLACEHOLDER_BYTES", "2048"))
+
 
 class ComfyUIClient:
     """ComfyUI queue client for one-submit-per-window LTX2.3 execution."""
@@ -116,6 +118,21 @@ class ComfyUIClient:
         path = Path(str(segment.get("image_path") or ""))
         return path if path.exists() else None
 
+    def _write_valid_placeholder_clip(self, output_path: Path, segment: dict[str, Any]) -> None:
+        text = (
+            "DRY_RUN_PLACEHOLDER_MP4\n"
+            f"segment_id={segment.get('segment_id')}\n"
+            f"frame_ids={segment.get('frame_ids')}\n"
+            f"image_paths={segment.get('image_paths')}\n"
+            f"audio={segment.get('audio_source_path')}\n"
+            f"prompt={segment.get('ltx_prompt')}\n"
+            f"start={segment.get('start_seconds')} end={segment.get('end_seconds')}\n"
+        )
+        payload = text.encode("utf-8")
+        if len(payload) < MIN_PLACEHOLDER_BYTES:
+            payload += b"#" * (MIN_PLACEHOLDER_BYTES - len(payload))
+        output_path.write_bytes(payload)
+
     def _make_dry_run_clip(self, segment: dict[str, Any]) -> str:
         output_path = Path(str(segment.get("output_clip_path")))
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -154,16 +171,7 @@ class ComfyUIClient:
             result = subprocess.run(cmd, check=False, capture_output=True, text=True)
             if result.returncode == 0 and output_path.exists():
                 return str(output_path)
-        output_path.write_text(
-            "DRY_RUN_PLACEHOLDER_MP4\n"
-            f"segment_id={segment.get('segment_id')}\n"
-            f"frame_ids={segment.get('frame_ids')}\n"
-            f"image_paths={segment.get('image_paths')}\n"
-            f"audio={segment.get('audio_source_path')}\n"
-            f"prompt={segment.get('ltx_prompt')}\n"
-            f"start={segment.get('start_seconds')} end={segment.get('end_seconds')}\n",
-            encoding="utf-8",
-        )
+        self._write_valid_placeholder_clip(output_path, segment)
         return str(output_path)
 
     def submit_segment(self, segment: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
