@@ -45,12 +45,18 @@
     },
     "08_audio": {
       "requires": [{"module": "02_script_writer", "name": "script.json"}],
-      "produces": [{"module": "08_audio", "name": "final_audio.wav", "type": "audio"}]
+      "produces": [
+        {"module": "08_audio", "name": "final_audio.wav", "type": "audio"},
+        {"module": "08_audio", "name": "audio_timeline.json", "type": "json"},
+        {"module": "08_audio", "name": "subtitle.srt", "type": "subtitle"},
+        {"module": "08_audio", "name": "subtitle.ass", "type": "subtitle"}
+      ]
     },
     "09_video": {
       "requires": [
         {"module": "07_storyboard_image", "name": "image_manifest.json"},
-        {"module": "08_audio", "name": "final_audio.wav"}
+        {"module": "08_audio", "name": "final_audio.wav"},
+        {"module": "08_audio", "name": "audio_timeline.json"}
       ],
       "produces": [{"module": "09_video", "name": "video_manifest.json", "type": "json"}]
     },
