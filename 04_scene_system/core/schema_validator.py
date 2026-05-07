@@ -9,8 +9,10 @@ REQUIRED_TOP = [
 REQUIRED_SCENE_FIELDS = [
     "scene_id", "canonical_scene_name", "aliases", "scene_type", "time_period",
     "lighting", "weather", "atmosphere", "layout", "key_visual_elements",
-    "continuity_rules", "source_evidence", "usage_in_script"
+    "continuity_rules", "source_evidence", "usage_in_script",
+    "asset_level", "needs_reference_image", "reference_image_plan", "parent_scene"
 ]
+VALID_ASSET_LEVELS = {"main_scene", "sub_scene", "temporary", "background"}
 
 
 def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
@@ -44,6 +46,18 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             issues.append(f"canonical_scene_name 重复：{name}")
         if name:
             names.add(name)
+        asset_level = item.get("asset_level")
+        if asset_level not in VALID_ASSET_LEVELS:
+            issues.append(f"场景 asset_level 非法：{name or sid} -> {asset_level}")
+        if asset_level == "main_scene" and item.get("needs_reference_image") is not True:
+            issues.append(f"主场景必须 needs_reference_image=true：{name or sid}")
+        if asset_level == "sub_scene" and not str(item.get("parent_scene", "")).strip():
+            issues.append(f"子场景必须绑定 parent_scene：{name or sid}")
+        plan = item.get("reference_image_plan")
+        if isinstance(plan, dict):
+            images = plan.get("recommended_images", [])
+            if asset_level == "main_scene" and "wide_establishing_view" not in images:
+                issues.append(f"主场景参考图计划必须包含 wide_establishing_view：{name or sid}")
         for alias in item.get("aliases", []) or []:
             alias_key = str(alias).strip()
             if not alias_key:
