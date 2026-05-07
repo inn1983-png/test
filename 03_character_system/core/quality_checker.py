@@ -9,20 +9,54 @@ REQUIRED_BY_STAGE = {
     "03B": ["characters"],
     "03C": ["script_usage_map", "coverage_report"],
     "03D": ["quality_report", "evidence_index", "revision_plan"],
+    "03E": ["review_report", "downstream_readiness_for_06", "main_assets_for_06", "optional_assets_for_06", "do_not_reference_as_main_asset"],
 }
 
 REQUIRED_CHARACTER_FIELDS = [
     "character_id", "canonical_name", "aliases", "gender", "age_range", "identity",
     "appearance", "costume", "temperament", "role_function", "source_evidence", "usage_in_script",
-    "asset_level", "needs_fixed_face", "reference_image_priority", "reference_image_plan"
+    "asset_level", "needs_fixed_face", "reference_image_priority", "reference_image_plan",
+    "asset_importance_score", "importance_reason", "source_understanding_basis"
 ]
 
 VALID_ASSET_LEVELS = {"main", "supporting", "extra_group", "mentioned_only"}
 VALID_REFERENCE_PRIORITIES = {"required", "optional", "not_needed"}
+VALID_RETRY_STAGES = {"03A", "03B", "03C", "03D"}
 
 
 def _non_empty(value: Any) -> bool:
     return value not in (None, "", [], {})
+
+
+def _check_review_report(stage_id: str, data: dict[str, Any], issues: list[str]) -> int:
+    score_delta = 0
+    report = data.get("review_report", {}) if isinstance(data.get("review_report"), dict) else {}
+    if not report:
+        issues.append(f"{stage_id} 缺少 review_report")
+        return -25
+    required = ["score", "passed", "needs_retry", "retry_stages", "revision_instructions", "downstream_readiness", "missing_asset_check", "merge_error_check", "level_error_check", "reference_image_strategy_check"]
+    for field in required:
+        if field not in report:
+            issues.append(f"{stage_id}.review_report 缺少字段：{field}")
+            score_delta -= 5
+    retry_stages = report.get("retry_stages", []) or []
+    for retry_stage in retry_stages:
+        if retry_stage not in VALID_RETRY_STAGES:
+            issues.append(f"{stage_id}.review_report.retry_stages 非法：{retry_stage}")
+            score_delta -= 10
+    if report.get("needs_retry") and not report.get("revision_instructions"):
+        issues.append(f"{stage_id} 需要重跑但没有 revision_instructions")
+        score_delta -= 15
+    readiness = data.get("downstream_readiness_for_06", {}) if isinstance(data.get("downstream_readiness_for_06"), dict) else {}
+    if not readiness:
+        issues.append(f"{stage_id} 缺少 downstream_readiness_for_06")
+        score_delta -= 15
+    else:
+        for field in ["ready", "blocking_issues", "main_assets_for_06", "optional_assets_for_06", "do_not_reference_as_main_asset"]:
+            if field not in readiness:
+                issues.append(f"downstream_readiness_for_06 缺少字段：{field}")
+                score_delta -= 4
+    return score_delta
 
 
 def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -59,11 +93,17 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
             if item.get("asset_level") in {"extra_group", "mentioned_only"} and item.get("reference_image_priority") == "required":
                 issues.append(f"龙套/仅提及角色不应强制参考图：{name or idx}")
                 score -= 8
+            importance = item.get("asset_importance_score")
+            if not isinstance(importance, (int, float)) or importance < 0 or importance > 100:
+                issues.append(f"角色 {name or idx} asset_importance_score 必须为 0-100")
+                score -= 8
     if stage_id == "03D":
         qr = data.get("quality_report", {}) if isinstance(data.get("quality_report"), dict) else {}
         if qr.get("needs_retry") and not qr.get("retry_stages"):
             issues.append("03D 要求重跑但未给 retry_stages")
             score -= 20
+    if stage_id == "03E":
+        score += _check_review_report(stage_id, data, issues)
 
     score = max(0, min(100, score))
     revision_instructions = [f"请修复：{issue}" for issue in issues]
