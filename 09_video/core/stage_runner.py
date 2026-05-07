@@ -24,6 +24,14 @@ STAGES: list[dict[str, str]] = [
 ]
 
 
+def _utf8_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONLEGACYWINDOWSSTDIO", "0")
+    return env
+
+
 def _intermediate_dir(output_dir: str | Path) -> Path:
     path = Path(output_dir) / "intermediate"
     io_utils.ensure_dir(path)
@@ -68,36 +76,8 @@ def build_prompt_manifest(plan: dict[str, Any], output_dir: str | Path) -> dict[
     for seg in plan.get("segments", []) or []:
         if not isinstance(seg, dict):
             continue
-        rows.append(
-            {
-                "segment_id": seg.get("segment_id"),
-                "segment_index": seg.get("segment_index"),
-                "segment_role": seg.get("segment_role"),
-                "window_mode": seg.get("window_mode"),
-                "window_size": seg.get("window_size"),
-                "stride": seg.get("stride"),
-                "frame_ids": seg.get("frame_ids", []),
-                "image_paths": seg.get("image_paths", []),
-                "start_seconds": seg.get("start_seconds"),
-                "end_seconds": seg.get("end_seconds"),
-                "prompt_parts": seg.get("prompt_parts", {}),
-                "ltx_prompt": seg.get("ltx_prompt"),
-                "negative_prompt": seg.get("negative_prompt"),
-                "motion_policy": seg.get("motion_policy", {}),
-                "is_padded_window": seg.get("is_padded_window", False),
-                "padded_frame_count": seg.get("padded_frame_count", 0),
-            }
-        )
-    manifest = {
-        "schema_version": SCHEMA_VERSION,
-        "stage": "09A_prompt_manifest",
-        "status": "success",
-        "window_mode": plan.get("window_mode"),
-        "window_size": plan.get("window_size"),
-        "stride": plan.get("stride"),
-        "prompt_count": len(rows),
-        "prompts": rows,
-    }
+        rows.append({"segment_id": seg.get("segment_id"), "segment_index": seg.get("segment_index"), "segment_role": seg.get("segment_role"), "window_mode": seg.get("window_mode"), "window_size": seg.get("window_size"), "stride": seg.get("stride"), "frame_ids": seg.get("frame_ids", []), "image_paths": seg.get("image_paths", []), "start_seconds": seg.get("start_seconds"), "end_seconds": seg.get("end_seconds"), "prompt_parts": seg.get("prompt_parts", {}), "ltx_prompt": seg.get("ltx_prompt"), "negative_prompt": seg.get("negative_prompt"), "motion_policy": seg.get("motion_policy", {}), "is_padded_window": seg.get("is_padded_window", False), "padded_frame_count": seg.get("padded_frame_count", 0)})
+    manifest = {"schema_version": SCHEMA_VERSION, "stage": "09A_prompt_manifest", "status": "success", "window_mode": plan.get("window_mode"), "window_size": plan.get("window_size"), "stride": plan.get("stride"), "prompt_count": len(rows), "prompts": rows}
     path = Path(output_dir) / "prompt_manifest.json"
     io_utils.write_json(path, manifest)
     return {**manifest, "prompt_manifest_path": str(path)}
@@ -113,14 +93,7 @@ def run_09b(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
             continue
         missing_reasons = _image_missing_reasons(segment)
         if missing_reasons:
-            result = {
-                "status": "failed",
-                "execution_mode": "skipped_before_comfyui",
-                "segment_id": segment.get("segment_id"),
-                "output_clip_path": segment.get("output_clip_path"),
-                "error": "missing required keyframe images",
-                "missing_reasons": missing_reasons,
-            }
+            result = {"status": "failed", "execution_mode": "skipped_before_comfyui", "segment_id": segment.get("segment_id"), "output_clip_path": segment.get("output_clip_path"), "error": "missing required keyframe images", "missing_reasons": missing_reasons}
             results.append(result)
             failed.append(result)
             skipped_missing_assets.append(result)
@@ -128,29 +101,11 @@ def run_09b(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
         try:
             result = client.submit_segment(segment, output_dir)
         except Exception as exc:
-            result = {
-                "status": "failed",
-                "execution_mode": "execute" if not client.dry_run else "dry_run",
-                "segment_id": segment.get("segment_id"),
-                "output_clip_path": segment.get("output_clip_path"),
-                "error": str(exc),
-            }
+            result = {"status": "failed", "execution_mode": "execute" if not client.dry_run else "dry_run", "segment_id": segment.get("segment_id"), "output_clip_path": segment.get("output_clip_path"), "error": str(exc)}
         results.append(result)
         if result.get("status") not in {"success", "submitted"}:
             failed.append(result)
-    return {
-        "stage": "09B_ltx23_comfyui_one_window_execution",
-        "status": "needs_retry" if failed else "success",
-        "execution_mode": "dry_run" if client.dry_run else "execute",
-        "execution_results": results,
-        "failed_video_segments": failed,
-        "skipped_missing_assets": skipped_missing_assets,
-        "notes": [
-            "09B 采用外部 Python 一段一提交；ComfyUI 每次只跑一组关键帧窗口。",
-            "缺少关键帧图片时不会提交 ComfyUI，会直接写入 failed_video_segments。",
-            "已有 clip 文件默认跳过，形成断点续跑；需要重抽卡时设置 AI_DRAMA_VIDEO_FORCE_RERUN=1。",
-        ],
-    }
+    return {"stage": "09B_ltx23_comfyui_one_window_execution", "status": "needs_retry" if failed else "success", "execution_mode": "dry_run" if client.dry_run else "execute", "execution_results": results, "failed_video_segments": failed, "skipped_missing_assets": skipped_missing_assets, "notes": ["09B 采用外部 Python 一段一提交；ComfyUI 每次只跑一组关键帧窗口。", "缺少关键帧图片时不会提交 ComfyUI，会直接写入 failed_video_segments。", "已有 clip 文件默认跳过，形成断点续跑；需要重抽卡时设置 AI_DRAMA_VIDEO_FORCE_RERUN=1。"]}
 
 
 def run_09c(plan: dict[str, Any], execution: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
@@ -172,18 +127,7 @@ def run_09c(plan: dict[str, Any], execution: dict[str, Any], output_dir: str | P
             missing.append({"segment_id": segment.get("segment_id"), "output_clip_path": str(clip_path), "reason": "clip file missing"})
         elif not valid:
             invalid.append({"segment_id": segment.get("segment_id"), "output_clip_path": str(clip_path), "reason": f"clip smaller than {MIN_VALID_CLIP_BYTES} bytes"})
-    resume_manifest = {
-        "schema_version": SCHEMA_VERSION,
-        "stage": "09C_breakpoint_resume_scan",
-        "status": "needs_retry" if missing or invalid else "success",
-        "completed_count": len([row for row in rows if row.get("status") == "success"]),
-        "missing_count": len(missing),
-        "invalid_count": len(invalid),
-        "segments": rows,
-        "missing_segments": missing,
-        "invalid_segments": invalid,
-        "resume_policy": {"skip_existing_valid_clips": True, "force_rerun_env": "AI_DRAMA_VIDEO_FORCE_RERUN=1", "retry_scope": "failed_video_segments_only" if missing or invalid else "none"},
-    }
+    resume_manifest = {"schema_version": SCHEMA_VERSION, "stage": "09C_breakpoint_resume_scan", "status": "needs_retry" if missing or invalid else "success", "completed_count": len([row for row in rows if row.get("status") == "success"]), "missing_count": len(missing), "invalid_count": len(invalid), "segments": rows, "missing_segments": missing, "invalid_segments": invalid, "resume_policy": {"skip_existing_valid_clips": True, "force_rerun_env": "AI_DRAMA_VIDEO_FORCE_RERUN=1", "retry_scope": "failed_video_segments_only" if missing or invalid else "none"}}
     path = Path(output_dir) / "resume_manifest.json"
     io_utils.write_json(path, resume_manifest)
     return {**resume_manifest, "resume_manifest_path": str(path)}
@@ -202,7 +146,7 @@ def _merge_with_ffmpeg(segments: list[dict[str, Any]], final_path: Path) -> bool
         lines.append(f"file '{path.as_posix()}'")
     list_path.write_text("\n".join(lines), encoding="utf-8")
     cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(list_path), "-c", "copy", str(final_path)]
-    result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, encoding="utf-8", errors="replace", env=_utf8_env())
     return result.returncode == 0 and final_path.exists()
 
 
@@ -220,19 +164,7 @@ def run_09d(plan: dict[str, Any], resume: dict[str, Any], final_audio_path: str 
         else:
             final_path.write_text("DRY_RUN_OR_FFMPEG_MERGE_PLACEHOLDER\n" + "\n".join(str(seg.get("output_clip_path")) for seg in segments), encoding="utf-8")
             merge_note = "ffmpeg merge unavailable or source clips are placeholders; wrote merge placeholder for manifest continuity."
-    merge_data = {
-        "schema_version": SCHEMA_VERSION,
-        "stage": "09D_final_merge_and_manifest_check",
-        "status": "success" if segments else "needs_retry",
-        "merge_status": merge_status,
-        "merge_note": merge_note,
-        "final_video_path": str(final_path),
-        "final_audio_path": str(final_audio_path),
-        "clip_count": len(segments),
-        "expected_clip_count": len(plan.get("segments", []) or []),
-        "missing_segments": resume.get("missing_segments", []),
-        "invalid_segments": resume.get("invalid_segments", []),
-    }
+    merge_data = {"schema_version": SCHEMA_VERSION, "stage": "09D_final_merge_and_manifest_check", "status": "success" if segments else "needs_retry", "merge_status": merge_status, "merge_note": merge_note, "final_video_path": str(final_path), "final_audio_path": str(final_audio_path), "clip_count": len(segments), "expected_clip_count": len(plan.get("segments", []) or []), "missing_segments": resume.get("missing_segments", []), "invalid_segments": resume.get("invalid_segments", [])}
     path = output_dir / "merge_result.json"
     io_utils.write_json(path, merge_data)
     return {**merge_data, "merge_result_path": str(path)}
@@ -264,50 +196,8 @@ def merge_stage_outputs(image_manifest: dict[str, Any], audio_timeline: dict[str
     stage_scores = {item["stage_id"]: (item.get("quality") or {}).get("score") for item in stage_result.get("stage_status", [])}
     failed = c.get("missing_segments", []) if isinstance(c.get("missing_segments"), list) else []
     invalid = c.get("invalid_segments", []) if isinstance(c.get("invalid_segments"), list) else []
-    retry_plan = {
-        "needs_retry": bool(failed) or bool(invalid) or bool(b.get("failed_video_segments")),
-        "retry_scope": "failed_video_segments_only" if failed or invalid or b.get("failed_video_segments") else "none",
-        "failed_segment_ids": [item.get("segment_id") for item in failed if isinstance(item, dict)] + [item.get("segment_id") for item in invalid if isinstance(item, dict)] + [item.get("segment_id") for item in b.get("failed_video_segments", []) if isinstance(item, dict)],
-        "do_not_rerun_06_07_08": True,
-        "notes": ["09 失败只重跑缺失/无效视频段；除非 image_manifest/final_audio/audio_timeline 本身缺失，否则不回滚上游。"],
-    }
-    data = {
-        "schema_version": SCHEMA_VERSION,
-        "module": "09_video",
-        "status": "success",
-        "stage_mode": "video_execution",
-        "execution_mode": a.get("execution_mode"),
-        "window_mode": a.get("window_mode"),
-        "window_size": a.get("window_size"),
-        "stride": a.get("stride"),
-        "source": {
-            "required_upstream": ["07_storyboard_image.image_manifest.json", "08_audio.final_audio.wav", "08_audio.audio_timeline.json"],
-            "optional_upstream": ["06_storyboard.storyboard.json"],
-            "upstream_schema_versions": {"06": (storyboard or {}).get("schema_version"), "07": image_manifest.get("schema_version"), "08_timeline": audio_timeline.get("schema_version")},
-            "output_dir": str(output_dir),
-        },
-        "final_audio_path": str(final_audio_path),
-        "video_plan_path": str(Path(output_dir) / "video_plan.json"),
-        "prompt_manifest_path": prompts.get("prompt_manifest_path"),
-        "resume_manifest_path": c.get("resume_manifest_path"),
-        "merge_result_path": d.get("merge_result_path"),
-        "final_video_path": d.get("final_video_path"),
-        "merge_status": d.get("merge_status"),
-        "video_segments": c.get("segments", []),
-        "execution_results": b.get("execution_results", []),
-        "failed_video_segments": b.get("failed_video_segments", []),
-        "retry_plan": retry_plan,
-        "settings": a.get("settings", {}),
-        "stage_status": stage_result.get("stage_status", []),
-        "quality_report": {"needs_retry": retry_plan["needs_retry"], "stage_scores": stage_scores, "completed_count": c.get("completed_count"), "missing_count": c.get("missing_count"), "invalid_count": c.get("invalid_count")},
-        "notes": [
-            "09 采用滑动窗口关键帧方案：4图为 1-4、4-7、7-10；6图为 1-6、6-11；9图为 1-9、9-17。",
-            "09 采用外部 Python 一段一提交，ComfyUI 每次只运行一组关键帧窗口。",
-            "每段 ltx_prompt/negative_prompt/motion_policy 由 09 根据 06/07/08 自动生成并注入工作流。",
-            "prompt_manifest.json 单独导出每段 prompt，便于测试和 UI 展示。",
-        ],
-        "config": config,
-    }
+    retry_plan = {"needs_retry": bool(failed) or bool(invalid) or bool(b.get("failed_video_segments")), "retry_scope": "failed_video_segments_only" if failed or invalid or b.get("failed_video_segments") else "none", "failed_segment_ids": [item.get("segment_id") for item in failed if isinstance(item, dict)] + [item.get("segment_id") for item in invalid if isinstance(item, dict)] + [item.get("segment_id") for item in b.get("failed_video_segments", []) if isinstance(item, dict)], "do_not_rerun_06_07_08": True, "notes": ["09 失败只重跑缺失/无效视频段；除非 image_manifest/final_audio/audio_timeline 本身缺失，否则不回滚上游。"]}
+    data = {"schema_version": SCHEMA_VERSION, "module": "09_video", "status": "success", "stage_mode": "video_execution", "execution_mode": a.get("execution_mode"), "window_mode": a.get("window_mode"), "window_size": a.get("window_size"), "stride": a.get("stride"), "source": {"required_upstream": ["07_storyboard_image.image_manifest.json", "08_audio.final_audio.wav", "08_audio.audio_timeline.json"], "optional_upstream": ["06_storyboard.storyboard.json"], "upstream_schema_versions": {"06": (storyboard or {}).get("schema_version"), "07": image_manifest.get("schema_version"), "08_timeline": audio_timeline.get("schema_version")}, "output_dir": str(output_dir)}, "final_audio_path": str(final_audio_path), "video_plan_path": str(Path(output_dir) / "video_plan.json"), "prompt_manifest_path": prompts.get("prompt_manifest_path"), "resume_manifest_path": c.get("resume_manifest_path"), "merge_result_path": d.get("merge_result_path"), "final_video_path": d.get("final_video_path"), "merge_status": d.get("merge_status"), "video_segments": c.get("segments", []), "execution_results": b.get("execution_results", []), "failed_video_segments": b.get("failed_video_segments", []), "retry_plan": retry_plan, "settings": a.get("settings", {}), "stage_status": stage_result.get("stage_status", []), "quality_report": {"needs_retry": retry_plan["needs_retry"], "stage_scores": stage_scores, "completed_count": c.get("completed_count"), "missing_count": c.get("missing_count"), "invalid_count": c.get("invalid_count")}, "notes": ["09 采用滑动窗口关键帧方案：4图为 1-4、4-7、7-10；6图为 1-6、6-11；9图为 1-9、9-17。", "09 采用外部 Python 一段一提交，ComfyUI 每次只运行一组关键帧窗口。", "每段 ltx_prompt/negative_prompt/motion_policy 由 09 根据 06/07/08 自动生成并注入工作流。", "prompt_manifest.json 单独导出每段 prompt，便于测试和 UI 展示。"], "config": config}
     validation = schema_validator.validate_final_output({**data, "schema_validation": {}})
     needs_review = retry_plan["needs_retry"] or any(item.get("status") != "success" for item in stage_result.get("stage_status", [])) or not validation["passed"]
     data["schema_validation"] = validation
