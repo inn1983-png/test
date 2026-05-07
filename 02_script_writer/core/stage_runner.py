@@ -117,13 +117,13 @@ def build_stage_payload(
             "novel_analysis": source_summary,
             "script_draft": outputs["02D"],
             "voice_line_plan": outputs["02C"],
-            "task": "为 08_audio 和 06 单帧分镜生成剧本生产标注。输出画面可执行性、人物负载和连续性链表；不生成正式分镜。",
+            "task": "为 08_audio、03 costume_variants 和 06 单帧分镜生成剧本生产标注。输出 audio_cues、visual_dramatic_units、appearance_state_changes、storyboard_hints、人物负载和连续性链表；不生成正式分镜。",
         }
     elif stage_id == "02F":
         payload = {
             "novel_analysis": source_summary,
             "stage_outputs": outputs,
-            "task": "总检 02A-02E，检查压缩、分集、多版本、情绪曲线、口播、画面可执行性、人物负载、连续性链表和失败样本回灌建议。",
+            "task": "总检 02A-02E，检查压缩、分集、多版本、情绪曲线、口播、画面可执行性、人物负载、外观/换装状态变化、连续性链表和失败样本回灌建议。",
         }
     else:
         raise ValueError(f"Unknown stage_id: {stage_id}")
@@ -292,6 +292,7 @@ def merge_stage_outputs(novel_analysis: dict[str, Any], config: dict[str, Any], 
         "production_annotations": e.get("production_annotations", {}),
         "audio_cues": e.get("audio_cues", []),
         "visual_dramatic_units": e.get("visual_dramatic_units", []),
+        "appearance_state_changes": e.get("appearance_state_changes", []),
         "storyboard_hints": e.get("storyboard_hints", []),
         "visual_executability_report": e.get("visual_executability_report", {}),
         "character_load_report": e.get("character_load_report", {}),
@@ -302,7 +303,7 @@ def merge_stage_outputs(novel_analysis: dict[str, Any], config: dict[str, Any], 
         "revision_plan": f.get("revision_plan", {}),
         "failure_learning_notes": f.get("failure_learning_notes", []),
         "quality_report": {**quality_report, "stage_scores": stage_scores},
-        "notes": ["02 已升级为音频驱动、单帧分镜友好的真实 LLM 分阶段剧本改编系统；02F 总检可触发前置阶段重跑。"],
+        "notes": ["02 已升级为音频驱动、单帧分镜友好、外观/换装状态可追踪的真实 LLM 分阶段剧本改编系统；02F 总检可触发前置阶段重跑。"],
         "config": config,
     }
     validation = schema_validator.validate_final_output(data)
