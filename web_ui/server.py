@@ -341,7 +341,7 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
         ("audio_execution_mode", "AI_DRAMA_AUDIO_EXECUTION_MODE"),
         ("index_tts_root", "AI_DRAMA_INDEX_TTS_ROOT"),
         ("video_execution_mode", "AI_DRAMA_VIDEO_EXECUTION_MODE"),
-        ("ffmpeg_bin", "AI_DRAMA_FFMPEG_BIN"),
+        ("ffmpeg_bin", "AI_DRAMA_FFMPEG"),
     ]:
         value = str(payload.get(source_key) or "").strip()
         if value:
