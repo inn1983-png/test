@@ -36,19 +36,57 @@ TEXT_MIME = {
 }
 
 DISPLAY_PIPELINE_PREFIX = "00_main_controller"
+MOJIBAKE_MARKERS = ("�", "½", "¼", "¾", "Ã", "Â", "ä", "å", "è", "é")
 
 
 def now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
 
+def repair_mojibake_text(text: str) -> str:
+    """Best-effort repair for Chinese text that was decoded with the wrong code page.
+
+    On Windows, subprocess output can pass through cp936/gbk/cp1252 before the Web UI
+    reads it. This function is intentionally conservative: it only replaces the text
+    when a candidate clearly contains more CJK characters and fewer replacement marks.
+    """
+    if not text or not any(marker in text for marker in MOJIBAKE_MARKERS):
+        return text
+
+    def cjk_score(value: str) -> int:
+        return sum(1 for ch in value if "\u4e00" <= ch <= "\u9fff")
+
+    def bad_score(value: str) -> int:
+        return value.count("�") * 3 + sum(value.count(ch) for ch in ("½", "¼", "¾", "Ã", "Â"))
+
+    candidates = [text]
+    transforms = [
+        ("latin1", "utf-8"),
+        ("latin1", "gbk"),
+        ("cp1252", "utf-8"),
+        ("cp1252", "gbk"),
+        ("gbk", "utf-8"),
+    ]
+    for source, target in transforms:
+        try:
+            candidates.append(text.encode(source, errors="ignore").decode(target, errors="ignore"))
+        except Exception:
+            pass
+    best = max(candidates, key=lambda item: (cjk_score(item) - bad_score(item), cjk_score(item), -bad_score(item), len(item)))
+    if cjk_score(best) > cjk_score(text) and bad_score(best) <= bad_score(text):
+        return best
+    return text
+
+
 def read_json(path: Path, default: Any) -> Any:
     if not path.exists():
         return default
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return default
+    for encoding in ("utf-8", "utf-8-sig", "gb18030"):
+        try:
+            return json.loads(repair_mojibake_text(path.read_text(encoding=encoding)))
+        except Exception:
+            pass
+    return default
 
 
 def write_text(path: Path, content: str) -> None:
@@ -299,6 +337,10 @@ def discover_run_snapshot(run_dir: Path) -> dict[str, Any]:
 
 def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], dict[str, str], str]:
     env = os.environ.copy()
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONLEGACYWINDOWSSTDIO", "0")
+    env.setdefault("CHCP", "65001")
     job_kind = str(payload.get("job_kind") or "pipeline")
 
     if job_kind == "data_link_check":
@@ -311,7 +353,7 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
         return cmd, env, job_kind
 
     mode = payload.get("mode") or "project"
-    cmd = [sys.executable, str(ROOT_DIR / "00_main_controller" / "run_pipeline.py"), "--mode", mode]
+    cmd = [sys.executable, "-X", "utf8", str(ROOT_DIR / "00_main_controller" / "run_pipeline.py"), "--mode", mode]
     if mode == "book_chapter":
         cmd.extend(["--book-id", safe_id(payload.get("book_id"), "book"), "--chapter-id", safe_id(payload.get("chapter_id"), "chapter")])
     else:
@@ -385,7 +427,7 @@ def run_job_thread(job: Job, env: dict[str, str]) -> None:
         assert process.stdout is not None
         last_snapshot = 0.0
         for line in process.stdout:
-            clean = line.rstrip("\n")
+            clean = repair_mojibake_text(line.rstrip("\n"))
             if clean:
                 job.publish("log", {"line": clean})
             if time.time() - last_snapshot > 1.5:
@@ -530,7 +572,14 @@ class Handler(SimpleHTTPRequestHandler):
         if suffix == ".json":
             return self.send_json({"path": rel, "type": "json", "content": read_json(path, {})})
         if suffix in {".txt", ".md", ".log", ".srt", ".ass"}:
-            return self.send_json({"path": rel, "type": "text", "content": path.read_text(encoding="utf-8", errors="replace")[-200000:]})
+            content = ""
+            for encoding in ("utf-8", "utf-8-sig", "gb18030"):
+                try:
+                    content = path.read_text(encoding=encoding, errors="replace")
+                    break
+                except Exception:
+                    pass
+            return self.send_json({"path": rel, "type": "text", "content": repair_mojibake_text(content)[-200000:]})
         if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
             return self.send_json({"path": rel, "type": "image", "url": "/media/" + rel})
         if suffix in {".wav", ".mp4"}:
@@ -571,6 +620,7 @@ def main() -> int:
     print(f"Web UI running: http://{args.host}:{args.port}")
     print("00-10 controller, data-link check, pipeline runner, artifacts preview are enabled.")
     print("Text LLM defaults to DeepSeek V4 Pro. API key can be supplied by UI or AI_DRAMA_LLM_API_KEY.")
+    print("UTF-8 mode is forced for child processes and SSE logs.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
