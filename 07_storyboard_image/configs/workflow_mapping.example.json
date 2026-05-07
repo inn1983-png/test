@@ -1,0 +1,42 @@
+{
+  "character_lock": {
+    "description": "文生图角色定妆照 workflow：单人、锁脸、干净背景。",
+    "workflow_path": "workflows/character_lock_api.json",
+    "positive_node_id": "12",
+    "negative_node_id": "13",
+    "output_prefix_node_id": "20",
+    "positive_input": "text",
+    "negative_input": "text",
+    "output_prefix_input": "filename_prefix"
+  },
+  "character_appearance": {
+    "description": "图生图角色换装/造型 workflow：参考定妆图，生成 costume_id + wearable_props。",
+    "workflow_path": "workflows/character_appearance_api.json",
+    "positive_node_id": "12",
+    "negative_node_id": "13",
+    "output_prefix_node_id": "20",
+    "positive_input": "text",
+    "negative_input": "text",
+    "output_prefix_input": "filename_prefix"
+  },
+  "reference_asset": {
+    "description": "场景/道具参考图 workflow。",
+    "workflow_path": "workflows/reference_asset_api.json",
+    "positive_node_id": "12",
+    "negative_node_id": "13",
+    "output_prefix_node_id": "20",
+    "positive_input": "text",
+    "negative_input": "text",
+    "output_prefix_input": "filename_prefix"
+  },
+  "storyboard_frame": {
+    "description": "正式单帧分镜图 workflow：多参考图融合，场景 + 造型 + 道具 + 连续性。",
+    "workflow_path": "workflows/storyboard_frame_api.json",
+    "positive_node_id": "12",
+    "negative_node_id": "13",
+    "output_prefix_node_id": "20",
+    "positive_input": "text",
+    "negative_input": "text",
+    "output_prefix_input": "filename_prefix"
+  }
+}
