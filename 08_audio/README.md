@@ -8,6 +8,17 @@
 
 当前已接入本地根目录 `index-tts` / IndexTTS2 适配器：项目仓库只保存调用代码和 manifest，不保存 TTS 权重。
 
+本轮已吸收 `TxtovideoAudio` 的核心音频驱动规则：
+
+```text
+N：旁白，固定旁白音色，弱情绪，不强制口型。
+D：角色对白，角色音色，保留较强情绪，可用于口型。
+M：心理 OS，角色音色或 OS 音色，中等情绪，不强制口型。
+S：静音留白，只生成静音段。
+```
+
+08 的目标是从真实音频时长出发，为 09 的 6–12 秒视频单元规划服务。
+
 ---
 
 ## 输入
@@ -35,7 +46,63 @@ segments[].voice_lines / lines / dialogues / narrations
 visual_dramatic_units[].voice_lines / dialogue_lines / lines
 ```
 
-如果 02 只输出了 `script_text` / `final_script` / `content`，08 会生成一个 fallback 旁白音频段，保证流程闭环，但会在质量报告里体现风险。
+同时支持 `TxtovideoAudio` 风格标记：
+
+```text
+【N|emotion|speed】旁白文本
+【D:角色名|emotion|speed】角色对白
+【M:角色名|emotion|speed】心理 OS
+【S:秒数】
+```
+
+如果 02 只输出了 `script_text` / `final_script` / `content`，08 会优先尝试解析上面的 N/D/M/S 标记；如果没有标记，才生成 fallback 旁白音频段。
+
+---
+
+## 音色库绑定
+
+08 会从以下位置读取音色库：
+
+```text
+AI_DRAMA_VOICE_MAP 指定的 json
+AI_DRAMA_SHARED_ASSETS_DIR/voice_library/voices.json
+AI_DRAMA_SHARED_ASSETS_DIR/voice_library/voice_map.json
+shared_assets/voice_library/voices.json
+shared_assets/voice_library/voice_map.json
+```
+
+推荐格式：
+
+```json
+{
+  "schema_version": "1.0",
+  "default_voice_id": "narrator_default",
+  "narrator": {
+    "voice_id": "narrator_default",
+    "spk_audio_prompt": "examples/voice_07.wav",
+    "description": "默认旁白音色"
+  },
+  "roles": {
+    "张捕头": {
+      "voice_id": "zhang_butou",
+      "spk_audio_prompt": "voice_samples/zhang_butou.wav",
+      "description": "中年男声，粗粝，压迫感"
+    },
+    "女主": {
+      "voice_id": "female_lead",
+      "spk_audio_prompt": "voice_samples/female_lead.wav",
+      "description": "年轻女声，冷静，克制"
+    }
+  },
+  "fallbacks": {
+    "male": "narrator_default",
+    "female": "narrator_default",
+    "unknown": "narrator_default"
+  }
+}
+```
+
+`spk_audio_prompt` 可以是相对 `index-tts` 的路径，也可以是绝对路径。
 
 ---
 
@@ -45,6 +112,9 @@ visual_dramatic_units[].voice_lines / dialogue_lines / lines
 08_audio/final_audio.wav
 08_audio/audio_manifest.json
 08_audio/audio_meta.json
+08_audio/audio_timeline.json
+08_audio/subtitle.srt
+08_audio/subtitle.ass
 08_audio/intermediate/08A_audio_queue.json
 08_audio/intermediate/08B_tts_segment_plan.json
 08_audio/intermediate/08C_tts_execution.json
@@ -54,15 +124,17 @@ visual_dramatic_units[].voice_lines / dialogue_lines / lines
 
 `final_audio.wav` 是 09_video 的关键依赖。
 
+`audio_timeline.json` 给 09_video 使用，用于按真实音频时长规划 6–12 秒视频单元。
+
 ---
 
 ## 阶段设计
 
 ```text
-08A audio_queue_build：从 02 剧本提取对白 / OS / 旁白队列，不重写剧情。
-08B tts_segment_plan：为每条音频行建立独立 TTS 分段，检查 index-tts 环境。
+08A audio_queue_build：从 02 剧本提取对白 / OS / 旁白 / 静音留白队列，不重写剧情。
+08B voice_emotion_binding_and_tts_plan：绑定音色库、映射情绪、建立 TTS 分段计划。
 08C tts_execution：dry_run 生成真实静音 WAV；execute 调用本地 IndexTTS2。
-08D final_mix：线性拼接分段音频和停顿，输出 final_audio.wav。
+08D final_mix_timeline_subtitle：拼接分段音频和停顿，输出 final_audio.wav、audio_timeline.json、subtitle.srt、subtitle.ass。
 ```
 
 每个阶段都会输出 `stage_quality`，并写入 `stage_status`，方便 Web UI 展示每一步具体在做什么。
@@ -92,8 +164,6 @@ set AI_DRAMA_INDEX_TTS_ROOT=D:\Txtovideo\index-tts
 set AI_DRAMA_TTS_DEFAULT_VOICE=examples/voice_07.wav
 ```
 
-注意：`AI_DRAMA_TTS_DEFAULT_VOICE` 可以是相对 `index-tts` 的路径，也可以是绝对路径。
-
 ---
 
 ## 运行模式
@@ -111,7 +181,7 @@ set AI_DRAMA_AUDIO_EXECUTION_MODE=dry_run
 ```bash
 set AI_DRAMA_AUDIO_EXECUTION_MODE=execute
 set AI_DRAMA_INDEX_TTS_ROOT=index-tts
-set AI_DRAMA_TTS_DEFAULT_VOICE=examples/voice_07.wav
+set AI_DRAMA_VOICE_MAP=shared_assets/voice_library/voices.json
 set AI_DRAMA_TTS_FP16=1
 set AI_DRAMA_TTS_DEEPSPEED=0
 set AI_DRAMA_TTS_CUDA_KERNEL=0
@@ -125,13 +195,24 @@ IndexTTS2 README 推荐使用 `uv run`，所以 execute 模式会在 `index-tts`
 
 ## 情绪控制
 
-当前默认使用：
+当前先把中文情绪映射为更稳定的 `emo_text` 和 `emo_alpha`：
 
 ```text
-use_emo_text=True
-emo_text=当前音频段 emotion 字段
-emo_alpha=AI_DRAMA_TTS_EMO_ALPHA，默认 0.6
-use_random=False
+愤怒 → 愤怒，压低声音，带有克制的火气
+压抑 → 压抑，低沉，克制，带一点悲凉
+恐惧 → 恐惧，紧张，急促，带颤抖
+震惊 → 震惊，短促，难以置信
+冷笑 → 冷笑，讥讽，平静中带轻蔑
+平静 / calm → 平静，自然，清晰
+```
+
+并按类型限制情绪强度：
+
+```text
+N 旁白：弱情绪
+D 对白：完整情绪
+M 心理 OS：中等情绪
+S 静音：无情绪
 ```
 
 如果提供独立情绪参考音频：
@@ -140,7 +221,23 @@ use_random=False
 set AI_DRAMA_TTS_DEFAULT_EMO_AUDIO=examples/emo_sad.wav
 ```
 
-后续可扩展：角色音色库、OS 专用音色、男女角色多音色、响度归一化、BGM、音效、字幕时间轴。
+---
+
+## 后处理
+
+默认不破坏 `final_audio.wav`。
+
+如需响度归一化：
+
+```bash
+set AI_DRAMA_AUDIO_NORMALIZE=1
+```
+
+系统会尝试调用 ffmpeg 额外生成：
+
+```text
+08_audio/final_audio_normalized.wav
+```
 
 ---
 
@@ -149,8 +246,13 @@ set AI_DRAMA_TTS_DEFAULT_EMO_AUDIO=examples/emo_sad.wav
 ```text
 不改写剧本正文。
 不改变角色说话人。
-留白和 pause_after_seconds 必须体现为停顿。
+N/D/M/S 标记优先保持原顺序。
+旁白 N 使用 narrator 音色。
+对白 D 使用角色音色，可用于口型。
+心理 OS/M 使用角色音色或 OS 音色，中等情绪，不强制口型。
+留白 S 必须体现为静音段。
 失败段只建议局部重跑 failed_audio_segments，不回滚 02。
+如果单条 voice_line 加起势和末帧留白后超过 12 秒，优先回到 02 拆句，不在 09 硬救。
 08 完成后，进入 09 前由总控释放 audio resources。
 TTS 权重和音色样本属于本地资源 / shared_assets，不提交进仓库。
 ```
@@ -168,4 +270,5 @@ TTS 权重和音色样本属于本地资源 / shared_assets，不提交进仓库
 ```text
 07_storyboard_image/image_manifest.json
 08_audio/final_audio.wav
+08_audio/audio_timeline.json
 ```
