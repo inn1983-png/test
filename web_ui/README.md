@@ -11,13 +11,19 @@
 在项目根目录运行：
 
 ```bash
-python web_ui/server.py --host 127.0.0.1 --port 7860
+python web_ui/server.py --host 127.0.0.1 --port 1144
+```
+
+也可以直接使用默认端口启动：
+
+```bash
+python web_ui/server.py
 ```
 
 浏览器打开：
 
 ```text
-http://127.0.0.1:7860
+http://127.0.0.1:1144
 ```
 
 ---
