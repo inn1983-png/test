@@ -32,6 +32,7 @@ TOP_LEVEL_REQUIRED = [
     "production_annotations",
     "audio_cues",
     "visual_dramatic_units",
+    "appearance_state_changes",
     "visual_executability_report",
     "character_load_report",
     "continuity_chain",
@@ -42,6 +43,7 @@ TOP_LEVEL_REQUIRED = [
 
 ALLOWED_SEGMENT_TYPES = {"os", "dialogue", "blank", "action", "emotion"}
 ALLOWED_VOICE_LINE_TYPES = {"N", "D", "M", "S"}
+ALLOWED_APPEARANCE_CHANGE_TYPES = {"default_appearance", "costume_change", "disguise", "damage_state", "wearable_added", "wearable_removed", "wearable_emphasized"}
 
 
 def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
@@ -69,6 +71,7 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
 
     _validate_refs(audio_cues, segment_ids, voice_line_ids, "audio_cues", issues)
     _validate_refs(storyboard_hints, segment_ids, voice_line_ids, "storyboard_hints", issues)
+    _validate_appearance_state_changes(data.get("appearance_state_changes", []) or [], segment_ids, voice_line_ids, visual_unit_ids, issues)
     _validate_video_units(video_units, voice_line_ids, issues)
     _validate_continuity_chain(data.get("continuity_chain", []) or [], visual_unit_ids, issues)
     _validate_script_versions(data.get("script_versions", []) or [], data.get("selected_version_id"), issues)
@@ -83,6 +86,7 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
 
     _require_non_empty_list(data, "source_line_usage", "无法确认原文关键句是否被继承。", issues)
     _require_non_empty_list(data, "character_name_usage", "无法检查角色称呼一致性。", issues)
+    _require_non_empty_list(data, "appearance_state_changes", "无法检查角色定妆、换装和穿戴状态变化。", issues)
     _require_non_empty_list(data, "episode_split_plan", "无法判断长文案是否需要分集/分段。", issues)
     _require_non_empty_list(data, "script_emotion_curve", "无法检查剧本情绪曲线。", issues)
     _require_non_empty_list(data, "failure_learning_notes", "无法把真实测试失败样本回灌到后续精修。", issues)
@@ -174,6 +178,33 @@ def _validate_refs(items: list[dict[str, Any]], segment_ids: set[str], voice_lin
         line_ref = item.get("voice_line_id")
         if line_ref and str(line_ref) not in voice_line_ids:
             issues.append(f"{label} 引用了不存在的 voice_line_id：{line_ref}")
+
+
+def _validate_appearance_state_changes(items: list[dict[str, Any]], segment_ids: set[str], voice_line_ids: set[str], visual_unit_ids: set[str], issues: list[str]) -> None:
+    if not isinstance(items, list) or not items:
+        issues.append("appearance_state_changes 为空，无法让 03/06 稳定判断服装和穿戴状态。")
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            issues.append("appearance_state_changes 存在非对象条目。")
+            continue
+        change_id = item.get("change_id")
+        for field in ["change_id", "canonical_name_hint", "change_type", "to_state_hint", "continuity_scope"]:
+            if not item.get(field):
+                issues.append(f"appearance_state_change {change_id or ''} 缺少字段：{field}")
+        if item.get("change_type") not in ALLOWED_APPEARANCE_CHANGE_TYPES:
+            issues.append(f"appearance_state_change {change_id} change_type 非法：{item.get('change_type')}")
+        seg = item.get("segment_id")
+        if seg and str(seg) not in segment_ids:
+            issues.append(f"appearance_state_change {change_id} 引用了不存在的 segment_id：{seg}")
+        line = item.get("voice_line_id")
+        if line and str(line) not in voice_line_ids:
+            issues.append(f"appearance_state_change {change_id} 引用了不存在的 voice_line_id：{line}")
+        vu = item.get("visual_unit_id")
+        if vu and str(vu) not in visual_unit_ids:
+            issues.append(f"appearance_state_change {change_id} 引用了不存在的 visual_unit_id：{vu}")
+        if not isinstance(item.get("wearable_props_hint", []), list):
+            issues.append(f"appearance_state_change {change_id} wearable_props_hint 必须为数组。")
 
 
 def _validate_video_units(items: list[dict[str, Any]], voice_line_ids: set[str], issues: list[str]) -> None:
