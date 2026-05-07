@@ -80,7 +80,8 @@ class LLMClient:
         except Exception as exc:
             if repair_callback is None:
                 raise
-            return repair_callback(text, str(exc))
+            repaired = repair_callback(text, str(exc))
+            return prompt_guard.remove_internal_output_fields(repaired)
 
 
 def parse_json_from_text(text: str) -> dict[str, Any]:
@@ -100,4 +101,4 @@ def parse_json_from_text(text: str) -> dict[str, Any]:
 
     if not isinstance(value, dict):
         raise ValueError("LLM output JSON must be an object")
-    return value
+    return prompt_guard.remove_internal_output_fields(value)
