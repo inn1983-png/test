@@ -22,7 +22,7 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
     if stride != max(1, window_size - 1):
         issues.append("stride must equal window_size - 1")
 
-    for key in ("final_audio_path", "video_plan_path", "resume_manifest_path"):
+    for key in ("final_audio_path", "video_plan_path", "prompt_manifest_path", "resume_manifest_path"):
         value = data.get(key)
         if not isinstance(value, str) or not value:
             issues.append(f"{key} is required")
@@ -42,9 +42,15 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             if int(seg.get("segment_index") or -1) != expected_index:
                 issues.append(f"video_segments[{idx}] segment_index must be {expected_index}")
             expected_index += 1
-            for key in ("segment_id", "audio_source_path", "output_clip_path", "status", "ltx_prompt", "negative_prompt", "motion_policy"):
+            for key in ("segment_id", "segment_role", "audio_source_path", "output_clip_path", "status", "ltx_prompt", "negative_prompt", "motion_policy", "prompt_parts"):
                 if not seg.get(key):
                     issues.append(f"video_segments[{idx}] missing {key}")
+            if seg.get("segment_role") not in {"single", "first", "middle", "last"}:
+                issues.append(f"video_segments[{idx}] segment_role invalid")
+            prompt_parts = seg.get("prompt_parts") if isinstance(seg.get("prompt_parts"), dict) else {}
+            for part_key in ("base_video_prompt", "segment_role_prompt", "window_action_prompt", "audio_acting_prompt", "final_ltx_prompt"):
+                if not prompt_parts.get(part_key):
+                    issues.append(f"video_segments[{idx}] prompt_parts missing {part_key}")
             frame_ids = seg.get("frame_ids")
             image_paths = seg.get("image_paths")
             seg_window_size = int(seg.get("window_size") or window_size or 0)
@@ -56,6 +62,8 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
                 for image_idx, image_path in enumerate(image_paths, start=1):
                     if not isinstance(image_path, str) or not image_path:
                         issues.append(f"video_segments[{idx}] image_paths[{image_idx}] is empty")
+                    elif not Path(image_path).exists():
+                        issues.append(f"video_segments[{idx}] image_paths[{image_idx}] does not exist")
             if idx > 1 and isinstance(frame_ids, list) and previous_last_frame and frame_ids:
                 if frame_ids[0] != previous_last_frame:
                     issues.append(f"video_segments[{idx}] first frame must equal previous segment last frame for overlap continuity")
