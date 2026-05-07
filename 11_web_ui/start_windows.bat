@@ -9,20 +9,7 @@ if "%AI_DRAMA_LLM_BASE_URL%"=="" (
   set "AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8080/v1/chat/completions"
 )
 
-if "%AI_DRAMA_LLM_MODEL%"=="" (
-  echo 请输入你的本地 LLM 模型名。
-  echo 例如：gemma-4-31b-it-q4 / gemma-3-27b / local-model
-  set /p AI_DRAMA_LLM_MODEL=AI_DRAMA_LLM_MODEL: 
-)
-
-if "%AI_DRAMA_LLM_MODEL%"=="" (
-  echo.
-  echo [错误] AI_DRAMA_LLM_MODEL 不能为空。
-  echo 请重新运行本脚本，并输入你的本地模型名。
-  pause
-  exit /b 1
-)
-
+if "%AI_DRAMA_LLM_MODEL%"=="" set "AI_DRAMA_LLM_MODEL=gemma-4-31B-it-Q4_K_M.gguf"
 if "%AI_DRAMA_LLM_TEMPERATURE%"=="" set "AI_DRAMA_LLM_TEMPERATURE=0.1"
 if "%AI_DRAMA_LLM_TIMEOUT_SEC%"=="" set "AI_DRAMA_LLM_TIMEOUT_SEC=240"
 if "%AI_DRAMA_UI_PORT%"=="" set "AI_DRAMA_UI_PORT=1144"
