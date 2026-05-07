@@ -11,6 +11,14 @@
 筛选原则：
 01 负责提取一切，04 不要简单删除候选，而是先合并，再分级，再决定是否需要参考图。
 
+必须使用 01 的真正理解作为分级依据：story_understanding、story_spine、events、conflicts、high_retention_segments、scene_value_map、visual_risk_report、paragraphs。
+
+asset_importance_score 评分：
+- 90-100：核心主场景，必须稳定。
+- 70-89：重要场景，需要进入主库。
+- 40-69：辅助/子场景，需要记录但不一定做图。
+- 0-39：临时/背景地点，保留但不进入主生图资产。
+
 asset_level 只能使用：
 - main_scene：主场景，反复出现或承载核心戏，必须有全景参考图。
 - sub_scene：主场景的一部分，如门口、桌前、堂下，必须绑定 parent_scene。
@@ -33,6 +41,9 @@ asset_level 只能使用：
       "canonical_scene_name": "稳定场景名",
       "aliases": ["别名"],
       "scene_type": "main_scene/sub_scene/temporary_location/background_place",
+      "asset_importance_score": 0,
+      "importance_reason": "基于 01 story_spine/events/scene_value_map 判断的重要性理由",
+      "source_understanding_basis": ["story_spine", "events", "scene_value_map", "high_retention_segments"],
       "asset_level": "main_scene/sub_scene/temporary/background",
       "needs_reference_image": true,
       "parent_scene": "主场景名；主场景自身可填 self",
