@@ -19,8 +19,10 @@ STAGES: list[dict[str, str]] = [
     {"stage_id": "03B", "name": "character_cards", "prompt_file": "prompts/03B_character_cards.md", "output_file": "03B_character_cards.json"},
     {"stage_id": "03C", "name": "script_usage_binding", "prompt_file": "prompts/03C_script_usage_binding.md", "output_file": "03C_script_usage_binding.json"},
     {"stage_id": "03D", "name": "quality_check", "prompt_file": "prompts/03D_quality_check.md", "output_file": "03D_quality_check.json"},
+    {"stage_id": "03E", "name": "asset_review", "prompt_file": "prompts/03E_asset_review.md", "output_file": "03E_asset_review.json"},
 ]
 STAGE_INDEX = {stage["stage_id"]: index for index, stage in enumerate(STAGES)}
+REVIEW_STAGE_ID = "03E"
 
 
 def _module_dir() -> Path:
@@ -53,14 +55,21 @@ def initial_context() -> dict[str, dict[str, Any]]:
 
 def _source_summary(novel_analysis: dict[str, Any], script: dict[str, Any]) -> dict[str, Any]:
     return {
-        "from_01": {
-            "candidate_characters": novel_analysis.get("candidate_characters", []),
-            "paragraphs": novel_analysis.get("paragraphs", []),
+        "from_01_understanding": {
+            "story_understanding": novel_analysis.get("story_understanding", {}),
+            "story_spine": novel_analysis.get("story_spine", {}),
             "events": novel_analysis.get("events", []) or novel_analysis.get("event_graph", {}).get("events", []),
+            "event_graph": novel_analysis.get("event_graph", {}),
+            "conflicts": novel_analysis.get("conflicts", []),
+            "high_retention_segments": novel_analysis.get("high_retention_segments", []),
             "character_arc_map": novel_analysis.get("character_arc_map", []),
             "visual_risk_report": novel_analysis.get("visual_risk_report", {}),
         },
-        "from_02": {
+        "from_01_candidates": {
+            "candidate_characters": novel_analysis.get("candidate_characters", []),
+            "paragraphs": novel_analysis.get("paragraphs", []),
+        },
+        "from_02_script": {
             "segments": script.get("segments", []),
             "character_name_usage": script.get("character_name_usage", []),
             "visual_dramatic_units": script.get("visual_dramatic_units", []),
@@ -75,11 +84,13 @@ def build_stage_payload(stage_id: str, novel_analysis: dict[str, Any], script: d
     if stage_id == "03A":
         payload: dict[str, Any] = {"source": source, "task": "合并同一角色的不同称呼，输出别名归并计划。禁止按年龄、身份、昵称、职务拆新角色。"}
     elif stage_id == "03B":
-        payload = {"source": source, "alias_merge_plan": outputs["03A"], "task": "生成稳定角色卡。只做角色资产标准化，不生成图片、分镜、图像提示词。"}
+        payload = {"source": source, "alias_merge_plan": outputs["03A"], "task": "生成稳定角色卡、资产分级、重要性评分和参考图计划。只做角色资产标准化，不生成图片、分镜、图像提示词。"}
     elif stage_id == "03C":
         payload = {"source": source, "characters": outputs["03B"].get("characters", []), "task": "把角色库绑定到 02 剧本 usage，输出 script_usage_map 和覆盖报告，服务 06 单帧分镜引用稳定角色名。"}
     elif stage_id == "03D":
         payload = {"source": source, "stage_outputs": outputs, "task": "总检角色库是否去重正确、证据充分、描述稳定、不串脸、不污染，并可指定 retry_stages。"}
+    elif stage_id == "03E":
+        payload = {"source": source, "stage_outputs": outputs, "task": "站在 06 单帧分镜角度进行资产复核。必须使用 01 story_understanding/story_spine/events/conflicts 判断遗漏、误合并、误分级、过度资产化，并输出 downstream_readiness_for_06。"}
     else:
         raise ValueError(stage_id)
     if final_revision_context:
@@ -99,10 +110,8 @@ def _run_one_stage(client: Any, stage: dict[str, str], novel_analysis: dict[str,
     current_output: dict[str, Any] | None = None
     quality: dict[str, Any] | None = None
     for attempt in range(1, max_retries + 2):
-        if attempt == 1:
-            current_output = _complete_json(client, system_prompt, payload)
-        else:
-            current_output = _complete_json(client, system_prompt, quality_checker.build_revision_payload(stage_id, payload, current_output or {}, quality or {}))
+        revision_payload = payload if attempt == 1 else quality_checker.build_revision_payload(stage_id, payload, current_output or {}, quality or {})
+        current_output = _complete_json(client, system_prompt, revision_payload)
         current_output.setdefault("schema_version", SCHEMA_VERSION)
         current_output.setdefault("stage", stage["name"])
         current_output["status"] = "llm"
@@ -123,10 +132,13 @@ def _run_stage_range(client: Any, novel_analysis: dict[str, Any], script: dict[s
     return [_run_one_stage(client, stage, novel_analysis, script, outputs, output_dir, max_retries, final_revision_context) for stage in STAGES[start_index:]]
 
 
-def _extract_retry_stage_ids(stage_d_output: dict[str, Any]) -> list[str]:
-    quality_report = stage_d_output.get("quality_report", {}) if isinstance(stage_d_output, dict) else {}
-    retry_stages = quality_report.get("retry_stages", []) if isinstance(quality_report, dict) else []
-    return [stage_id for stage_id in retry_stages if stage_id in STAGE_INDEX and stage_id != "03D"]
+def _extract_retry_stage_ids(outputs: dict[str, Any]) -> list[str]:
+    retry_stage_ids: list[str] = []
+    for stage_id, report_key in [("03D", "quality_report"), ("03E", "review_report")]:
+        report = outputs.get(stage_id, {}).get(report_key, {}) if isinstance(outputs.get(stage_id), dict) else {}
+        if isinstance(report, dict):
+            retry_stage_ids.extend(report.get("retry_stages", []) or [])
+    return [stage_id for stage_id in retry_stage_ids if stage_id in STAGE_INDEX and stage_id != REVIEW_STAGE_ID]
 
 
 def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], output_dir: str | Path, max_retries: int = DEFAULT_MAX_RETRIES, max_final_revision_rounds: int = DEFAULT_MAX_FINAL_REVISION_ROUNDS) -> dict[str, Any]:
@@ -137,12 +149,13 @@ def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], outpu
     stage_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, 0, max_retries)
     final_revision_rounds = []
     for round_index in range(1, max_final_revision_rounds + 1):
-        retry_stage_ids = _extract_retry_stage_ids(outputs.get("03D", {}))
+        retry_stage_ids = _extract_retry_stage_ids(outputs)
         if not retry_stage_ids:
             break
         start_index = min(STAGE_INDEX[stage_id] for stage_id in retry_stage_ids)
-        quality_report = outputs.get("03D", {}).get("quality_report", {})
-        final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_report, "instruction": "03D 总检要求重跑。请从最早问题阶段修正，并保持字段完整。"}
+        review_context = outputs.get("03E", {}).get("review_report", {})
+        quality_context = outputs.get("03D", {}).get("quality_report", {})
+        final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_context, "review_report": review_context, "instruction": "03D/03E 要求重跑。请从最早问题阶段修正，并保持字段完整。"}
         rerun_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, start_index, max_retries, final_revision_context)
         final_revision_rounds.append({"round": round_index, "retry_stage_ids": retry_stage_ids, "rerun_status": rerun_status})
         stage_status.extend(rerun_status)
@@ -151,10 +164,11 @@ def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], outpu
 
 def merge_stage_outputs(novel_analysis: dict[str, Any], script: dict[str, Any], config: dict[str, Any], stage_result: dict[str, Any]) -> dict[str, Any]:
     outputs = stage_result["outputs"]
-    a, b, c, d = outputs["03A"], outputs["03B"], outputs["03C"], outputs["03D"]
+    a, b, c, d, e = outputs["03A"], outputs["03B"], outputs["03C"], outputs["03D"], outputs["03E"]
     latest_status_by_stage = {item["stage_id"]: item for item in stage_result["stage_status"]}
     stage_scores = {stage_id: (item.get("quality") or {}).get("score") for stage_id, item in latest_status_by_stage.items()}
     quality_report = d.get("quality_report", {}) if isinstance(d.get("quality_report", {}), dict) else {}
+    review_report = e.get("review_report", {}) if isinstance(e.get("review_report", {}), dict) else {}
     characters = b.get("characters", [])
     alias_index = {}
     for item in characters or []:
@@ -179,16 +193,22 @@ def merge_stage_outputs(novel_analysis: dict[str, Any], script: dict[str, Any], 
         "alias_index": alias_index,
         "character_script_usage": c.get("script_usage_map", []),
         "coverage_report": c.get("coverage_report", {}),
+        "asset_review_report": review_report,
+        "downstream_readiness_for_06": e.get("downstream_readiness_for_06", {}),
+        "main_assets_for_06": e.get("main_assets_for_06", []),
+        "optional_assets_for_06": e.get("optional_assets_for_06", []),
+        "do_not_reference_as_main_asset": e.get("do_not_reference_as_main_asset", []),
+        "upstream_blocking_issues": e.get("upstream_blocking_issues", []),
         "risk_report": d.get("risk_report", b.get("risk_report", {})),
         "evidence_index": d.get("evidence_index", []),
         "revision_plan": d.get("revision_plan", {}),
-        "warnings": d.get("warnings", []),
+        "warnings": list(d.get("warnings", [])) + list(e.get("warnings", [])),
         "quality_report": {**quality_report, "stage_scores": stage_scores},
         "notes": ["03 只输出稳定角色库，供 06 单帧分镜引用；不生成图片、不生成分镜、不生成图像提示词。"],
         "config": config,
     }
     validation = schema_validator.validate_final_output(data)
-    needs_review = any(item.get("status") != "success" for item in latest_status_by_stage.values()) or bool(quality_report.get("needs_retry")) or not validation["passed"]
+    needs_review = any(item.get("status") != "success" for item in latest_status_by_stage.values()) or bool(quality_report.get("needs_retry")) or bool(review_report.get("needs_retry")) or not validation["passed"]
     data["schema_validation"] = validation
     data["quality_report"] = {**data["quality_report"], "needs_review": needs_review, "schema_validation_passed": validation["passed"], "schema_validation_issues": validation["issues"]}
     data["status"] = "needs_review" if needs_review else "success"
