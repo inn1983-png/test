@@ -13,8 +13,11 @@ REQUIRED_BY_STAGE = {
 
 REQUIRED_PROP_FIELDS = [
     "prop_id", "canonical_prop_name", "aliases", "prop_type", "owner_character",
-    "usage_function", "appearance", "material", "risk_notes", "source_evidence", "usage_in_script"
+    "usage_function", "appearance", "material", "risk_notes", "source_evidence", "usage_in_script",
+    "asset_level", "needs_reference_image", "reference_image_plan"
 ]
+
+VALID_ASSET_LEVELS = {"key_prop", "action_prop", "background_object", "mentioned_only"}
 
 
 def _non_empty(value: Any) -> bool:
@@ -42,6 +45,16 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
             if "prompt" in item or "image_prompt" in item:
                 issues.append(f"道具 {item.get('canonical_prop_name', idx)} 含图像提示词字段，越界")
                 score -= 20
+            name = str(item.get("canonical_prop_name", idx))
+            if item.get("asset_level") not in VALID_ASSET_LEVELS:
+                issues.append(f"道具 {name} asset_level 非法：{item.get('asset_level')}")
+                score -= 10
+            if item.get("asset_level") == "key_prop" and item.get("needs_reference_image") is not True:
+                issues.append(f"关键道具必须 needs_reference_image=true：{name}")
+                score -= 10
+            if item.get("asset_level") in {"background_object", "mentioned_only"} and item.get("needs_reference_image") is True:
+                issues.append(f"背景/仅提及道具不建议强制参考图：{name}")
+                score -= 6
     if stage_id == "05D":
         qr = data.get("quality_report", {}) if isinstance(data.get("quality_report"), dict) else {}
         if qr.get("needs_retry") and not qr.get("retry_stages"):
