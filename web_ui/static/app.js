@@ -101,11 +101,12 @@ async function refreshAll() {
   if (state.currentJob) {
     const data = await api(`/api/jobs/${state.currentJob.id}/snapshot`);
     state.currentSnapshot = data.snapshot;
-    renderSnapshot();
+    await renderSnapshot();
   } else {
     renderTimeline();
     renderRetryCenter([]);
     renderStoryboardWorkspace(null);
+    renderAssetCardGrid(null);
   }
 }
 
@@ -181,10 +182,10 @@ function connectEvents(jobId) {
     $("liveLog").textContent = state.logLines.join("\n");
     $("liveLog").scrollTop = $("liveLog").scrollHeight;
   });
-  state.eventSource.addEventListener("snapshot", (ev) => {
+  state.eventSource.addEventListener("snapshot", async (ev) => {
     const event = JSON.parse(ev.data);
     state.currentSnapshot = event.payload;
-    renderSnapshot();
+    await renderSnapshot();
   });
   state.eventSource.addEventListener("job_started", (ev) => {
     const event = JSON.parse(ev.data);
@@ -209,14 +210,13 @@ function updateJobMini() {
   if (!state.currentJob) {
     $("currentJobMini").textContent = "暂无任务";
     $("metricJob").textContent = "无";
-    $("metricJobSub") && ($("metricJobSub").textContent = "未运行");
     return;
   }
   $("currentJobMini").innerHTML = `<strong>${state.currentJob.id}</strong><br>${badge(state.currentJob.status)}<br><span class="muted">${state.currentJob.run_dir}</span>`;
   $("metricJob").textContent = state.currentJob.id;
 }
 
-function renderSnapshot() {
+async function renderSnapshot() {
   const snap = state.currentSnapshot;
   if (!snap) return;
   const issues = collectIssues(snap.modules || []);
@@ -224,14 +224,15 @@ function renderSnapshot() {
   $("metricOutputs").textContent = (snap.important_outputs || []).length;
   $("metricIssues").textContent = issues.length;
   const heroBadge = $("heroStatusBadge");
-  if (heroBadge) heroBadge.outerHTML = badge(snap.summary_status).replace("badge", "badge") .replace(">", ` id="heroStatusBadge">`);
+  if (heroBadge) heroBadge.outerHTML = badge(snap.summary_status).replace("badge", "badge").replace(">", ` id="heroStatusBadge">`);
   renderProgress(snap.modules || []);
   renderTimeline(snap.modules || []);
   renderStages(snap.modules || []);
   renderOutputs(snap.important_outputs || []);
   renderAssetSummaries(snap);
   renderRetryCenter(issues);
-  renderStoryboardWorkspace(snap);
+  await renderAssetCardGrid(snap);
+  await renderStoryboardWorkspace(snap);
 }
 
 function renderProgress(modules) {
@@ -285,18 +286,12 @@ function renderStages(modules) {
 function collectIssues(modules) {
   const issues = [];
   for (const m of modules) {
-    if (["failed", "blocked"].includes(m.status)) {
-      issues.push({ title: `${m.name} ${statusLabel(m.status)}`, detail: m.message || "模块未通过", level: "problem" });
-    }
+    if (["failed", "blocked"].includes(m.status)) issues.push({ title: `${m.name} ${statusLabel(m.status)}`, detail: m.message || "模块未通过", level: "problem" });
     for (const s of m.stages || []) {
-      if (s.passed === false || Number(s.issues_count || 0) > 0) {
-        issues.push({ title: `${m.name} / ${s.stage_id || s.name}`, detail: `评分 ${s.score ?? "-"}，问题 ${s.issues_count ?? 0} 个`, level: "problem", path: s.path });
-      }
+      if (s.passed === false || Number(s.issues_count || 0) > 0) issues.push({ title: `${m.name} / ${s.stage_id || s.name}`, detail: `评分 ${s.score ?? "-"}，问题 ${s.issues_count ?? 0} 个`, level: "problem", path: s.path });
     }
     const q = m.quality || {};
-    if (q.needs_review || q.needs_retry || q.schema_validation_passed === false) {
-      issues.push({ title: `${m.name} 总检需复核`, detail: JSON.stringify(q).slice(0, 220), level: "problem" });
-    }
+    if (q.needs_review || q.needs_retry || q.schema_validation_passed === false) issues.push({ title: `${m.name} 总检需复核`, detail: JSON.stringify(q).slice(0, 220), level: "problem" });
   }
   return issues;
 }
@@ -310,7 +305,7 @@ function renderRetryCenter(issues) {
   }
   wrap.innerHTML = issues.map((item) => `
     <div class="retry-item ${item.level}">
-      <div class="retry-title">${item.title}</div>
+      <div class="retry-title">${escapeHtml(item.title)}</div>
       <div class="muted">${escapeHtml(item.detail || "")}</div>
       ${item.path ? `<button class="btn small" onclick="previewFile('${item.path}')">查看问题文件</button>` : ""}
     </div>
@@ -325,8 +320,8 @@ function renderOutputs(outputs) {
   $("outputList").innerHTML = outputs.map((o) => `
     <div class="output-item">
       <div>
-        <div class="output-name">${o.name}</div>
-        <div class="output-path">${o.path}</div>
+        <div class="output-name">${escapeHtml(o.name)}</div>
+        <div class="output-path">${escapeHtml(o.path)}</div>
       </div>
       <button class="btn small" onclick="previewFile('${o.path}')">预览</button>
     </div>
@@ -336,41 +331,162 @@ function renderOutputs(outputs) {
 function renderAssetSummaries(snap) {
   const outputs = snap.important_outputs || [];
   const has = (suffix) => outputs.some((o) => o.path.endsWith(suffix));
-  $("characterSummary").textContent = has("03_character_system/characters.json") ? "角色资产已生成。后续这里显示 canonical_name、costume_variants、定妆照和造型照。" : "等待 03 输出";
-  $("sceneSummary").textContent = has("04_scene_system/scenes.json") ? "场景资产已生成。后续这里显示主场景、子场景、父场景和参考图。" : "等待 04 输出";
-  $("propSummary").textContent = has("05_prop_system/props.json") ? "道具资产已生成。后续这里显示 wearable_policy、绑定角色和参考图。" : "等待 05 输出";
+  $("characterSummary").textContent = has("03_character_system/characters.json") ? "角色资产已生成，可在下方编辑每个角色提示词。" : "等待 03 输出";
+  $("sceneSummary").textContent = has("04_scene_system/scenes.json") ? "场景资产已生成，可在下方编辑每个场景提示词。" : "等待 04 输出";
+  $("propSummary").textContent = has("05_prop_system/props.json") ? "道具资产已生成，可在下方编辑每个道具提示词。" : "等待 05 输出";
 }
 
-function renderStoryboardWorkspace(snap) {
+async function loadJsonFromRun(relPath) {
+  const rel = currentRunDir();
+  if (!rel) return null;
+  try {
+    const data = await api(`/api/file?path=${encodeURIComponent(`${rel}/${relPath}`)}`);
+    return data.type === "json" ? data.content : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function renderAssetCardGrid(snap) {
+  const wrap = $("assetCardGrid");
+  if (!wrap) return;
+  if (!snap) {
+    wrap.innerHTML = `<div class="muted">运行 03/04/05 后，这里会显示可编辑资产卡。</div>`;
+    return;
+  }
+  const [characters, scenes, props] = await Promise.all([
+    loadJsonFromRun("03_character_system/characters.json"),
+    loadJsonFromRun("04_scene_system/scenes.json"),
+    loadJsonFromRun("05_prop_system/props.json"),
+  ]);
+  const cards = [];
+  for (const item of characters?.characters || []) cards.push(assetCard("character", item.canonical_name, item.asset_level, item.default_costume_id, item.appearance || item.costume || "", buildCharacterPrompt(item)));
+  for (const item of scenes?.scenes || []) cards.push(assetCard("scene", item.canonical_scene_name, item.asset_level, item.parent_scene || "", item.reference_image_plan || "", buildScenePrompt(item)));
+  for (const item of props?.props || []) cards.push(assetCard("prop", item.canonical_prop_name, item.asset_level, item.wearable_policy || "", item.reference_image_plan || "", buildPropPrompt(item)));
+  wrap.innerHTML = cards.length ? cards.join("") : `<div class="muted">暂无资产卡。请先运行 03/04/05。</div>`;
+  restorePromptValues();
+}
+
+function assetCard(type, title, level, meta, desc, prompt) {
+  const key = `asset:${type}:${title}`;
+  return `
+    <div class="editable-card">
+      <div class="editable-card-header">
+        <div>
+          <div class="editable-title">${escapeHtml(title || "未命名资产")}</div>
+          <div class="editable-subtitle">${typeLabel(type)} · ${escapeHtml(level || "未分级")}</div>
+        </div>
+        ${badge("pending")}
+      </div>
+      <div class="card-meta-grid">
+        <div class="card-meta"><span>引用信息</span><strong>${escapeHtml(meta || "-")}</strong></div>
+        <div class="card-meta"><span>生成状态</span><strong>等待 07 接入</strong></div>
+      </div>
+      <div class="image-slot">图片预览位</div>
+      <textarea class="prompt-editor" data-prompt-key="${escapeAttr(key)}">${escapeHtml(prompt || desc || "")}</textarea>
+      <div class="card-actions">
+        <button class="btn small" onclick="savePromptDraft('${escapeAttr(key)}')">保存提示词</button>
+        <button class="btn small primary" onclick="regenerateImage('${escapeAttr(key)}')">重新生成图片</button>
+      </div>
+    </div>
+  `;
+}
+
+function typeLabel(type) {
+  return { character: "角色资产", scene: "场景资产", prop: "道具资产", frame: "分镜帧" }[type] || type;
+}
+
+function buildCharacterPrompt(item) {
+  return [
+    `角色：${item.canonical_name || ""}`,
+    `外观：${toText(item.appearance)}`,
+    `服装版本：${toText(item.costume_variants || item.costume)}`,
+    `定妆照需求：${toText(item.reference_image_plan)}`,
+    "风格：电视剧电影真人写实，中国古代语境，真实光照，清晰细节，避免现代物品。",
+  ].join("\n");
+}
+function buildScenePrompt(item) {
+  return [`场景：${item.canonical_scene_name || ""}`, `层级：${item.asset_level || ""}`, `参考图计划：${toText(item.reference_image_plan)}`, "风格：古代中国影视剧真实场景，空间结构清晰，光影自然，无现代元素。"].join("\n");
+}
+function buildPropPrompt(item) {
+  return [`道具：${item.canonical_prop_name || ""}`, `道具级别：${item.asset_level || ""}`, `穿戴策略：${item.wearable_policy || ""}`, `参考图计划：${toText(item.reference_image_plan)}`, "风格：真实材质，古代器物，中国古风影视质感，无现代工业痕迹。"].join("\n");
+}
+
+async function renderStoryboardWorkspace(snap) {
   const wrap = $("storyboardWorkspace");
   if (!wrap) return;
   if (!snap) {
-    wrap.innerHTML = `<div class="muted">暂无分镜数据。运行 06_storyboard 后这里会显示分镜工作台。</div>`;
+    wrap.innerHTML = `<div class="muted">暂无分镜数据。运行 06_storyboard 后这里会显示分镜卡片。</div>`;
     return;
   }
-  const output = (snap.important_outputs || []).find((o) => o.path.endsWith("06_storyboard/storyboard.json"));
-  if (!output) {
+  const storyboard = await loadJsonFromRun("06_storyboard/storyboard.json");
+  const frames = storyboard?.frames || [];
+  if (!frames.length) {
     wrap.innerHTML = `<div class="muted">等待 06_storyboard/storyboard.json 输出。</div>`;
     return;
   }
-  wrap.innerHTML = `
-    <div class="storyboard-card">
-      <div class="frame-index">当前阶段</div>
-      <div class="frame-title">单帧分镜 JSON 已生成</div>
-      <div class="frame-meta">${output.path}<br>大小 ${output.size || 0} bytes</div>
-      <button class="btn small" onclick="previewFile('${output.path}')">打开分镜 JSON</button>
-    </div>
-    <div class="storyboard-card">
-      <div class="frame-index">后续升级</div>
-      <div class="frame-title">图文分镜表</div>
-      <div class="frame-meta">07 图片接入后展示 frame_id、角色引用、场景图、角色造型图和分镜图。</div>
-    </div>
-    <div class="storyboard-card">
-      <div class="frame-index">连续性</div>
-      <div class="frame-title">四宫格预览组</div>
-      <div class="frame-meta">读取 four_grid_preview_groups，展示 1–4、4–7、7–10 的连续性检查。</div>
+  wrap.classList.add("editable-card-grid");
+  wrap.innerHTML = frames.slice(0, 80).map((frame) => frameCard(frame)).join("");
+  restorePromptValues();
+}
+
+function frameCard(frame) {
+  const id = frame.frame_id || `frame_${frame.sequence_index || ""}`;
+  const key = `frame:${id}`;
+  const characters = (frame.characters || []).map((c) => `${c.canonical_name || ""}/${c.costume_id || ""}`).filter(Boolean).join("，");
+  const scene = frame.scene?.canonical_scene_name || frame.canonical_scene_name || "";
+  const prompt = [
+    `分镜：${id}`,
+    `场景：${scene}`,
+    `角色：${characters}`,
+    `动作：${frame.story_action || frame.action || ""}`,
+    `构图：${frame.composition_notes || ""}`,
+    `连续性：${frame.continuity_notes || ""}`,
+    "风格：电视剧电影真人写实，中国古代语境，角色服装与资产库一致，画面稳定，避免现代物品。",
+  ].join("\n");
+  return `
+    <div class="editable-card storyboard-card">
+      <div class="editable-card-header">
+        <div>
+          <div class="editable-title">${escapeHtml(id)}</div>
+          <div class="editable-subtitle">第 ${frame.sequence_index ?? "-"} 帧 · ${escapeHtml(scene || "未绑定场景")}</div>
+        </div>
+        ${badge("pending")}
+      </div>
+      <div class="card-meta-grid">
+        <div class="card-meta"><span>角色</span><strong>${escapeHtml(characters || "-")}</strong></div>
+        <div class="card-meta"><span>图像状态</span><strong>等待 07 接入</strong></div>
+      </div>
+      <div class="image-slot">分镜图预览位</div>
+      <textarea class="prompt-editor" data-prompt-key="${escapeAttr(key)}">${escapeHtml(prompt)}</textarea>
+      <div class="card-actions">
+        <button class="btn small" onclick="savePromptDraft('${escapeAttr(key)}')">保存提示词</button>
+        <button class="btn small primary" onclick="regenerateImage('${escapeAttr(key)}')">重新生成本帧</button>
+      </div>
     </div>
   `;
+}
+
+function savePromptDraft(key) {
+  const el = document.querySelector(`[data-prompt-key="${cssEscape(key)}"]`);
+  if (!el) return;
+  localStorage.setItem(`ai_drama_prompt:${key}`, el.value);
+  toast(`已保存：${key}`);
+}
+function restorePromptValues() {
+  document.querySelectorAll("[data-prompt-key]").forEach((el) => {
+    const key = el.dataset.promptKey;
+    const saved = localStorage.getItem(`ai_drama_prompt:${key}`);
+    if (saved !== null) el.value = saved;
+  });
+}
+function regenerateImage(key) {
+  savePromptDraft(key);
+  toast("已保存提示词。07 图片生成模块接入后，这里会触发单项重绘。")
+}
+function toast(message) {
+  console.log(message);
+  alert(message);
 }
 
 function currentRunDir() {
@@ -383,11 +499,8 @@ async function previewFile(path) {
   try {
     const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
     $("previewTitle").textContent = data.path || path;
-    if (data.type === "json") {
-      $("previewContent").textContent = JSON.stringify(data.content, null, 2);
-    } else {
-      $("previewContent").textContent = data.content || `二进制文件，大小 ${data.size || 0} bytes`;
-    }
+    if (data.type === "json") $("previewContent").textContent = JSON.stringify(data.content, null, 2);
+    else $("previewContent").textContent = data.content || `二进制文件，大小 ${data.size || 0} bytes`;
     $("previewModal").classList.remove("hidden");
   } catch (err) {
     $("previewTitle").textContent = "预览失败";
@@ -396,11 +509,19 @@ async function previewFile(path) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+function toText(value) {
+  if (value === null || value === undefined) return "";
+  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
 }
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+}
+function escapeAttr(value) { return escapeHtml(value).replace(/'/g, "&#39;"); }
+function cssEscape(value) { return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"'); }
 
 window.previewFile = previewFile;
+window.savePromptDraft = savePromptDraft;
+window.regenerateImage = regenerateImage;
 init().catch((err) => {
   console.error(err);
   $("liveLog").textContent = String(err);
