@@ -31,6 +31,15 @@
     { id: '10_final_assembly', nav: '最终合成', title: '最终合成系统', kind: 'assembly', desc: '拼接视频、对齐音频字幕、导出最终成片。', stages: [['输入检查','检查音频和视频片段。'],['视频准备','准备片段列表。'],['音频字幕对齐','对齐音频和字幕。'],['最终导出','导出最终视频。']]}
   ];
 
+  function appState() {
+    try { return state || {}; } catch (_) { return window.state || {}; }
+  }
+
+  function runDirNow() {
+    const s = appState();
+    return s.currentSnapshot?.run_dir || s.currentJob?.run_dir || '';
+  }
+
   function renderSystem(system) {
     const target = document.getElementById('systemWorkbenchRoot');
     if (!target) return;
@@ -52,7 +61,7 @@
       </div>
       <div class="panel live-stage-panel">
         <div class="live-stage-header">
-          <div><h2>实时阶段看板</h2><p>跑到“故事理解”就高亮故事理解；跑到“候选资产提取”就高亮候选资产提取。每一步后面直接显示该阶段输出摘要。</p></div>
+          <div><h2>制作指挥台</h2><p>跑到“故事理解”就高亮故事理解；跑到“候选资产提取”就高亮候选资产提取。每一步后面直接显示该阶段输出摘要。</p></div>
           <div class="live-stage-legend"><span>蓝色 = 正在运行</span><span>绿色 = 已有输出</span><span>红色 = 失败/需处理</span></div>
         </div>
         <div id="liveStageBoard" class="live-stage-board"></div>
@@ -75,8 +84,8 @@
   async function refreshExecutionCards(system) {
     window.refreshCurrentExecutionCards = () => refreshExecutionCards(system);
     const grid = document.getElementById('executionCardGrid');
-    if (!grid || !window.state) return;
-    const runDir = state.currentSnapshot?.run_dir || state.currentJob?.run_dir || '';
+    if (!grid) return;
+    const runDir = runDirNow();
     if (!runDir) return;
     if (system.kind === 'image') await renderImageCards(grid, runDir);
     if (system.kind === 'audio') await renderAudioCards(grid, runDir);
@@ -84,10 +93,7 @@
     if (system.kind === 'assembly') await renderAssemblyCards(grid, runDir);
   }
 
-  async function getJson(path) {
-    try { const data = await api(`/api/file?path=${encodeURIComponent(path)}`); return data.type === 'json' ? data.content : null; }
-    catch (_) { return null; }
-  }
+  async function getJson(path) { try { const data = await api(`/api/file?path=${encodeURIComponent(path)}`); return data.type === 'json' ? data.content : null; } catch (_) { return null; } }
 
   function card(title, desc, rows, actionPath) {
     return `<div class="system-step-card"><h3>${escapeHtml(title)}</h3><p>${escapeHtml(desc || '')}</p><div class="step-meta-list">${rows.map(r => `<span>${escapeHtml(r)}</span>`).join('')}</div>${actionPath ? `<div class="system-action-row"><button class="btn small" onclick="previewFile('${escapeAttr(actionPath)}')">查看文件</button></div>` : ''}</div>`;
@@ -160,7 +166,8 @@
   const oldConnect = window.connectEvents || connectEvents;
   window.connectEvents = connectEvents = function(jobId) {
     oldConnect(jobId);
-    const es = state.eventSource;
+    const s = appState();
+    const es = s.eventSource;
     if (!es) return;
     es.addEventListener('log', ev => {
       const event = JSON.parse(ev.data);
