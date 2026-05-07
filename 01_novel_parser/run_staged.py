@@ -30,25 +30,30 @@ def main() -> int:
         novel_text = read_novel_text()
         _, output_dir = base_module.get_runtime_module_dirs(MODULE_NAME)
 
-        stage_result = stage_runner.run_scaffold_stages(novel_text, output_dir)
+        stage_result = stage_runner.run_llm_stages(novel_text, output_dir)
         data = stage_runner.merge_stage_outputs(novel_text, config, stage_result)
 
         base_module.write_json_key_output(
             MODULE_NAME,
             KEY_OUTPUT,
             data,
-            description="小说解析关键输出：01A–01F 分阶段生成的全文理解、故事质量控制、事件图谱、生产预判、全量候选资产与原文证据链。",
+            description="小说解析关键输出：01A–01F 分阶段真实 LLM 生成的全文理解、故事质量控制、事件图谱、生产预判、全量候选资产与原文证据链。",
         )
-        base_module.write_placeholder_output(MODULE_NAME, {
-            "module": MODULE_NAME,
-            "status": "scaffold",
-            "message": f"小说解析系统已按 01A–01F 阶段框架运行，关键输出已生成：{KEY_OUTPUT}",
-            "key_output": KEY_OUTPUT,
-            "schema_version": SCHEMA_VERSION,
-            "stage_mode": stage_result["stage_mode"],
-            "stage_status": stage_result["stage_status"],
-            "config": config,
-        })
+        base_module.write_json_key_output(
+            MODULE_NAME,
+            "novel_meta.json",
+            {
+                "module": MODULE_NAME,
+                "schema_version": SCHEMA_VERSION,
+                "status": data.get("status"),
+                "stage_mode": data.get("stage_mode"),
+                "stage_status": data.get("stage_status", []),
+                "final_revision_rounds": data.get("final_revision_rounds", []),
+                "quality_report": data.get("quality_report", {}),
+                "schema_validation": data.get("schema_validation", {}),
+            },
+            description="小说解析元信息：阶段状态、评分、重跑记录与 schema 校验。",
+        )
         print(f"{DISPLAY_NAME} finished. key output: {KEY_OUTPUT}")
         return 0
     finally:
