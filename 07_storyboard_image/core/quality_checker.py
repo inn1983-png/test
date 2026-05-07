@@ -78,6 +78,13 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(registry.get("entries", []), list):
             issues.append("asset_image_registry.entries 必须为数组")
             score -= 15
+        pollution = report.get("reference_image_pollution", {}) if isinstance(report.get("reference_image_pollution"), dict) else {}
+        if pollution.get("has_pollution"):
+            pollution_issues = pollution.get("pollution_issues", []) or []
+            for pi in pollution_issues:
+                if isinstance(pi, dict):
+                    issues.append(f"参考图污染：{pi.get('message', 'unknown')}")
+            score -= min(30, len(pollution_issues) * 10)
 
     summary = data.get("execution_summary", {}) if isinstance(data.get("execution_summary"), dict) else {}
     if summary.get("failed", 0):

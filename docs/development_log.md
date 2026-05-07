@@ -815,6 +815,321 @@ env_snapshot: 关键环境变量（API Key 脱敏）
 
 ---
 
+# 第一阶段：本地 LLM 无 API Key 支持
+
+01–06 已支持本地 OpenAI-compatible LLM 无 API Key 运行；只有默认云端 DeepSeek 模式才强制要求 AI_DRAMA_LLM_API_KEY。
+
+判断逻辑：
+
+```text
+AI_DRAMA_LLM_BASE_URL 包含 127.0.0.1 / localhost / ::1 / 0.0.0.0 → 允许无 API Key
+AI_DRAMA_LLM_BASE_URL 未设置（使用默认 DeepSeek URL）→ 必须有 API Key
+```
+
+新增文件：
+
+```text
+00_common/llm_config_utils.py
+```
+
+修改文件：
+
+```text
+01_novel_parser/core/llm_client.py
+02_script_writer/core/llm_client.py
+03_character_system/core/llm_client.py
+04_scene_system/core/llm_client.py
+05_prop_system/core/llm_client.py
+06_storyboard/core/llm_client.py
+```
+
+---
+
+# 第二阶段：10 不生成假 mp4
+
+10_final_assembly 在 dry_run 或 ffmpeg 不可用时，不再创建假的 final.mp4，改为创建 final.placeholder.txt 占位说明文件。
+
+核心规则：
+
+```text
+dry_run 或 ffmpeg 不可用时，绝对不创建 final.mp4。
+改为创建 final.placeholder.txt，包含 dry_run 状态、ffmpeg 可用性等信息。
+final_manifest.json 中必须包含 final_video_ready 和 final_video_placeholder_path 字段。
+只有真实 execute 成功且 ffprobe 验证通过时，才允许生成 final.mp4。
+```
+
+schema_validator 规则：
+
+```text
+final_video_ready=true 时，final_video_path 必须存在且必须是有效 mp4，final_video_placeholder_path 必须为 null。
+final_video_ready=false 时，final_video_path 必须为 null，可以有 final_video_placeholder_path。
+```
+
+quality_checker 规则：
+
+```text
+dry_run 生成 placeholder 不算硬失败，但必须标记 final_video_ready=false。
+execute 模式下 final_video_ready=false 才算 needs_review。
+10B dry_run_placeholder 模式必须有 prepared_video_placeholder_path，不能有 prepared_video_path。
+10D dry_run_placeholder 模式必须有 final_video_ready=false、final_video_path=null、final_video_placeholder_path 非空。
+```
+
+Web UI 显示规则：
+
+```text
+final_video_ready=true：显示 final.mp4 可播放。
+final_video_ready=false：显示"最终视频未生成，仅生成占位说明"，并显示 placeholder 内容。
+不把 placeholder 当视频展示。
+snapshot 中新增 final_video_ready 和 final_video_placeholder_path 字段。
+```
+
+修改文件：
+
+```text
+10_final_assembly/core/stage_runner.py
+10_final_assembly/core/schema_validator.py
+10_final_assembly/core/quality_checker.py
+web_ui/server.py
+web_ui/static/app.js
+```
+
+---
+
+# 第三阶段：UI 返工中心
+
+Web UI 新增"返工中心 / Repair Center"标签页，聚合所有模块问题并提供一键重跑按钮。
+
+核心功能：
+
+```text
+聚合 run_status、intermediate JSON、quality_report、schema_validation、retry_plan、upstream_blocking_issues、failed_frames/segments、module_contracts 依赖检查、final_export_not_ready。
+每条问题显示：module、stage_id、status、score、issue_type、issue_message、suggested_action、recommended_from_module、recommended_only_module、can_run_current_module。
+问题类型：missing_dependency、schema_failed、stage_quality_failed、upstream_blocking、image_failed_frames、audio_failed_segments、video_failed_segments、final_export_not_ready。
+阻塞问题（缺上游产物）：当前模块按钮置灰，提示先跑上游，提供"从推荐模块开始跑"按钮。
+可重试问题：提供"重跑当前模块"或"重跑失败帧/段"按钮。
+07 失败帧 → image_retry_scope=failed_frames
+08 失败段 → audio_retry_scope=failed_segments
+09 失败段 → video_retry_scope=failed_segments
+不自动重跑，必须用户点击按钮。
+```
+
+修改文件：
+
+```text
+00_common/repair_index.py
+web_ui/static/index.html
+web_ui/static/app.js
+web_ui/static/styles.css
+```
+
+---
+
+# 第四阶段：09 execute 前置自检
+
+09_video 新增 09PRE_execute_preflight_check 阶段，在 execute 模式下确保 ComfyUI / workflow / ffmpeg / 上游产物就绪后才进入 09B。
+
+核心规则：
+
+```text
+dry_run 模式：只检查 segment plan 结构，不要求 ComfyUI 可访问，不阻塞 09B dry_run。
+execute 模式必须检查：
+  - AI_DRAMA_VIDEO_EXECUTION_MODE 是否为 execute
+  - AI_DRAMA_COMFYUI_BASE_URL 是否可访问
+  - workflow / mapping 文件是否存在
+  - positive_prompt / negative_prompt / output_prefix 节点是否配置
+  - reference image 节点数量是否满足 window_size
+  - 每个 segment 的 image_paths 是否全部存在
+  - final_audio.wav 是否存在
+  - ffmpeg / ffprobe 是否可用
+preflight 不通过：不进入 09B，09B/09C/09D 标记为 blocked。
+failed_checks 每条包含：check_id, status, message, fix_hint。
+```
+
+修改文件：
+
+```text
+09_video/core/stage_runner.py
+09_video/core/quality_checker.py
+web_ui/static/app.js
+```
+
+---
+
+# 第五阶段：一键健康检查
+
+新增 `00_main_controller/health_check.py`，提供一键系统健康检查，并接入 Web UI。
+
+检查内容：
+
+```text
+1. Python 环境：版本、工作目录、00_common 可导入
+2. Pipeline：pipeline.json、模块目录、run_staged.py
+3. Contracts：module_contracts.json、requires/produces
+4. LLM：BASE_URL、MODEL、API Key（本地不要求）、最小测试请求
+5. ComfyUI：BASE_URL 可达性、workflow/mapping 文件
+6. Audio：TTS 根目录、checkpoints、voices.json
+7. Video/Final：ffmpeg、ffprobe
+8. Workspace：projects 可写、shared_assets 可写、项目目录
+```
+
+新增文件：
+
+```text
+00_main_controller/health_check.py
+```
+
+修改文件：
+
+```text
+web_ui/server.py
+web_ui/static/index.html
+web_ui/static/app.js
+```
+
+---
+
+# 第六阶段：UI 只跑模块体验
+
+优化"只跑某个模块"体验，增加依赖检查实时提示和跳过依赖检查选项。
+
+核心功能：
+
+```text
+鼠标悬停模块按钮时，自动调用 /api/module-requirements 检查依赖。
+01_novel_parser 无前置依赖，永远允许只跑。
+依赖已满足：显示"✓ 依赖已满足，可单独运行"。
+依赖缺失：显示缺少哪些上游产物，建议从哪个模块开始跑。
+"跳过依赖检查"复选框：默认关闭，打开后允许带 --skip-dependency-check。
+```
+
+修改文件：
+
+```text
+web_ui/server.py
+web_ui/static/index.html
+web_ui/static/app.js
+web_ui/static/styles.css
+```
+
+---
+
+# 第七阶段：LLM 截断续写
+
+01–06 增加 LLM 截断保护和自动续写策略，不引入死循环。
+
+核心规则：
+
+```text
+当 LLM finish_reason=length 时，不立刻重跑整个阶段。
+标记为 output_truncated，进入 continuation 模式。
+continuation 模式告诉模型：不要重头开始，只继续输出缺失数组元素。
+每个阶段最多续写 2 次。
+超过 2 次仍失败，写入 stage_quality issues：issue_type=llm_output_truncated。
+06_storyboard：frames 必须按 sequence_index 续写。
+02_script_writer：voice_lines / scenes / visual_dramatic_units 可续写。
+所有续写过程写入 llm_traces：continuation_request.json、continuation_raw_response.txt、merged_output.json。
+不破坏原来的 JSON repair fallback。
+```
+
+新增文件：
+
+```text
+00_common/llm_truncation_handler.py
+```
+
+修改文件：
+
+```text
+00_common/llm_streaming.py
+01_novel_parser/core/llm_client.py
+02_script_writer/core/llm_client.py
+03_character_system/core/llm_client.py
+04_scene_system/core/llm_client.py
+05_prop_system/core/llm_client.py
+06_storyboard/core/llm_client.py
+```
+
+---
+
+# 第八阶段：07 参考图污染防护
+
+07_storyboard_image 新增参考图来源校验，防止未声明的参考图路径混入生成流程。
+
+核心规则：
+
+```text
+07C reference_assets 阶段：只允许使用 04_scene_system/scenes.json 和 05_prop_system/props.json 中声明的参考图路径。
+07D storyboard_frame 阶段：只允许使用 07B appearance_manifest 和 07C reference_asset_manifest 中声明的参考图路径。
+发现未声明的参考图路径，标记为 reference_image_pollution。
+不自动删除，但写入 quality_report 和 retry_plan。
+不阻塞流程，但标记 needs_review。
+```
+
+修改文件：
+
+```text
+07_storyboard_image/core/stage_runner.py
+07_storyboard_image/core/quality_checker.py
+```
+
+---
+
+# 第九阶段：08 单句过长预警
+
+08_audio 新增文本长度预检，在 TTS 执行前检测过长的文本行。
+
+核心规则：
+
+```text
+新增 LONG_TEXT_WARNING_CHARS=80 和 LONG_TEXT_REVIEW_CHARS=150 阈值。
+08B 之后、08C 之前运行 build_text_length_review。
+超过 80 字符：warning，建议检查节奏。
+超过 150 字符：needs_review，建议回到 02 拆句。
+提供 suggested_split 建议拆分方案。
+写入 08_text_length_review.json。
+quality_report 新增 text_length_review 字段。
+quality_checker 08B 新增长文本扣分逻辑。
+```
+
+修改文件：
+
+```text
+08_audio/core/stage_runner.py
+08_audio/core/quality_checker.py
+```
+
+---
+
+# 第十阶段：smoke test
+
+新增 `tests/smoke_test_pipeline.py`，验证流水线核心功能不回归。
+
+测试项：
+
+```text
+1. Pipeline JSON 可读性
+2. Module Contracts 可读性
+3. 模块 run_staged.py 存在性
+4. 00_common 模块可导入性
+5. 系统健康检查
+6. Schema Validators 可调用性
+7. LLM 截断处理器
+8. Repair Index 构建功能
+9. 09PRE 阶段存在性
+10. 10 不生成假 MP4
+11. 07 参考图污染检查
+12. 08 文本长度预警
+```
+
+新增文件：
+
+```text
+tests/smoke_test_pipeline.py
+tests/fixtures/minimal_novel.txt
+```
+
+---
+
 # 用户最新明确要求
 
 ```text

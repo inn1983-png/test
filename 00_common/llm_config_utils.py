@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+import os
+
+CLOUD_DEFAULT_BASE_URL = "https://api.deepseek.com/chat/completions"
+
+
+def is_local_base_url(base_url: str) -> bool:
+    if not base_url:
+        return False
+    lower = base_url.lower()
+    return any(h in lower for h in ("127.0.0.1", "localhost", "::1", "0.0.0.0"))
+
+
+def validate_api_key_requirement(base_url: str, api_key: str, module_name: str) -> None:
+    if api_key:
+        return
+    if is_local_base_url(base_url):
+        return
+    if base_url == CLOUD_DEFAULT_BASE_URL or base_url.startswith("https://api."):
+        raise RuntimeError(
+            f"{module_name} 当前使用默认云端 LLM，需要设置 AI_DRAMA_LLM_API_KEY；"
+            "如果你使用本地模型，请设置 AI_DRAMA_LLM_BASE_URL 和 AI_DRAMA_LLM_MODEL。"
+        )
+
+
+def resolve_llm_base_url(env_default: str) -> str:
+    return os.getenv("AI_DRAMA_LLM_BASE_URL", env_default).strip()
+
+
+def resolve_llm_model(env_default: str) -> str:
+    return os.getenv("AI_DRAMA_LLM_MODEL", env_default).strip()
+
+
+def resolve_llm_api_key() -> str:
+    return os.getenv("AI_DRAMA_LLM_API_KEY", "").strip()
+
+
+def resolve_llm_timeout(default: int = 6000) -> int:
+    return int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", str(default)))
+
+
+def resolve_llm_temperature(default: float = 0.1) -> float:
+    return float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", str(default)))

@@ -48,6 +48,16 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
                 if not env.get(key):
                     issues.append(f"execute 模式环境未就绪：{key}=false。")
                     score -= 8
+        long_text_count = 0
+        for seg in segments if isinstance(segments, list) else []:
+            if not isinstance(seg, dict) or _is_silence(seg):
+                continue
+            text = str(seg.get("text") or "")
+            if len(text) > 150:
+                long_text_count += 1
+        if long_text_count:
+            warnings.append(f"08B 有 {long_text_count} 条文本超过 150 字符，TTS 可能截断或质量下降，建议回到 02 拆句。")
+            score -= min(15, long_text_count * 5)
 
     elif stage_id == "08C":
         summary = data.get("execution_summary", {}) if isinstance(data.get("execution_summary"), dict) else {}

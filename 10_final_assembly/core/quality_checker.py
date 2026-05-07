@@ -22,8 +22,14 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
     elif stage_id == "10B":
         if data.get("video_source_mode") not in {"final_video", "concat_clips", "dry_run_placeholder"}:
             issues.append("10B video_source_mode invalid.")
-        if not data.get("prepared_video_path"):
-            issues.append("10B missing prepared_video_path.")
+        if data.get("video_source_mode") == "dry_run_placeholder":
+            if not data.get("prepared_video_placeholder_path"):
+                issues.append("10B dry_run_placeholder mode must have prepared_video_placeholder_path.")
+            if data.get("prepared_video_path"):
+                issues.append("10B dry_run_placeholder mode must not have prepared_video_path.")
+        else:
+            if not data.get("prepared_video_path"):
+                issues.append("10B missing prepared_video_path.")
     elif stage_id == "10C":
         if not data.get("final_audio_path"):
             issues.append("10C missing final_audio_path.")
@@ -32,12 +38,23 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
         if not copied and len(missing) >= 2:
             issues.append("10C found no subtitle.srt or subtitle.ass; allowed, but needs review if subtitles were expected.")
     elif stage_id == "10D":
-        if not data.get("final_video_path"):
-            issues.append("10D missing final_video_path.")
-        if data.get("export_mode") not in {"mux", "burn_subtitles", "skip_existing", "dry_run_placeholder"}:
+        export_mode = data.get("export_mode")
+        if export_mode not in {"mux", "burn_subtitles", "skip_existing", "dry_run_placeholder"}:
             issues.append("10D export_mode invalid.")
-        if data.get("status") not in {"success", "skipped", "needs_review"}:
-            issues.append("10D status invalid.")
+        if export_mode == "dry_run_placeholder":
+            if data.get("final_video_ready") is not False:
+                issues.append("10D dry_run_placeholder must have final_video_ready=false.")
+            if data.get("final_video_path") is not None:
+                issues.append("10D dry_run_placeholder must have final_video_path=null.")
+            if not data.get("final_video_placeholder_path"):
+                issues.append("10D dry_run_placeholder must have final_video_placeholder_path.")
+        else:
+            if not data.get("final_video_path"):
+                issues.append("10D missing final_video_path.")
+            if data.get("final_video_ready") is False:
+                issues.append("10D execute mode with final_video_ready=false indicates export failure.")
+            if data.get("status") not in {"success", "skipped", "needs_review"}:
+                issues.append("10D status invalid.")
 
     score -= min(80, len(issues) * 15)
     passed = score >= 70 and not issues

@@ -80,12 +80,111 @@ def _mark_started(stage_id: str, output_dir: str | Path) -> None:
     stage_status_writer.mark_stage_started("07_storyboard_image", output_dir, stage_id, stage["name"], "stage started")
 
 
+def _validate_reference_sources(
+    reference_asset_manifest: dict[str, Any],
+    image_manifest: dict[str, Any],
+    scenes: dict[str, Any],
+    props: dict[str, Any],
+    appearance_manifest: dict[str, Any],
+) -> dict[str, Any]:
+    declared_scene_refs: set[str] = set()
+    declared_prop_refs: set[str] = set()
+    declared_appearance_refs: set[str] = set()
+    declared_reference_asset_paths: set[str] = set()
+
+    for scene in (scenes.get("scenes") or []):
+        if isinstance(scene, dict):
+            for ref in (scene.get("reference_images") or []):
+                if isinstance(ref, dict) and ref.get("path"):
+                    declared_scene_refs.add(str(ref["path"]))
+                elif isinstance(ref, str):
+                    declared_scene_refs.add(ref)
+    for prop in (props.get("props") or []):
+        if isinstance(prop, dict):
+            for ref in (prop.get("reference_images") or []):
+                if isinstance(ref, dict) and ref.get("path"):
+                    declared_prop_refs.add(str(ref["path"]))
+                elif isinstance(ref, str):
+                    declared_prop_refs.add(ref)
+
+    for appearance in (appearance_manifest.get("appearances") or []):
+        if isinstance(appearance, dict) and appearance.get("image_path"):
+            declared_appearance_refs.add(str(appearance["image_path"]))
+
+    for asset in (reference_asset_manifest.get("scene_assets") or []) + (reference_asset_manifest.get("prop_assets") or []):
+        if isinstance(asset, dict) and asset.get("selected_image_path"):
+            declared_reference_asset_paths.add(str(asset["selected_image_path"]))
+
+    pollution_issues: list[dict[str, Any]] = []
+
+    for asset in (reference_asset_manifest.get("scene_assets") or []) + (reference_asset_manifest.get("prop_assets") or []):
+        if not isinstance(asset, dict):
+            continue
+        img_path = str(asset.get("selected_image_path") or "")
+        if not img_path:
+            continue
+        asset_key = str(asset.get("asset_key") or asset.get("scene_key") or asset.get("prop_key") or "?")
+        asset_kind = str(asset.get("asset_kind") or "unknown")
+        if asset_kind == "scene" and img_path not in declared_scene_refs:
+            if not any(img_path.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp")):
+                continue
+            pollution_issues.append({
+                "issue_type": "reference_image_pollution",
+                "stage": "07C",
+                "asset_key": asset_key,
+                "image_path": img_path,
+                "expected_source": "04_scene_system.scenes.reference_images",
+                "message": f"07C 场景参考图 {asset_key} 的路径 {img_path} 不在 04_scene_system 声明的 reference_images 中",
+            })
+        elif asset_kind != "scene" and img_path not in declared_prop_refs:
+            if not any(img_path.endswith(ext) for ext in (".png", ".jpg", ".jpeg", ".webp")):
+                continue
+            pollution_issues.append({
+                "issue_type": "reference_image_pollution",
+                "stage": "07C",
+                "asset_key": asset_key,
+                "image_path": img_path,
+                "expected_source": "05_prop_system.props.reference_images",
+                "message": f"07C 道具参考图 {asset_key} 的路径 {img_path} 不在 05_prop_system 声明的 reference_images 中",
+            })
+
+    allowed_07d_refs = declared_appearance_refs | declared_reference_asset_paths
+    for img in (image_manifest.get("images") or []):
+        if not isinstance(img, dict):
+            continue
+        frame_id = str(img.get("frame_id") or img.get("sequence_index") or "?")
+        for ref_path in (img.get("reference_image_paths") or []):
+            ref_str = str(ref_path)
+            if ref_str and ref_str not in allowed_07d_refs:
+                pollution_issues.append({
+                    "issue_type": "reference_image_pollution",
+                    "stage": "07D",
+                    "frame_id": frame_id,
+                    "image_path": ref_str,
+                    "expected_source": "07B appearance_manifest or 07C reference_asset_manifest",
+                    "message": f"07D 帧 {frame_id} 的参考图路径 {ref_str} 不在 07B/07C 声明的参考图中",
+                })
+
+    return {
+        "pollution_check": {
+            "declared_scene_refs_count": len(declared_scene_refs),
+            "declared_prop_refs_count": len(declared_prop_refs),
+            "declared_appearance_refs_count": len(declared_appearance_refs),
+            "declared_reference_asset_paths_count": len(declared_reference_asset_paths),
+            "pollution_issues": pollution_issues,
+            "has_pollution": bool(pollution_issues),
+        },
+    }
+
+
 def build_07e(
     plan: dict[str, Any],
     character_lock_manifest: dict[str, Any],
     appearance_manifest: dict[str, Any],
     reference_asset_manifest: dict[str, Any],
     image_manifest: dict[str, Any],
+    scenes: dict[str, Any] | None = None,
+    props: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     registry = image_registry.build_registry(character_lock_manifest, appearance_manifest, reference_asset_manifest, image_manifest)
     retry_plan = retry_manager.build_retry_plan(character_lock_manifest, appearance_manifest, reference_asset_manifest, image_manifest)
@@ -94,17 +193,22 @@ def build_07e(
         if isinstance(entry, dict) and not entry.get("image_path"):
             missing.append({"registry_key": entry.get("registry_key"), "category": entry.get("category"), "issue": "empty image_path"})
     dependency_index = plan.get("dependency_index", {})
+    pollution_result = _validate_reference_sources(
+        reference_asset_manifest, image_manifest, scenes or {}, props or {}, appearance_manifest,
+    )
     quality_report = {
         "needs_retry": retry_plan.get("needs_retry", False),
         "missing_images": missing,
         "retry_plan": retry_plan,
         "dependency_index_ready": bool(dependency_index),
+        "reference_image_pollution": pollution_result.get("pollution_check", {}),
         "note": "07E 只处理图片阶段局部重跑；除非 06 绑定断裂，否则不回滚 LLM 文本阶段。",
     }
+    has_pollution = pollution_result.get("pollution_check", {}).get("has_pollution", False)
     return {
         "schema_version": SCHEMA_VERSION,
         "stage": "07E_finalize",
-        "status": "needs_retry" if retry_plan.get("needs_retry") or missing else "success",
+        "status": "needs_retry" if retry_plan.get("needs_retry") or missing or has_pollution else "success",
         "asset_image_registry": registry,
         "dependency_index": dependency_index,
         "retry_plan": retry_plan,
@@ -117,6 +221,7 @@ def build_07e(
             "prop_reference_count": len(reference_asset_manifest.get("prop_assets", []) or []),
             "storyboard_frame_count": len(image_manifest.get("images", []) or []),
             "needs_retry": retry_plan.get("needs_retry", False),
+            "reference_image_pollution": has_pollution,
         },
     }
 
@@ -178,6 +283,8 @@ def run_image_stages(
         outputs["07B"].get("appearance_manifest", {}),
         outputs["07C"].get("reference_asset_manifest", {}),
         outputs["07D"].get("image_manifest", {}),
+        scenes=scenes,
+        props=props,
     )
     stage_status.append(_run_and_score("07E", outputs["07E"], output_dir, "07E_finalize.json"))
     _write_json(Path(output_dir) / "dependency_index.json", outputs["07E"].get("dependency_index", {}))

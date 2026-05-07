@@ -4,6 +4,7 @@ import os
 import json
 import shutil
 import subprocess
+import urllib.request
 from importlib import import_module
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,7 @@ MIN_FINAL_VIDEO_BYTES = int(os.getenv("AI_DRAMA_VIDEO_MIN_FINAL_BYTES", "2048"))
 
 STAGES: list[dict[str, str]] = [
     {"stage_id": "09A", "name": "window_segment_plan", "output_file": "09A_video_segment_plan.json"},
+    {"stage_id": "09PRE", "name": "execute_preflight_check", "output_file": "09PRE_execute_preflight_check.json"},
     {"stage_id": "09B", "name": "ltx23_comfyui_one_window_execution", "output_file": "09B_ltx23_execution.json"},
     {"stage_id": "09C", "name": "breakpoint_resume_scan", "output_file": "09C_resume_scan.json"},
     {"stage_id": "09D", "name": "final_merge_and_manifest_check", "output_file": "09D_final_merge.json"},
@@ -177,6 +179,106 @@ def build_prompt_manifest(plan: dict[str, Any], output_dir: str | Path) -> dict[
     path = Path(output_dir) / "prompt_manifest.json"
     io_utils.write_json(path, manifest)
     return {**manifest, "prompt_manifest_path": str(path)}
+
+
+def run_09pre(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
+    execution_mode = str(os.getenv("AI_DRAMA_VIDEO_EXECUTION_MODE", "dry_run")).strip().lower()
+    is_dry_run = execution_mode not in {"execute", "comfyui", "real"}
+    failed_checks: list[dict[str, Any]] = []
+    passed_checks: list[dict[str, Any]] = []
+
+    def _check(check_id: str, condition: bool, message: str, fix_hint: str) -> None:
+        if condition:
+            passed_checks.append({"check_id": check_id, "status": "passed", "message": message, "fix_hint": ""})
+        else:
+            failed_checks.append({"check_id": check_id, "status": "failed", "message": message, "fix_hint": fix_hint})
+
+    segments = plan.get("segments", []) or []
+    _check("segment_plan_structure", isinstance(segments, list) and len(segments) > 0, f"segment plan has {len(segments) if isinstance(segments, list) else 0} segments", "09A must produce at least one segment")
+
+    if is_dry_run:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "stage": "09PRE_execute_preflight_check",
+            "status": "success",
+            "execution_mode": "dry_run",
+            "preflight_mode": "dry_run_lite",
+            "passed_checks": passed_checks,
+            "failed_checks": [],
+            "notes": ["dry_run 模式只检查 segment plan 结构，不要求 ComfyUI 可访问。"],
+        }
+
+    _check("execution_mode", execution_mode in {"execute", "comfyui", "real"}, f"AI_DRAMA_VIDEO_EXECUTION_MODE={execution_mode}", "set AI_DRAMA_VIDEO_EXECUTION_MODE=execute")
+
+    comfyui_url = os.getenv("AI_DRAMA_COMFYUI_BASE_URL", "").strip()
+    _check("comfyui_base_url_set", bool(comfyui_url), "AI_DRAMA_COMFYUI_BASE_URL is set", "set AI_DRAMA_COMFYUI_BASE_URL=http://127.0.0.1:8188")
+    if comfyui_url:
+        try:
+            req = urllib.request.Request(f"{comfyui_url.rstrip('/')}/system_stats", method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                _check("comfyui_reachable", resp.status == 200, f"ComfyUI reachable at {comfyui_url}", "start ComfyUI server")
+        except Exception as exc:
+            _check("comfyui_reachable", False, f"ComfyUI not reachable: {exc}", f"ensure ComfyUI is running at {comfyui_url}")
+
+    workflow_path = os.getenv("AI_DRAMA_VIDEO_COMFYUI_WORKFLOW", os.getenv("AI_DRAMA_COMFYUI_WORKFLOW", "")).strip()
+    mapping_path = os.getenv("AI_DRAMA_COMFYUI_WORKFLOW_MAPPING", "").strip()
+    _check("workflow_configured", bool(workflow_path) or bool(mapping_path), "workflow or mapping is configured", "set AI_DRAMA_VIDEO_COMFYUI_WORKFLOW or AI_DRAMA_COMFYUI_WORKFLOW_MAPPING")
+    if workflow_path:
+        _check("workflow_file_exists", Path(workflow_path).exists(), f"workflow file exists: {workflow_path}", f"create workflow file at {workflow_path}")
+    if mapping_path:
+        _check("mapping_file_exists", Path(mapping_path).exists(), f"mapping file exists: {mapping_path}", f"create mapping file at {mapping_path}")
+
+    positive_node = os.getenv("AI_DRAMA_VIDEO_NODE_PROMPT", os.getenv("AI_DRAMA_COMFYUI_POSITIVE_NODE_ID", "")).strip()
+    negative_node = os.getenv("AI_DRAMA_VIDEO_NODE_NEGATIVE_PROMPT", os.getenv("AI_DRAMA_COMFYUI_NEGATIVE_NODE_ID", "")).strip()
+    output_prefix_node = os.getenv("AI_DRAMA_VIDEO_NODE_OUTPUT_PREFIX", os.getenv("AI_DRAMA_COMFYUI_OUTPUT_PREFIX_NODE_ID", "")).strip()
+    _check("positive_prompt_node", bool(positive_node), f"positive prompt node configured: {positive_node or '(empty)'}", "set AI_DRAMA_COMFYUI_POSITIVE_NODE_ID")
+    _check("negative_prompt_node", bool(negative_node), f"negative prompt node configured: {negative_node or '(empty)'}", "set AI_DRAMA_COMFYUI_NEGATIVE_NODE_ID")
+    _check("output_prefix_node", bool(output_prefix_node), f"output prefix node configured: {output_prefix_node or '(empty)'}", "set AI_DRAMA_COMFYUI_OUTPUT_PREFIX_NODE_ID")
+
+    window_size = plan.get("window_size") or 4
+    ref_nodes_env = os.getenv("AI_DRAMA_COMFYUI_REFERENCE_IMAGE_NODES", "").strip()
+    ref_count = len([n for n in ref_nodes_env.split(",") if n.strip()]) if ref_nodes_env else 0
+    _check("reference_image_nodes", ref_count >= window_size, f"reference image nodes ({ref_count}) >= window_size ({window_size})", f"configure at least {window_size} reference image nodes in AI_DRAMA_COMFYUI_REFERENCE_IMAGE_NODES")
+
+    all_images_exist = True
+    missing_images: list[str] = []
+    for seg in segments:
+        if not isinstance(seg, dict):
+            continue
+        for img_path in seg.get("image_paths", []) or []:
+            if not img_path or not Path(str(img_path)).exists():
+                all_images_exist = False
+                missing_images.append(str(img_path))
+    _check("segment_images_exist", all_images_exist, f"all segment images exist ({len(missing_images)} missing)" if missing_images else "all segment images exist", "ensure 07_storyboard_image has generated all required keyframe images")
+
+    final_audio = os.getenv("AI_DRAMA_FINAL_AUDIO_PATH", "").strip()
+    if not final_audio:
+        audio_dir = Path(output_dir) / ".." / "08_audio"
+        candidate = audio_dir / "final_audio.wav"
+        final_audio = str(candidate) if candidate.exists() else ""
+    _check("final_audio_exists", bool(final_audio) and Path(final_audio).exists(), f"final_audio.wav exists: {final_audio or '(not found)'}", "ensure 08_audio has generated final_audio.wav")
+
+    ffmpeg_bin = os.getenv("AI_DRAMA_FFMPEG", "ffmpeg")
+    _check("ffmpeg_available", bool(shutil.which(ffmpeg_bin)), f"ffmpeg available: {ffmpeg_bin}", "install ffmpeg and add to PATH, or set AI_DRAMA_FFMPEG")
+    ffprobe_bin = _ffprobe_binary()
+    _check("ffprobe_available", bool(shutil.which(ffprobe_bin)), f"ffprobe available: {ffprobe_bin}", "install ffprobe and add to PATH, or set AI_DRAMA_FFPROBE")
+
+    all_passed = not failed_checks
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "stage": "09PRE_execute_preflight_check",
+        "status": "success" if all_passed else "blocked",
+        "execution_mode": execution_mode,
+        "preflight_mode": "execute_full",
+        "passed_checks": passed_checks,
+        "failed_checks": failed_checks,
+        "retry_plan": {
+            "needs_retry": not all_passed,
+            "retry_scope": "fix_environment_or_mapping" if not all_passed else "none",
+            "do_not_rerun_06_07_08": True,
+        } if not all_passed else {},
+        "notes": ["09PRE 是 execute 模式前置自检，确保 ComfyUI / workflow / ffmpeg / 上游产物就绪后才进入 09B。"] if all_passed else ["09PRE 检查未通过，09B 不会执行。请根据 failed_checks 修复环境或配置。"],
+    }
 
 
 def run_09b(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
@@ -340,6 +442,16 @@ def run_video_stages(
     io_utils.write_json(Path(output_dir) / "video_plan.json", outputs["09A"])
     outputs["09A_PROMPTS"] = build_prompt_manifest(outputs["09A"], output_dir)
     stage_status.append(_run_and_score("09A", outputs["09A"], output_dir, "09A_video_segment_plan.json"))
+    _mark_started("09PRE", output_dir)
+    outputs["09PRE"] = run_09pre(outputs["09A"], output_dir)
+    stage_status.append(_run_and_score("09PRE", outputs["09PRE"], output_dir, "09PRE_execute_preflight_check.json"))
+    preflight_blocked = outputs["09PRE"].get("status") == "blocked"
+    if preflight_blocked:
+        for sid in ("09B", "09C", "09D"):
+            stage = STAGE_BY_ID.get(sid, {"name": sid})
+            stage_status_writer.mark_stage_finished("09_video", output_dir, sid, stage["name"], "blocked", output_file="", score=0, issues_count=1)
+            stage_status.append({"stage_id": sid, "status": "blocked", "output_path": "", "quality": {"passed": False, "score": 0, "issues": [f"09PRE preflight check blocked; {sid} will not execute."]}})
+        return {"schema_version": SCHEMA_VERSION, "stage_mode": "video_execution", "stage_status": stage_status, "outputs": outputs}
     _mark_started("09B", output_dir)
     outputs["09B"] = run_09b(outputs["09A"], output_dir)
     stage_status.append(_run_and_score("09B", outputs["09B"], output_dir, "09B_ltx23_execution.json"))

@@ -52,6 +52,10 @@
       <div class="sidebar-section">
         <div class="sidebar-label">分步运行</div>
         <div id="stepRunGrid" class="step-run-grid"></div>
+        <div class="dep-check-area">
+          <label class="dep-check-label"><input type="checkbox" id="skipDepCheck" /> 跳过依赖检查</label>
+          <div id="depHint" class="dep-hint"></div>
+        </div>
       </div>
 
       <div class="sidebar-section">
@@ -71,7 +75,8 @@
           <span id="jobStatusText">空闲</span>
         </div>
         <div class="topbar-right">
-          <button class="btn small" id="refreshBtn">刷新</button>
+            <button id="btnHealthCheck" class="btn small" onclick="runHealthCheck()">系统健康检查</button>
+            <button class="btn small" id="refreshBtn">刷新</button>
         </div>
       </header>
 
@@ -83,6 +88,7 @@
           <div class="output-tabs">
             <button class="tab active" data-tab="stream">流水线日志</button>
             <button class="tab" data-tab="stage">阶段详情</button>
+            <button class="tab" data-tab="repair">返工中心</button>
           </div>
         </div>
         <div class="output-body">
@@ -91,6 +97,9 @@
           </div>
           <div class="tab-content" id="tabStage">
             <div id="stageDetail" class="stage-detail">点击模块查看阶段详情</div>
+          </div>
+          <div class="tab-content" id="tabRepair">
+            <div id="repairCenter" class="repair-center">选择项目后查看返工中心</div>
           </div>
         </div>
       </section>

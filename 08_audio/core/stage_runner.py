@@ -19,6 +19,8 @@ schema_validator = import_module("08_audio.core.schema_validator")
 SCHEMA_VERSION = "1.1"
 LONG_VOICE_LINE_WARNING_SECONDS = 8.0
 LONG_VOICE_LINE_REVIEW_SECONDS = 12.0
+LONG_TEXT_WARNING_CHARS = 80
+LONG_TEXT_REVIEW_CHARS = 150
 
 STAGES: list[dict[str, str]] = [
     {"stage_id": "08A", "name": "audio_queue_build", "output_file": "08A_audio_queue.json"},
@@ -154,6 +156,50 @@ def build_audio_timing_review(timeline: dict[str, Any]) -> dict[str, Any]:
         "warnings": warnings,
         "issues": issues,
     }
+
+
+def build_text_length_review(voice_lines: list[dict[str, Any]]) -> dict[str, Any]:
+    long_texts: list[dict[str, Any]] = []
+    for index, item in enumerate(voice_lines, start=1):
+        if not isinstance(item, dict) or _is_silence_line(item):
+            continue
+        text = str(item.get("text") or item.get("content") or "")
+        char_count = len(text)
+        if char_count <= LONG_TEXT_WARNING_CHARS:
+            continue
+        needs_review = char_count > LONG_TEXT_REVIEW_CHARS
+        long_texts.append({
+            "line_id": item.get("voice_line_id") or item.get("line_id") or item.get("segment_id") or f"voice_line_{index:04d}",
+            "segment_id": item.get("segment_id"),
+            "speaker": item.get("speaker"),
+            "text_preview": text[:60] + ("..." if len(text) > 60 else ""),
+            "char_count": char_count,
+            "issue_type": "text_too_long_for_tts" if needs_review else "text_long_warning",
+            "severity": "needs_review" if needs_review else "warning",
+            "recommended_action": "return_to_02_split_sentence" if needs_review else "review_text_length",
+            "suggested_split": _suggest_split(text) if needs_review else None,
+        })
+    issues = [item for item in long_texts if item.get("severity") == "needs_review"]
+    warnings = [item for item in long_texts if item.get("severity") == "warning"]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "stage": "08_text_length_review",
+        "status": "needs_review" if issues else ("warning" if warnings else "success"),
+        "needs_review": bool(issues),
+        "warning_count": len(warnings),
+        "issue_count": len(issues),
+        "warning_threshold_chars": LONG_TEXT_WARNING_CHARS,
+        "review_threshold_chars": LONG_TEXT_REVIEW_CHARS,
+        "recommended_action": "return_to_02_split_sentence" if issues else ("review_text_length" if warnings else "none"),
+        "long_texts": long_texts,
+        "warnings": warnings,
+        "issues": issues,
+    }
+
+
+def _read_text_length_review(output_dir: str | Path) -> dict[str, Any]:
+    path = _intermediate_dir(output_dir) / "08_text_length_review.json"
+    return io_utils.read_json(path, default={})
 
 
 def _has_any(text: str, keywords: list[str]) -> bool:
@@ -326,6 +372,10 @@ def run_audio_stages(script: dict[str, Any], output_dir: str | Path) -> dict[str
     outputs["08B"] = build_08b(outputs["08A"], output_dir)
     stage_status.append(_run_and_score("08B", outputs["08B"], output_dir, "08B_tts_segment_plan.json"))
 
+    voice_lines = outputs["08A"].get("voice_queue", []) or outputs["08B"].get("voice_queue", []) or []
+    text_length_review = build_text_length_review(voice_lines)
+    _write_stage(output_dir, "08_text_length_review.json", text_length_review)
+
     _mark_started("08C", output_dir)
     outputs["08C"] = indextts_client.synthesize_segments(outputs["08B"], output_dir)
     stage_status.append(_run_and_score("08C", outputs["08C"], output_dir, "08C_tts_execution.json"))
@@ -391,6 +441,7 @@ def merge_stage_outputs(script: dict[str, Any], config: dict[str, Any], stage_re
             "long_voice_line_count": len(timing_review.get("long_voice_lines", []) or []),
             "edit_rhythm_segment_count": len(edit_rhythm.get("segments", []) or []),
             "recommended_audio_action": timing_review.get("recommended_action"),
+            "text_length_review": _read_text_length_review(output_dir),
         },
         "notes": [
             "08 是 AUDIO_PHASE，进入 09 前由总控释放音频模型资源。",

@@ -30,7 +30,7 @@ const STAGE_NAMES = {
   "06A": "资产门控", "06B": "分镜规划", "06C": "单帧分镜", "06D": "连续性绑定", "06E": "质量检查",
   "07A": "参考资产", "07B": "图片任务", "07C": "ComfyUI", "07D": "图片总检",
   "08A": "音频队列", "08B": "音色绑定", "08C": "TTS执行", "08D": "混音字幕",
-  "09A": "输入检查", "09B": "视频规划", "09C": "LTX执行", "09D": "视频总检",
+  "09A": "输入检查", "09PRE": "前置自检", "09B": "视频规划", "09C": "LTX执行", "09D": "视频总检",
   "10A": "输入检查", "10B": "视频准备", "10C": "音频字幕对齐", "10D": "最终导出",
 };
 
@@ -46,6 +46,150 @@ async function api(path, opts = {}) {
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
+
+const ISSUE_TYPE_NAMES = {
+  "missing_dependency": "缺少依赖",
+  "schema_failed": "Schema 校验失败",
+  "stage_quality_failed": "阶段质量未通过",
+  "llm_json_parse_failed": "LLM JSON 解析失败",
+  "llm_output_truncated": "LLM 输出截断",
+  "upstream_blocking": "上游阻塞",
+  "image_failed_frames": "图片帧失败",
+  "audio_failed_segments": "音频段失败",
+  "video_failed_segments": "视频段失败",
+  "final_export_not_ready": "最终视频未生成",
+};
+
+const ACTION_NAMES = {
+  "rerun_from_upstream": "从上游模块重跑",
+  "rerun_module": "重跑当前模块",
+  "retry_failed_frames": "重跑失败帧",
+  "retry_failed_segments": "重跑失败段",
+  "check_ffmpeg_and_upstream": "检查 ffmpeg 和上游",
+};
+
+async function renderRepairCenter() {
+  const wrap = $("repairCenter");
+  if (!wrap) return;
+  if (!state.currentSnapshot) {
+    wrap.innerHTML = `<div style="color:var(--muted);padding:20px">选择项目后查看返工中心</div>`;
+    return;
+  }
+  const repair = state.currentSnapshot.repair_index;
+  if (!repair || !repair.issues || !repair.issues.length) {
+    wrap.innerHTML = `<div class="repair-empty"><div class="repair-empty-icon">✓</div><div>所有模块状态正常，无需返工</div></div>`;
+    return;
+  }
+  const summary = repair.summary || {};
+  const issues = repair.issues || [];
+  let html = `<div class="repair-summary">
+    <div class="repair-stat"><span class="repair-stat-num">${summary.total_issues || 0}</span><span class="repair-stat-label">总问题</span></div>
+    <div class="repair-stat stat-blocking"><span class="repair-stat-num">${summary.blocking_issues || 0}</span><span class="repair-stat-label">阻塞</span></div>
+    <div class="repair-stat stat-retryable"><span class="repair-stat-num">${summary.retryable_issues || 0}</span><span class="repair-stat-label">可重试</span></div>
+  </div>`;
+  if (summary.recommended_from_module) {
+    html += `<div class="repair-rec">建议从 <strong>${mName(summary.recommended_from_module)}</strong> 开始重跑</div>`;
+  }
+  html += `<div class="repair-issues">`;
+  for (const issue of issues) {
+    const canRun = issue.can_run_current_module;
+    const issueType = issue.issue_type || "unknown";
+    const issueLabel = ISSUE_TYPE_NAMES[issueType] || issueType;
+    const actionLabel = ACTION_NAMES[issue.suggested_action] || issue.suggested_action || "";
+    const moduleLabel = mName(issue.module || "");
+    const stageLabel = issue.stage_id || "";
+    const isBlocking = !canRun;
+    const cls = isBlocking ? "repair-issue blocking" : "repair-issue retryable";
+    html += `<div class="${cls}">
+      <div class="ri-header">
+        <span class="ri-module">${esc(moduleLabel)}</span>
+        ${stageLabel ? `<span class="ri-stage">${esc(stageLabel)}</span>` : ""}
+        <span class="ri-type">${esc(issueLabel)}</span>
+        ${isBlocking ? `<span class="ri-badge blocking">阻塞</span>` : ""}
+      </div>
+      <div class="ri-message">${esc(issue.issue_message || "")}</div>
+      <div class="ri-actions">`;
+    if (canRun && issue.recommended_only_module) {
+      const retryScope = getRetryScope(issue);
+      html += `<button class="btn small primary" onclick="repairRunModule('${escAttr(issue.recommended_only_module)}', ${retryScope})">${actionLabel || "重跑当前模块"}</button>`;
+    }
+    if (issue.recommended_from_module) {
+      html += `<button class="btn small" onclick="repairRunFrom('${escAttr(issue.recommended_from_module)}')">从 ${mName(issue.recommended_from_module)} 开始跑</button>`;
+    }
+    if (!canRun) {
+      html += `<span class="ri-hint">当前模块缺少依赖，请先跑上游</span>`;
+    }
+    html += `</div></div>`;
+  }
+  html += `</div>`;
+  wrap.innerHTML = html;
+}
+
+function getRetryScope(issue) {
+  if (issue.issue_type === "image_failed_frames") return `{image_retry_scope:"failed_frames"}`;
+  if (issue.issue_type === "audio_failed_segments") return `{audio_retry_scope:"failed_segments"}`;
+  if (issue.issue_type === "video_failed_segments") return `{video_retry_scope:"failed_segments"}`;
+  return "{}";
+}
+
+async function repairRunModule(moduleName, retryScope) {
+  const extra = { only_module: moduleName };
+  if (retryScope && retryScope.image_retry_scope) extra.image_retry_scope = retryScope.image_retry_scope;
+  if (retryScope && retryScope.audio_retry_scope) extra.audio_retry_scope = retryScope.audio_retry_scope;
+  if (retryScope && retryScope.video_retry_scope) extra.video_retry_scope = retryScope.video_retry_scope;
+  await startJob(extra);
+}
+
+async function repairRunFrom(moduleName) {
+  await startJob({ from_module: moduleName });
+}
+
+window.repairRunModule = repairRunModule;
+window.repairRunFrom = repairRunFrom;
+
+async function runHealthCheck() {
+  const wrap = $("repairCenter");
+  if (!wrap) return;
+  wrap.innerHTML = `<div style="padding:20px;color:var(--muted)">正在运行系统健康检查...</div>`;
+  try {
+    const result = await api("/api/system/health-check", { method: "POST" });
+    const checks = result.checks || [];
+    const summary = result.summary || {};
+    let html = `<div class="repair-summary">
+      <div class="repair-stat"><span class="repair-stat-num" style="color:var(--success)">${summary.passed || 0}</span><span class="repair-stat-label">通过</span></div>
+      <div class="repair-stat stat-retryable"><span class="repair-stat-num">${summary.warning || 0}</span><span class="repair-stat-label">警告</span></div>
+      <div class="repair-stat stat-blocking"><span class="repair-stat-num">${summary.failed || 0}</span><span class="repair-stat-label">失败</span></div>
+    </div>`;
+    const groups = {};
+    for (const check of checks) {
+      const g = check.group || "Other";
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(check);
+    }
+    for (const [groupName, groupChecks] of Object.entries(groups)) {
+      html += `<div style="margin-top:12px;font-weight:800;font-size:13px;color:var(--primary)">${esc(groupName)}</div>`;
+      html += `<div class="repair-issues">`;
+      for (const check of groupChecks) {
+        const statusIcon = check.status === "passed" ? "✓" : check.status === "warning" ? "⚠" : "✗";
+        const statusColor = check.status === "passed" ? "var(--success)" : check.status === "warning" ? "var(--warning)" : "var(--danger)";
+        html += `<div class="repair-issue ${check.status === "failed" ? "blocking" : check.status === "warning" ? "retryable" : ""}">
+          <div class="ri-header">
+            <span style="color:${statusColor};font-weight:800">${statusIcon}</span>
+            <span class="ri-type">${esc(check.check_id || "")}</span>
+          </div>
+          <div class="ri-message">${esc(check.message || "")}</div>
+          ${check.fix_hint ? `<div class="ri-hint" style="color:var(--muted)">修复建议：${esc(check.fix_hint)}</div>` : ""}
+        </div>`;
+      }
+      html += `</div>`;
+    }
+    wrap.innerHTML = html;
+  } catch (err) {
+    wrap.innerHTML = `<div style="padding:20px;color:var(--danger)">健康检查失败: ${esc(String(err))}</div>`;
+  }
+}
+
+window.runHealthCheck = runHealthCheck;
 
 async function init() {
   bindActions();
@@ -116,10 +260,12 @@ async function refreshAll() {
     state.currentSnapshot = data.snapshot;
     renderPipeline();
     renderStageDetail();
+    renderRepairCenter();
     renderStepRunGrid();
   } else {
     renderPipeline();
     renderStepRunGrid();
+    renderRepairCenter();
   }
 }
 
@@ -151,6 +297,7 @@ function connectEvents(jobId) {
     state.currentSnapshot = event.payload;
     renderPipeline();
     renderStageDetail();
+    renderRepairCenter();
     renderStepRunGrid();
   });
 
@@ -296,6 +443,7 @@ async function openProject(projectId) {
   state.selectedModule = null;
   renderPipeline();
   renderStageDetail();
+  renderRepairCenter();
   updateTopbar();
 }
 
@@ -303,12 +451,33 @@ async function previewFile(path) {
   try {
     const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
     $("previewTitle").textContent = data.path || path;
+    const isPlaceholder = data.path && data.path.includes(".placeholder.txt");
     if (data.type === "json") {
       $("previewContent").textContent = JSON.stringify(data.content, null, 2);
     } else if (data.type === "image") {
       $("previewContent").innerHTML = `<img src="${data.url}" style="max-width:100%;border-radius:12px" />`;
     } else if (data.type === "media") {
-      $("previewContent").textContent = `媒体文件：${data.path}\n大小：${data.size || 0} bytes`;
+      if (data.path && data.path.endsWith(".mp4")) {
+        const snapshot = state.currentSnapshot;
+        const videoReady = snapshot && snapshot.final_video_ready === true;
+        if (videoReady) {
+          $("previewContent").innerHTML = `<div style="padding:16px;background:var(--surface);border-radius:8px;margin-bottom:12px"><strong style="color:var(--success)">✓ 最终视频已生成</strong><br/><span style="color:var(--muted);font-size:12px">大小：${data.size || 0} bytes</span></div><video src="${data.url}" controls style="max-width:100%;border-radius:12px"></video>`;
+        } else {
+          const placeholderPath = snapshot && snapshot.final_video_placeholder_path;
+          let placeholderContent = "";
+          if (placeholderPath) {
+            try {
+              const placeholderData = await api(`/api/file?path=${encodeURIComponent(placeholderPath)}`);
+              placeholderContent = esc(placeholderData.content || "");
+            } catch (e) {}
+          }
+          $("previewContent").innerHTML = `<div style="padding:16px;background:var(--surface);border-radius:8px;margin-bottom:12px"><strong style="color:var(--warning)">⚠ 最终视频未生成，仅生成占位说明</strong><br/><span style="color:var(--muted);font-size:12px">final_video_ready=false，请检查 ffmpeg 是否可用或上游产物是否完整</span></div>${placeholderContent ? `<pre style="white-space:pre-wrap;font-size:12px">${placeholderContent}</pre>` : ""}`;
+        }
+      } else {
+        $("previewContent").textContent = `媒体文件：${data.path}\n大小：${data.size || 0} bytes`;
+      }
+    } else if (isPlaceholder) {
+      $("previewContent").innerHTML = `<div style="padding:16px;background:var(--surface);border-radius:8px;margin-bottom:12px"><strong style="color:var(--warning)">⚠ 最终视频未生成，仅生成占位说明</strong><br/><span style="color:var(--muted);font-size:12px">dry_run 或 ffmpeg 不可用时不会创建 final.mp4，只创建占位说明文件</span></div><pre style="white-space:pre-wrap;font-size:12px">${esc(data.content || "")}</pre>`;
     } else {
       $("previewContent").textContent = data.content || `二进制文件 ${data.size || 0} bytes`;
     }
@@ -368,16 +537,42 @@ function renderStepRunGrid() {
   grid.innerHTML = modules.map((name) => {
     const s = moduleStatusMap[name] || "pending";
     const cls = s === "success" ? "step-success" : s === "running" ? "step-running" : s === "failed" || s === "blocked" ? "step-failed" : "";
-    return `<button class="step-btn ${cls}" onclick="runSingleModule('${escAttr(name)}')"><span class="step-id">${name.slice(0, 2)}</span><span class="step-name">${mName(name)}</span><span class="step-status">${statusText(s)}</span></button>`;
+    return `<button class="step-btn ${cls}" onclick="runSingleModule('${escAttr(name)}')" onmouseenter="checkModuleDeps('${escAttr(name)}')"><span class="step-id">${name.slice(0, 2)}</span><span class="step-name">${mName(name)}</span><span class="step-status">${statusText(s)}</span></button>`;
   }).join("");
 }
 
 async function runSingleModule(moduleName) {
-  const payload = getPayload({ only_module: moduleName });
-  if (!payload.project_id) {
-    payload.project_id = "project_" + new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const skipDeps = $("skipDepCheck") && $("skipDepCheck").checked;
+  const extra = { only_module: moduleName };
+  if (skipDeps) extra.skip_dependency_check = "1";
+  await startJob(extra);
+}
+
+async function checkModuleDeps(moduleName) {
+  const hint = $("depHint");
+  if (!hint) return;
+  if (!moduleName) { hint.innerHTML = ""; return; }
+  if (moduleName === "01_novel_parser") {
+    hint.innerHTML = `<span style="color:var(--success)">✓ 01 无前置依赖，可单独运行</span>`;
+    return;
   }
-  await startJob({ only_module: moduleName });
+  hint.innerHTML = `<span style="color:var(--muted)">检查依赖中...</span>`;
+  try {
+    const snapshot = state.currentSnapshot;
+    const runDir = snapshot ? snapshot.run_dir : "";
+    const params = new URLSearchParams({ module: moduleName });
+    if (runDir) params.set("run_dir", runDir);
+    const result = await api(`/api/module-requirements?${params}`);
+    if (result.can_run) {
+      hint.innerHTML = `<span style="color:var(--success)">✓ 依赖已满足，可单独运行</span>`;
+    } else {
+      const missing = (result.missing_requires || []).map(m => `${m.module}.${m.name || "?"}`).join("、");
+      const rec = result.recommended_from_module || moduleName;
+      hint.innerHTML = `<span style="color:var(--danger)">✗ 缺少依赖：${esc(missing)}</span><br/><span style="color:var(--muted)">建议从 ${mName(rec)} 开始跑，或勾选"跳过依赖检查"</span>`;
+    }
+  } catch (e) {
+    hint.innerHTML = `<span style="color:var(--warning)">依赖检查失败: ${esc(String(e))}</span>`;
+  }
 }
 
 init().catch((err) => { console.error(err); if ($("liveLog")) $("liveLog").textContent = String(err); });

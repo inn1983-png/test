@@ -10,6 +10,11 @@ import urllib.request
 from typing import Any
 
 MOJIBAKE_MARKERS = ("�", "½", "¼", "¾", "Ã", "Â")
+_last_finish_reason: str | None = None
+
+
+def get_last_finish_reason() -> str | None:
+    return _last_finish_reason
 
 
 def force_utf8_stdio() -> None:
@@ -135,6 +140,8 @@ def complete_text_with_logs(
     user_prompt: str,
     trace_label: str,
 ) -> str:
+    global _last_finish_reason
+    _last_finish_reason = None
     force_utf8_stdio()
     payload: dict[str, Any] = {
         "model": model,
@@ -178,11 +185,12 @@ def _complete_once(payload: dict[str, Any], base_url: str, api_key: str, timeout
     choice = result["choices"][0]
     finish_reason = choice.get("finish_reason")
     text = repair_mojibake_text(choice["message"]["content"])
+    global _last_finish_reason
+    _last_finish_reason = finish_reason
     if finish_reason == "length":
-        raise RuntimeError(
-            f"LLM output was truncated by max_tokens. trace={trace_label} chars={len(text)} max_tokens={payload.get('max_tokens')}"
-        )
-    safe_print(f"[LLM_DONE] {trace_label} 输出完成 chars={len(text)} seconds={time.time() - start:.1f} finish_reason={finish_reason}")
+        safe_print(f"[LLM_TRUNCATED] {trace_label} 输出被截断 chars={len(text)} max_tokens={payload.get('max_tokens')}")
+    else:
+        safe_print(f"[LLM_DONE] {trace_label} 输出完成 chars={len(text)} seconds={time.time() - start:.1f} finish_reason={finish_reason}")
     safe_print(f"[LLM_OUTPUT_PREVIEW] {trace_label} {text[:1200].replace(chr(10), ' ')}")
     return text
 
@@ -239,9 +247,10 @@ def _complete_stream(payload: dict[str, Any], base_url: str, api_key: str, timeo
     text = repair_mojibake_text("".join(chunks))
     if printed < len(text):
         safe_print(f"[LLM_STREAM] {trace_label} {text[printed:].replace(chr(10), ' ')}")
+    global _last_finish_reason
+    _last_finish_reason = finish_reason
     if finish_reason == "length":
-        raise RuntimeError(
-            f"LLM stream output was truncated by max_tokens. trace={trace_label} chars={len(text)} max_tokens={payload.get('max_tokens')}"
-        )
-    safe_print(f"[LLM_DONE] {trace_label} 输出完成 chars={len(text)} seconds={time.time() - start:.1f} finish_reason={finish_reason}")
+        safe_print(f"[LLM_TRUNCATED] {trace_label} 流式输出被截断 chars={len(text)} max_tokens={payload.get('max_tokens')}")
+    else:
+        safe_print(f"[LLM_DONE] {trace_label} 输出完成 chars={len(text)} seconds={time.time() - start:.1f} finish_reason={finish_reason}")
     return text

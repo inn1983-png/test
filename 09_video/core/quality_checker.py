@@ -39,6 +39,15 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
                 previous_last = frame_ids[-1]
             if float(seg.get("duration_seconds") or 0) > 12.5:
                 issues.append(f"09A {seg.get('segment_id', idx)} duration exceeds 12.5 seconds.")
+    elif stage_id == "09PRE":
+        if data.get("status") == "blocked":
+            failed_checks = data.get("failed_checks") if isinstance(data.get("failed_checks"), list) else []
+            for check in failed_checks:
+                if isinstance(check, dict):
+                    issues.append(f"09PRE {check.get('check_id', 'unknown')}: {check.get('message', '')}")
+        if data.get("preflight_mode") == "dry_run_lite":
+            if data.get("status") != "success":
+                issues.append("09PRE dry_run_lite must always succeed.")
     elif stage_id == "09B":
         results = data.get("execution_results") if isinstance(data.get("execution_results"), list) else []
         if not results:

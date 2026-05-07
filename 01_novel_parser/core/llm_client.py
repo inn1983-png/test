@@ -103,21 +103,18 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        base_url = os.getenv("AI_DRAMA_LLM_BASE_URL", DEFAULT_TEXT_LLM_BASE_URL).strip()
-        model = os.getenv("AI_DRAMA_LLM_MODEL", DEFAULT_TEXT_LLM_MODEL).strip()
-        api_key = os.getenv("AI_DRAMA_LLM_API_KEY", "").strip()
-        if not api_key:
-            raise RuntimeError(
-                "01_novel_parser text LLM defaults to DeepSeek V4 Pro API. "
-                "Please set AI_DRAMA_LLM_API_KEY. "
-                "Optional overrides: AI_DRAMA_LLM_BASE_URL, AI_DRAMA_LLM_MODEL."
-            )
+        from importlib import import_module
+        llm_config_utils = import_module("00_common.llm_config_utils")
+        base_url = llm_config_utils.resolve_llm_base_url(DEFAULT_TEXT_LLM_BASE_URL)
+        model = llm_config_utils.resolve_llm_model(DEFAULT_TEXT_LLM_MODEL)
+        api_key = llm_config_utils.resolve_llm_api_key()
+        llm_config_utils.validate_api_key_requirement(base_url, api_key, "01_novel_parser")
         return cls(
             base_url=base_url,
             model=model,
             api_key=api_key,
-            timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "6000")),
-            temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.1")),
+            timeout_sec=llm_config_utils.resolve_llm_timeout(6000),
+            temperature=llm_config_utils.resolve_llm_temperature(0.1),
             stream_log=os.getenv("AI_DRAMA_LLM_STREAM_LOG", "1").strip() not in {"0", "false", "False", "no"},
             max_tokens=int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "16384")),
         )
@@ -134,11 +131,13 @@ class LLMClient:
         _force_utf8_stdio()
         self.config = config or LLMConfig.from_env()
         self.trace_output_dir: str | Path | None = None
+        self.last_finish_reason: str | None = None
 
     def set_trace_output_dir(self, output_dir: str | Path | None) -> None:
         self.trace_output_dir = output_dir
 
     def complete_text(self, system_prompt: str, user_prompt: str, trace_label: str = "LLM") -> str:
+        self.last_finish_reason = None
         if self.config.stream_log:
             try:
                 return self._complete_text_stream(system_prompt, user_prompt, trace_label=trace_label)
@@ -202,11 +201,11 @@ class LLMClient:
         choice = result["choices"][0]
         finish_reason = choice.get("finish_reason")
         text = repair_mojibake_text(choice["message"]["content"])
+        self.last_finish_reason = finish_reason
         if finish_reason == "length":
-            raise RuntimeError(
-                f"LLM output was truncated by max_tokens. trace={trace_label} chars={len(text)} max_tokens={payload.get('max_tokens')}"
-            )
-        safe_print(f"[LLM_DONE] {trace_label} 输出完成 chars={len(text)} seconds={time.time() - start:.1f} finish_reason={finish_reason}")
+            safe_print(f"[LLM_TRUNCATED] {trace_label} 输出被截断 chars={len(text)} max_tokens={payload.get('max_tokens')}")
+        else:
+            safe_print(f"[LLM_DONE] {trace_label} 输出完成 chars={len(text)} seconds={time.time() - start:.1f} finish_reason={finish_reason}")
         safe_print(f"[LLM_OUTPUT_PREVIEW] {trace_label} {text[:1200].replace(chr(10), ' ')}")
         return text
 
@@ -266,11 +265,11 @@ class LLMClient:
         text = repair_mojibake_text("".join(chunks))
         if printed_chars < len(text):
             safe_print(f"[LLM_STREAM] {trace_label} {text[printed_chars:].replace(chr(10), ' ')}")
+        self.last_finish_reason = finish_reason
         if finish_reason == "length":
-            raise RuntimeError(
-                f"LLM stream output was truncated by max_tokens. trace={trace_label} chars={len(text)} max_tokens={payload.get('max_tokens')}"
-            )
-        safe_print(f"[LLM_DONE] {trace_label} 输出完成 chars={len(text)} seconds={time.time() - start:.1f} finish_reason={finish_reason}")
+            safe_print(f"[LLM_TRUNCATED] {trace_label} 流式输出被截断 chars={len(text)} max_tokens={payload.get('max_tokens')}")
+        else:
+            safe_print(f"[LLM_DONE] {trace_label} 输出完成 chars={len(text)} seconds={time.time() - start:.1f} finish_reason={finish_reason}")
         return text
 
     def complete_json(
@@ -279,6 +278,7 @@ class LLMClient:
         user_payload: dict[str, Any],
         repair_callback: Callable[[str, str], dict[str, Any]] | None = None,
         trace_label: str = "LLM_JSON",
+        module_name: str = "",
     ) -> dict[str, Any]:
         guarded_prompt = prompt_guard.apply_json_guard(system_prompt)
         guarded_payload = prompt_guard.compact_payload_hint(user_payload)
@@ -304,6 +304,22 @@ class LLMClient:
             trace.write_parsed_before_clean(parsed_before)
             parsed = prompt_guard.remove_internal_output_fields(parsed_before)
             trace.write_parsed_after_clean(parsed)
+            if self.last_finish_reason == "length" and module_name:
+                truncation_handler = import_module("00_common.llm_truncation_handler")
+                result = truncation_handler.handle_truncation(
+                    module_name=module_name,
+                    original_prompt=user_prompt,
+                    original_response={"choices": [{"finish_reason": "length", "message": {"content": text}}]},
+                    original_parsed=parsed,
+                    llm_call_fn=lambda prompt: self._raw_call_for_continuation(prompt, trace_label=f"{trace_label}_cont"),
+                    trace_dir=self.trace_output_dir,
+                )
+                if result.get("status") in ("continuation_success", "continuation_exhausted"):
+                    parsed = result["parsed"]
+                    if result.get("issue_type") == "llm_output_truncated":
+                        safe_print(f"[LLM_TRUNCATION_EXHAUSTED] {trace_label} 续写次数用尽，使用部分结果")
+                    else:
+                        safe_print(f"[LLM_CONTINUATION_OK] {trace_label} 续写成功 continuation_count={result.get('continuation_count', 0)}")
             trace.write_final_stage_output(parsed)
             safe_print(f"[JSON_PARSE] {trace_label} JSON 解析成功 keys={list(parsed.keys())[:12]}")
             return parsed
@@ -320,6 +336,17 @@ class LLMClient:
             trace.write_final_stage_output(cleaned)
             safe_print(f"[JSON_REPAIR_DONE] {trace_label} 修复完成 keys={list(cleaned.keys())[:12]}")
             return cleaned
+
+    def _raw_call_for_continuation(self, prompt: str, trace_label: str = "LLM_CONT") -> dict[str, Any]:
+        payload = self._base_payload("", prompt, trace_label=trace_label)
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(self.config.base_url, data=data, headers=self._headers(), method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=self.config.timeout_sec) as response:
+                raw = self._decode_response_bytes(response.read(), response)
+        except Exception as exc:
+            raise RuntimeError(f"Continuation LLM call failed: {exc}") from exc
+        return json.loads(raw)
 
 
 def parse_json_from_text(text: str) -> dict[str, Any]:

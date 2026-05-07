@@ -322,6 +322,7 @@ def discover_important_outputs(run_dir: Path) -> list[dict[str, Any]]:
         "09_video/video_manifest.json",
         "09_video/final_video.mp4",
         "10_final_assembly/final.mp4",
+        "10_final_assembly/final.placeholder.txt",
         "10_final_assembly/final_manifest.json",
         "10_final_assembly/final_meta.json",
     ]
@@ -362,6 +363,13 @@ def discover_run_snapshot(run_dir: Path) -> dict[str, Any]:
         repair = repair_index.write_repair_index(run_dir)
     except Exception as exc:
         repair = {"error": str(exc), "issues": []}
+    final_assembly_dir = run_dir / "10_final_assembly"
+    final_video_ready = None
+    final_video_placeholder_path = None
+    final_manifest_data = read_json(final_assembly_dir / "final_manifest.json", {})
+    if isinstance(final_manifest_data, dict):
+        final_video_ready = final_manifest_data.get("final_video_ready")
+        final_video_placeholder_path = final_manifest_data.get("final_video_placeholder_path")
     return {
         "run_dir": rel_path(run_dir),
         "run_status": status,
@@ -371,6 +379,8 @@ def discover_run_snapshot(run_dir: Path) -> dict[str, Any]:
         "data_link_check": read_json(run_dir / "00_data_link_check_report.json", {}),
         "repair_index": repair,
         "events": event_writer.read_recent_events(run_dir, limit=200),
+        "final_video_ready": final_video_ready,
+        "final_video_placeholder_path": final_video_placeholder_path,
     }
 
 
@@ -646,6 +656,8 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/jobs/start":
             return self.send_json({"job": job_summary(start_job(self.read_body_json()))})
+        if parsed.path == "/api/system/health-check":
+            return self._handle_health_check()
         if parsed.path == "/api/system/check-data-link":
             payload = self.read_body_json()
             payload["job_kind"] = "data_link_check"
@@ -686,6 +698,34 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(raw)))
         self.end_headers()
         self.wfile.write(raw)
+
+    def _handle_health_check(self) -> None:
+        try:
+            health_check = import_module("00_main_controller.health_check")
+            result = health_check.run_health_check()
+            self.send_json(result)
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, status=500)
+
+    def _handle_module_requirements(self, params: dict[str, str]) -> None:
+        try:
+            module_contracts_mod = import_module("00_common.module_contracts")
+            module_name = params.get("module", "")
+            run_dir_str = params.get("run_dir", "")
+            if not module_name:
+                self.send_json({"error": "module parameter required"}, status=400)
+                return
+            if run_dir_str:
+                run_path = WORKSPACE_DIR / run_dir_str if not Path(run_dir_str).is_absolute() else Path(run_dir_str)
+            else:
+                projects_dir = WORKSPACE_DIR / "projects"
+                project_dirs = sorted(projects_dir.iterdir()) if projects_dir.exists() else []
+                run_path = project_dirs[-1] if project_dirs else WORKSPACE_DIR
+            contracts = module_contracts_mod.load_contracts()
+            result = module_contracts_mod.inspect_module_requirements(run_path, module_name, contracts)
+            self.send_json(result)
+        except Exception as exc:
+            self.send_json({"error": str(exc)}, status=500)
 
     def stream_events(self, job_id: str) -> None:
         job = JOBS.get(job_id)

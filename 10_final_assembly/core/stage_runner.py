@@ -170,18 +170,27 @@ def run_10b(check: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
                 "ffprobe_validation": probe,
             }
 
-    prepared_video.write_text("DRY_RUN_FINAL_ASSEMBLY_PREPARED_VIDEO_PLACEHOLDER\n", encoding="utf-8")
+    placeholder_path = prepared_dir / "prepared_video.placeholder.txt"
+    placeholder_path.write_text(
+        "DRY_RUN_FINAL_ASSEMBLY_PREPARED_VIDEO_PLACEHOLDER\n"
+        f"source_video_path={preferred}\n"
+        f"source_clip_paths={[str(p) for p in clip_paths]}\n"
+        f"ffmpeg_available={client.available}\n"
+        f"dry_run={dry_run}\n",
+        encoding="utf-8",
+    )
     return {
         "schema_version": SCHEMA_VERSION,
         "stage": "10B_video_prepare",
-        "status": "needs_review" if not dry_run else "success",
+        "status": "success" if dry_run else "needs_review",
         "video_source_mode": "dry_run_placeholder",
-        "prepared_video_path": str(prepared_video),
+        "prepared_video_path": None,
+        "prepared_video_placeholder_path": str(placeholder_path),
         "source_video_path": str(preferred) if preferred else None,
         "source_clip_paths": [str(p) for p in clip_paths],
         "ffmpeg_available": client.available,
         "dry_run": dry_run,
-        "notes": ["无可用 ffmpeg 或处于 dry_run 时，写入可检查占位 prepared_video.mp4。"],
+        "notes": ["dry_run 或无可用 ffmpeg 时，写入占位说明文件，不创建假 mp4。"],
     }
 
 
@@ -233,11 +242,14 @@ def run_10d(video_prepare: dict[str, Any], audio_subtitle: dict[str, Any], outpu
     prepared = _as_path(video_prepare.get("prepared_video_path"))
     audio = _as_path(audio_subtitle.get("final_audio_path"))
     if dry_run or not prepared or not audio or not client.available:
-        final_path.write_text(
+        placeholder_path = output_dir / "final.placeholder.txt"
+        placeholder_path.write_text(
             "DRY_RUN_FINAL_ASSEMBLY_PLACEHOLDER\n"
             f"prepared_video={prepared}\n"
             f"final_audio={audio}\n"
-            f"burn_subtitles={burn}\n",
+            f"burn_subtitles={burn}\n"
+            f"ffmpeg_available={client.available}\n"
+            f"dry_run={dry_run}\n",
             encoding="utf-8",
         )
         return {
@@ -245,7 +257,9 @@ def run_10d(video_prepare: dict[str, Any], audio_subtitle: dict[str, Any], outpu
             "stage": "10D_final_export",
             "status": "success" if dry_run else "needs_review",
             "export_mode": "dry_run_placeholder",
-            "final_video_path": str(final_path),
+            "final_video_ready": False,
+            "final_video_path": None,
+            "final_video_placeholder_path": str(placeholder_path),
             "ffmpeg_available": client.available,
             "dry_run": dry_run,
         }
@@ -319,6 +333,8 @@ def merge_stage_outputs(video_manifest: dict[str, Any], paths: dict[str, Path], 
     final_manifest_path = output_dir / "final_manifest.json"
     final_meta_path = output_dir / "final_meta.json"
     stage_scores = {item["stage_id"]: (item.get("quality") or {}).get("score") for item in stage_result.get("stage_status", [])}
+    final_video_ready = bool(d.get("final_video_ready", False)) if d.get("export_mode") != "skip_existing" else True
+    final_video_placeholder_path = d.get("final_video_placeholder_path") if not final_video_ready else None
     data = {
         "schema_version": SCHEMA_VERSION,
         "module": "10_final_assembly",
@@ -327,7 +343,9 @@ def merge_stage_outputs(video_manifest: dict[str, Any], paths: dict[str, Path], 
         "uses_llm": False,
         "uses_ltx": False,
         "generates_new_video_segments": False,
+        "final_video_ready": final_video_ready,
         "final_video_path": d.get("final_video_path"),
+        "final_video_placeholder_path": final_video_placeholder_path,
         "final_manifest_path": str(final_manifest_path),
         "final_meta_path": str(final_meta_path),
         "video_manifest_path": str(paths["video_manifest_path"]),
@@ -362,6 +380,9 @@ def merge_stage_outputs(video_manifest: dict[str, Any], paths: dict[str, Path], 
             "默认只复制字幕，不烧录字幕；设置 AI_DRAMA_FINAL_BURN_SUBTITLES=1 后才尝试烧录。",
             "final.mp4 已存在且有效时默认跳过；设置 AI_DRAMA_FINAL_FORCE_RERUN=1 可强制重导出。",
             "公开剪辑项目建议作为后续插件接入，默认路径保持 FFmpeg 确定性封装。",
+            "dry_run 或 ffmpeg 不可用时，不创建 final.mp4，只创建 final.placeholder.txt 占位说明。",
+            "final_video_ready=true 表示最终视频已生成且 ffprobe 验证通过。",
+            "final_video_ready=false 表示最终视频未生成，可查看 final_video_placeholder_path 了解原因。",
         ],
     }
     validation = schema_validator.validate_final_output({**data, "schema_validation": {}})
