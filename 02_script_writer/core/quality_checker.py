@@ -17,7 +17,7 @@ REQUIRED_KEYS = {
     "02B": ["script_structure", "scene_beats", "event_coverage_map", "retention_design", "character_name_usage", "script_emotion_curve"],
     "02C": ["voice_line_plan", "script_video_unit_candidates", "duration_risk_report"],
     "02D": ["script", "segments", "script_text", "source_line_usage", "script_versions", "selected_version_id", "tts_readability_report"],
-    "02E": ["production_annotations", "audio_cues", "visual_dramatic_units", "storyboard_hints", "risk_report", "visual_executability_report", "character_load_report", "continuity_chain"],
+    "02E": ["production_annotations", "audio_cues", "visual_dramatic_units", "appearance_state_changes", "storyboard_hints", "risk_report", "visual_executability_report", "character_load_report", "continuity_chain"],
     "02F": ["quality_report", "evidence_index", "warnings", "revision_plan", "failure_learning_notes"],
 }
 
@@ -232,10 +232,18 @@ def _evaluate_annotations(data: dict[str, Any], score: int, issues: list[str], s
         score -= 18
         issues.append("visual_dramatic_units 为空，06 单帧分镜难以抓动作链和连续性。")
         suggestions.append("为关键语音行补充 scene_name_hint、characters_in_action、props_in_action、action_chain、continuity_hint。")
+    if "appearance_state_changes" not in data or not isinstance(data.get("appearance_state_changes"), list):
+        score -= 12
+        issues.append("appearance_state_changes 缺失或不是数组，03/06 无法稳定判断换装和穿戴状态。")
+        suggestions.append("输出 appearance_state_changes；即使没有换装，也要记录主要角色 default_appearance。")
+    elif not data.get("appearance_state_changes"):
+        score -= 8
+        issues.append("appearance_state_changes 为空，03/06 只能猜默认服装和换装事件。")
+        suggestions.append("至少为主要角色输出 default_appearance；如果有换装、伪装、破损、戴面具等必须逐项记录。")
     if not data.get("storyboard_hints"):
         score -= 10
         issues.append("storyboard_hints 为空，06 分镜难以获得剧本层面的画面锚点。")
-        suggestions.append("补充 segment_id / voice_line_id 对应的 visual_anchor、action_chain、shot_intent。")
+        suggestions.append("补充 segment_id / voice_line_id 对应的 visual_anchor、action_chain、shot_intent、appearance_state_hint。")
     if not data.get("visual_executability_report"):
         score -= 10
         issues.append("visual_executability_report 为空，无法提前发现抽象画面动作。")
@@ -247,7 +255,7 @@ def _evaluate_annotations(data: dict[str, Any], score: int, issues: list[str], s
     if not data.get("continuity_chain"):
         score -= 10
         issues.append("continuity_chain 为空，后续单帧连续性缺少链表约束。")
-        suggestions.append("输出 from_visual_unit_id / to_visual_unit_id / must_keep / can_change。")
+        suggestions.append("输出 from_visual_unit_id / to_visual_unit_id / must_keep / can_change，并包含服装/穿戴状态连续性。")
     return score, issues, suggestions
 
 
