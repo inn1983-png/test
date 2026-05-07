@@ -73,6 +73,7 @@ def _source_summary(novel_analysis: dict[str, Any], script: dict[str, Any]) -> d
             "segments": script.get("segments", []),
             "character_name_usage": script.get("character_name_usage", []),
             "visual_dramatic_units": script.get("visual_dramatic_units", []),
+            "appearance_state_changes": script.get("appearance_state_changes", []),
             "storyboard_hints": script.get("storyboard_hints", []),
             "continuity_chain": script.get("continuity_chain", []),
         },
@@ -82,15 +83,15 @@ def _source_summary(novel_analysis: dict[str, Any], script: dict[str, Any]) -> d
 def build_stage_payload(stage_id: str, novel_analysis: dict[str, Any], script: dict[str, Any], outputs: dict[str, dict[str, Any]], final_revision_context: dict[str, Any] | None = None) -> dict[str, Any]:
     source = _source_summary(novel_analysis, script)
     if stage_id == "03A":
-        payload: dict[str, Any] = {"source": source, "task": "合并同一角色的不同称呼，输出别名归并计划。禁止按年龄、身份、昵称、职务拆新角色。"}
+        payload: dict[str, Any] = {"source": source, "task": "合并同一角色的不同称呼，输出别名归并计划。禁止按年龄、身份、昵称、职务、服装阶段拆新角色。"}
     elif stage_id == "03B":
-        payload = {"source": source, "alias_merge_plan": outputs["03A"], "task": "生成稳定角色卡、资产分级、重要性评分和参考图计划。只做角色资产标准化，不生成图片、分镜、图像提示词。"}
+        payload = {"source": source, "alias_merge_plan": outputs["03A"], "task": "生成稳定角色卡、资产分级、重要性评分、定妆照需求和 costume_variants。必须参考 02 appearance_state_changes 判断默认外观、换装、伪装、破损服装和穿戴状态。只做角色资产标准化，不生成图片、分镜、图像提示词。"}
     elif stage_id == "03C":
-        payload = {"source": source, "characters": outputs["03B"].get("characters", []), "task": "把角色库绑定到 02 剧本 usage，输出 script_usage_map 和覆盖报告，服务 06 单帧分镜引用稳定角色名。"}
+        payload = {"source": source, "characters": outputs["03B"].get("characters", []), "task": "把角色库绑定到 02 剧本 usage，并根据 02 appearance_state_changes 输出 costume_usage_map，服务 06 单帧分镜引用 canonical_name + costume_id。"}
     elif stage_id == "03D":
-        payload = {"source": source, "stage_outputs": outputs, "task": "总检角色库是否去重正确、证据充分、描述稳定、不串脸、不污染，并可指定 retry_stages。"}
+        payload = {"source": source, "stage_outputs": outputs, "task": "总检角色库是否去重正确、证据充分、描述稳定、不串脸、不污染，并检查 costume_variants 是否覆盖 02 appearance_state_changes，可指定 retry_stages。"}
     elif stage_id == "03E":
-        payload = {"source": source, "stage_outputs": outputs, "task": "站在 06 单帧分镜角度进行资产复核。必须使用 01 story_understanding/story_spine/events/conflicts 判断遗漏、误合并、误分级、过度资产化，并输出 downstream_readiness_for_06。"}
+        payload = {"source": source, "stage_outputs": outputs, "task": "站在 06 单帧分镜角度进行资产复核。必须使用 01 story_understanding/story_spine/events/conflicts 和 02 appearance_state_changes 判断遗漏、误合并、误分级、服装版本缺失、过度资产化，并输出 downstream_readiness_for_06。"}
     else:
         raise ValueError(stage_id)
     if final_revision_context:
@@ -204,7 +205,7 @@ def merge_stage_outputs(novel_analysis: dict[str, Any], script: dict[str, Any], 
         "revision_plan": d.get("revision_plan", {}),
         "warnings": list(d.get("warnings", [])) + list(e.get("warnings", [])),
         "quality_report": {**quality_report, "stage_scores": stage_scores},
-        "notes": ["03 只输出稳定角色库，供 06 单帧分镜引用；不生成图片、不生成分镜、不生成图像提示词。"],
+        "notes": ["03 只输出稳定角色库、定妆照需求和 costume_variants，供 06 单帧分镜引用；不生成图片、不生成分镜、不生成图像提示词。"],
         "config": config,
     }
     validation = schema_validator.validate_final_output(data)
