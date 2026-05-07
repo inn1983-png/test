@@ -2,7 +2,23 @@
 
 `web_ui/` 不是临时测试页，而是整个 AI 短剧生产系统的最终版可视化控制台第一版。
 
-它的目标是解决：LLM 长时间运行时用户看不到系统在做什么、每个阶段输出藏在 JSON 文件里、评分/返工/阻塞问题不直观、后续图片/音频/视频阶段难以统一管理。
+它现在已经接入 00–10：
+
+```text
+00_main_controller：总控 / 自检 / 数据链路检查
+01_novel_parser：小说解析
+02_script_writer：剧本改编
+03_character_system：角色资产库
+04_scene_system：场景资产库
+05_prop_system：道具资产库
+06_storyboard：单帧分镜
+07_storyboard_image：分镜图片
+08_audio：音频生成
+09_video：视频生成
+10_final_assembly：最终成片包装
+```
+
+UI 的目标是解决：LLM 长时间运行时用户看不到系统在做什么、每个阶段输出藏在 JSON 文件里、评分/返工/阻塞问题不直观、图片/音频/视频/最终合成难以统一管理。
 
 ---
 
@@ -28,19 +44,49 @@ http://127.0.0.1:1144
 
 ---
 
+## 推荐检查顺序
+
+进入 UI 后，建议先在「生产控制台」依次执行：
+
+```text
+1. 00–10 数据链路检查
+2. 00 总控自检
+3. 全流程 dry-run
+4. 启动 01–10 生产 / 或只跑指定模块
+```
+
+对应命令行：
+
+```bash
+python 00_main_controller/check_data_link.py --project-id ui_data_link_check
+python 00_main_controller/self_check.py --keep
+python 00_main_controller/run_pipeline.py --mode project --project-id ui_dry_run_check --dry-run --strict-order
+```
+
+数据链路检查报告输出：
+
+```text
+workspace/projects/{project_id}/00_data_link_check_report.json
+```
+
+该检查只做结构和链路检查，不调用 LLM、不调用 ComfyUI、不调用 IndexTTS、不调用 LTX、不调用 FFmpeg。
+
+---
+
 ## 当前已实现
 
-### 1. 总览页
+### 1. 生产驾驶舱
 
 显示：
 
 ```text
-pipeline.json 中的 01–10 模块顺序
+00–10 显示链路
 当前任务状态
 run_status.json 总状态
 关键产物数量
 最近项目列表
 实时日志
+链路检查摘要
 ```
 
 ### 2. 生产控制台
@@ -48,12 +94,20 @@ run_status.json 总状态
 支持：
 
 ```text
+00–10 数据链路检查
+00 总控自检
+全流程 dry-run
+只建运行上下文
 project / book_chapter 模式
 输入 project_id / book_id / chapter_id
 粘贴 novel.txt 正文
 从指定模块继续运行
 只运行单个模块
 配置本地 LLM Base URL / Model / Temperature / Timeout
+配置 07 图片执行模式 / ComfyUI 地址 / workflow mapping / 风格后缀 / 负向提示词
+配置 08 音频执行模式 / IndexTTS 根目录
+配置 09 视频执行模式
+配置 10/09 使用的 FFmpeg 路径
 启动生产
 停止当前任务
 ```
@@ -64,11 +118,13 @@ project / book_chapter 模式
 
 ```text
 workspace/.../<module>/intermediate/*.json
+workspace/projects/{project_id}/00_data_link_check_report.json
 ```
 
 并显示：
 
 ```text
+00 链路检查结果
 阶段文件
 stage_quality.score
 stage_quality.passed
@@ -76,11 +132,21 @@ issues 数量
 阶段 JSON 预览
 ```
 
-适合 01–06 这种真实分阶段 LLM 模块。
+### 4. 返工中心
 
-### 4. 资产库入口
+集中显示：
 
-为最终版资产工作台预留并已接入：
+```text
+模块 failed / blocked
+阶段低分 / issues
+quality_report.needs_retry
+schema_validation_issues
+00 数据链路失败项
+```
+
+### 5. 资产库入口
+
+已接入：
 
 ```text
 03_character_system/characters.json
@@ -88,13 +154,40 @@ issues 数量
 05_prop_system/props.json
 ```
 
-当前先做 JSON 预览，后续可升级成角色卡 / 场景卡 / 道具卡。
+当前支持 JSON 预览和提示词草稿编辑，后续可升级成角色卡 / 场景卡 / 道具卡的真实编辑与单项重绘。
 
-### 5. 产物中心
+### 6. 图片阶段入口
+
+已接入 07 相关预览入口：
+
+```text
+07_storyboard_image/image_manifest.json
+07_storyboard_image/dependency_index.json
+角色定妆图
+角色造型图
+场景 / 道具参考图
+正式单帧分镜图
+```
+
+### 7. 分镜工作台
+
+读取：
+
+```text
+06_storyboard/storyboard.json
+```
+
+显示分镜卡片，并为后续单帧重绘预留提示词编辑入口。
+
+### 8. 产物中心
 
 集中展示关键产物：
 
 ```text
+00_data_link_check_report.json
+runtime_context.json
+manifest.json
+run_status.json
 01_novel_parser/novel_analysis.json
 02_script_writer/script.json
 03_character_system/characters.json
@@ -104,117 +197,17 @@ issues 数量
 06_storyboard/storyboard_meta.json
 07_storyboard_image/image_manifest.json
 08_audio/final_audio.wav
+08_audio/audio_timeline.json
+08_audio/subtitle.srt
+08_audio/subtitle.ass
 09_video/video_manifest.json
+09_video/final_video.mp4
 10_final_assembly/final.mp4
+10_final_assembly/final_manifest.json
+10_final_assembly/final_meta.json
 ```
 
-JSON 可直接弹窗预览。
-
----
-
-## 最终版 UI 规划
-
-### A. 项目首页
-
-用于管理多个项目 / 多本书 / 多章节：
-
-```text
-项目列表
-章节列表
-当前进度
-最近失败
-最终成片
-```
-
-### B. 生产控制台
-
-最终应支持：
-
-```text
-小说输入
-章节选择
-模块选择
-本地 LLM 参数
-ComfyUI 参数
-CosyVoice2 参数
-LTX2.3 参数
-一键全流程
-从失败处继续
-只重跑某阶段
-```
-
-### C. 阶段透明区
-
-每个阶段都要显示：
-
-```text
-阶段目标
-输入摘要
-LLM 原始输出
-JSON 修复记录
-评分
-修改意见
-自动重跑次数
-最终输出
-schema 校验
-```
-
-### D. 资产库工作台
-
-03/04/05 后续升级成可视化资产卡：
-
-```text
-角色卡：canonical_name、fixed face、costume_variants、定妆照、造型照
-场景卡：canonical_scene_name、scene_level、参考图、父场景
-道具卡：canonical_prop_name、wearable_policy、绑定角色、参考图
-```
-
-### E. 分镜工作台
-
-06 后续升级成真正分镜表：
-
-```text
-frame_id
-剧情片段
-角色引用
-costume_id
-appearance_asset_key
-场景引用
-道具引用
-构图说明
-连续性说明
-四宫格预览组
-```
-
-07 图片生成后，分镜表应变成图文表格。
-
-### F. 媒体生产区
-
-07/08/09/10 后续接入：
-
-```text
-图片队列
-音频队列
-视频队列
-显存资源状态
-失败重试
-文件预览
-最终导出
-```
-
-### G. 返工中心
-
-集中显示所有问题：
-
-```text
-needs_retry
-retry_stages
-upstream_blocking_issues
-schema_validation_issues
-quality_report.issues
-```
-
-最终目标是让用户不用翻 JSON，也能知道应该重跑 03、04、05 还是 06。
+JSON、字幕、图片、音频、视频文件都能通过 UI 预览或定位。
 
 ---
 
@@ -222,7 +215,8 @@ quality_report.issues
 
 ```text
 不是黑盒等待，而是过程可见。
-不是单模块测试，而是 01–10 总控。
+不是单模块测试，而是 00–10 总控。
 不是只看日志，而是看阶段产物、评分、返工原因。
-不是临时页面，而是后续 07 图片、08 音频、09 视频、10 合成都能接入的最终工作台骨架。
+00 只做总控、上下文、校验、自检和数据链路检查。
+01–10 仍按 pipeline.json 执行，模块边界不改变。
 ```
