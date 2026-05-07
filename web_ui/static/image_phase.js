@@ -130,6 +130,27 @@
   }
   window.renderImagePhase = renderImagePhase;
 
+  try {
+    const oldGetPayload = typeof getPayload === "function" ? getPayload : null;
+    if (oldGetPayload) {
+      const patchedGetPayload = function (extra) {
+        const payload = oldGetPayload(extra || {});
+        payload.image_execution_mode = el("imageExecutionModeInput")?.value || "";
+        payload.comfyui_base_url = el("comfyuiBaseUrlInput")?.value || "";
+        payload.comfyui_workflow_mapping = el("workflowMappingInput")?.value || "";
+        payload.image_style_suffix = el("imageStyleSuffixInput")?.value || "";
+        payload.image_negative_prompt = el("imageNegativePromptInput")?.value || "";
+        if (extra) Object.assign(payload, extra);
+        if (payload.only_module) payload.from_module = "";
+        return payload;
+      };
+      window.getPayload = patchedGetPayload;
+      getPayload = patchedGetPayload;
+    }
+  } catch (err) {
+    console.warn("image phase payload patch skipped", err);
+  }
+
   const oldRenderSnapshot = window.renderSnapshot;
   if (typeof oldRenderSnapshot === "function") {
     window.renderSnapshot = async function () {
