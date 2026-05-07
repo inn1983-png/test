@@ -11,11 +11,19 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def _text_of(item: dict[str, Any]) -> str:
-    for key in ("text", "line", "content", "dialogue", "os", "voice_text", "narration"):
+    for key in ("tts_text", "text", "line", "content", "dialogue", "os", "voice_text", "narration"):
         value = item.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def _line_type_of(item: dict[str, Any]) -> str:
+    for key in ("voice_line_type", "line_type", "type", "kind"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip().upper()
+    return "D"
 
 
 def _speaker_of(item: dict[str, Any]) -> str:
@@ -23,11 +31,13 @@ def _speaker_of(item: dict[str, Any]) -> str:
         value = item.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
-    kind = str(item.get("type") or item.get("line_type") or "").lower()
+    kind = _line_type_of(item).lower()
     if kind in {"n", "narration", "旁白"}:
         return "Narrator"
     if kind in {"m", "os", "monologue", "心理", "内心"}:
         return "OS"
+    if kind in {"s", "silence", "blank", "留白"}:
+        return "Silence"
     return "Narrator"
 
 
@@ -39,8 +49,38 @@ def _emotion_of(item: dict[str, Any]) -> str:
     return "calm"
 
 
+def _voice_line_plan_candidates(script: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, item in enumerate(_as_list(script.get("voice_line_plan")), start=1):
+        if not isinstance(item, dict):
+            continue
+        line_type = _line_type_of(item)
+        text = _text_of(item)
+        if line_type in {"S", "SILENCE", "留白"}:
+            text = ""
+        elif not text:
+            continue
+        rows.append(
+            {
+                "voice_line_id": item.get("voice_line_id") or f"voice_line_{index:04d}",
+                "segment_id": item.get("segment_id") or item.get("source_segment_id"),
+                "visual_unit_id": item.get("visual_unit_id") or item.get("source_visual_unit_id"),
+                "speaker": _speaker_of(item),
+                "line_type": line_type,
+                "text": text,
+                "emotion": _emotion_of(item),
+                "speed_hint": item.get("speed_hint") or item.get("pace") or "normal",
+                "pause_after_seconds": float(item.get("pause_after_seconds") or item.get("pause_sec") or (1.0 if line_type == "S" else 0.15)),
+                "source": "02_script_writer.voice_line_plan",
+            }
+        )
+    return rows
+
+
 def _collect_candidates(script: dict[str, Any]) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
+
+    candidates.extend(_voice_line_plan_candidates(script))
 
     for key in ("voice_lines", "audio_lines", "dialogue_lines", "narration_lines"):
         for item in _as_list(script.get(key)):
@@ -122,32 +162,39 @@ def _parse_tagged_script(text: str) -> list[dict[str, Any]]:
 
 
 def build_voice_queue(script: dict[str, Any]) -> dict[str, Any]:
-    """Extract a stable audio queue from the flexible 02_script_writer output."""
+    """Extract a stable audio queue from the flexible 02_script_writer output.
+
+    02_script_writer's canonical audio contract is voice_line_plan. 08 must read
+    it first so N/D/M/S order, speaker, and tts_text are preserved. Fallbacks are
+    kept only for older script shapes or hand-written tagged script_text.
+    """
     lines: list[dict[str, Any]] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     for index, item in enumerate(_collect_candidates(script), start=1):
+        line_type = _line_type_of(item)
         text = _text_of(item)
-        if not text:
+        if line_type in {"S", "SILENCE", "留白"}:
+            text = ""
+        elif not text:
             continue
         speaker = _speaker_of(item)
-        line_id = str(item.get("voice_line_id") or item.get("line_id") or item.get("id") or f"audio_line_{index:04d}")
-        dedupe_key = (line_id, speaker, text)
+        line_id = str(item.get("voice_line_id") or item.get("audio_line_id") or item.get("line_id") or item.get("id") or f"audio_line_{index:04d}")
+        dedupe_key = (line_id, speaker, line_type, text)
         if dedupe_key in seen:
             continue
         seen.add(dedupe_key)
-        kind = str(item.get("type") or item.get("line_type") or "dialogue")
         lines.append(
             {
                 "audio_line_id": line_id,
-                "source_segment_id": item.get("segment_id"),
-                "source_visual_unit_id": item.get("visual_unit_id"),
+                "source_segment_id": item.get("segment_id") or item.get("source_segment_id"),
+                "source_visual_unit_id": item.get("visual_unit_id") or item.get("source_visual_unit_id"),
                 "speaker": speaker,
-                "line_type": kind,
+                "line_type": line_type,
                 "text": text,
                 "emotion": _emotion_of(item),
                 "speed_hint": item.get("speed_hint") or item.get("pace") or "normal",
-                "pause_after_seconds": float(item.get("pause_after_seconds") or 0.15),
-                "source": "02_script_writer",
+                "pause_after_seconds": float(item.get("pause_after_seconds") or item.get("pause_sec") or (1.0 if line_type == "S" else 0.15)),
+                "source": item.get("source") or "02_script_writer",
             }
         )
 
@@ -164,7 +211,7 @@ def build_voice_queue(script: dict[str, Any]) -> dict[str, Any]:
                         "source_segment_id": None,
                         "source_visual_unit_id": None,
                         "speaker": "Narrator",
-                        "line_type": "fallback_text",
+                        "line_type": "N",
                         "text": fallback_text.strip(),
                         "emotion": "calm",
                         "speed_hint": "normal",
@@ -179,7 +226,9 @@ def build_voice_queue(script: dict[str, Any]) -> dict[str, Any]:
         "voice_queue": lines,
         "speaker_count": len({line["speaker"] for line in lines}),
         "line_count": len(lines),
+        "source_priority": ["voice_line_plan", "legacy voice/audio line fields", "tagged script_text", "plain script_text fallback"],
         "notes": [
+            "08A 优先读取 02 voice_line_plan，保持 N/D/M/S 顺序、speaker 与 tts_text。",
             "08A 只从 02 剧本提取对白/OS/旁白音频队列，不重新改写剧情。",
             "支持 TxtovideoAudio 标记：N 旁白、D 角色对白、M 心理 OS、S 静音留白。",
         ],
