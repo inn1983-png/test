@@ -43,18 +43,26 @@
             <button class="btn" onclick="switchView('stages')">查看分步输出</button>
             <button class="btn ghost" onclick="switchView('outputs')">查看产物</button>
           </div>
-          <div class="system-subnav-note">运行时右侧会显示实时输出。${system.kind === 'llm' ? '文本系统会显示模型输出、JSON 解析、评分和修改意见。' : '执行系统会显示任务队列、产物、失败项和重试计划。'}</div>
+          <div class="system-subnav-note">运行时下方阶段看板会自动高亮当前步骤。${system.kind === 'llm' ? '文本系统会显示模型输出、JSON 解析、评分和修改意见。' : '执行系统会显示任务队列、产物、失败项和重试计划。'}</div>
         </div>
         <div class="panel system-log-panel">
           <div class="panel-header compact"><h2>实时输出</h2></div>
           <pre id="systemMiniLog" class="log-box">等待运行。启动后会同步显示模型输出、JSON 解析、评分、任务执行和重跑日志。</pre>
         </div>
       </div>
+      <div class="panel live-stage-panel">
+        <div class="live-stage-header">
+          <div><h2>实时阶段看板</h2><p>跑到“故事理解”就高亮故事理解；跑到“候选资产提取”就高亮候选资产提取。每一步后面直接显示该阶段输出摘要。</p></div>
+          <div class="live-stage-legend"><span>蓝色 = 正在运行</span><span>绿色 = 已有输出</span><span>红色 = 失败/需处理</span></div>
+        </div>
+        <div id="liveStageBoard" class="live-stage-board"></div>
+      </div>
       <div class="system-step-grid">
         ${system.stages.map(s => `<div class="system-step-card"><h3>${s[0]}</h3><p>${s[1]}</p><div class="step-meta-list"><span>状态：等待运行</span><span>内容：${system.kind === 'llm' ? '提示词、模型输出、评分、修改意见' : '任务数量、执行状态、产物路径、失败重试'}</span><span>查看：实时输出 + 分步输出</span></div></div>`).join('')}
       </div>
       ${renderExecutionCards(system)}
     `;
+    if (window.renderLiveStageBoard) window.renderLiveStageBoard();
     refreshExecutionCards(system);
   }
 
@@ -77,10 +85,8 @@
   }
 
   async function getJson(path) {
-    try {
-      const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
-      return data.type === 'json' ? data.content : null;
-    } catch (_) { return null; }
+    try { const data = await api(`/api/file?path=${encodeURIComponent(path)}`); return data.type === 'json' ? data.content : null; }
+    catch (_) { return null; }
   }
 
   function card(title, desc, rows, actionPath) {
@@ -92,27 +98,15 @@
     const images = data?.images || data?.image_manifest?.images || [];
     const retry = data?.retry_plan || data?.quality_report?.retry_plan || {};
     if (!images.length) { grid.innerHTML = '<div class="muted">暂无分镜图任务。运行分镜图系统后显示每帧图片卡片。</div>'; return; }
-    const cards = images.slice(0, 80).map((img, i) => card(`图片任务 ${img.frame_id || i + 1}`, img.execution_mode === 'dry_run' ? 'dry-run 任务，尚未真实生成图片。' : '图片执行任务。', [
-      `图片路径：${img.image_path || '-'}`,
-      `执行状态：${img.status || img.execution_result?.status || '未知'}`,
-      `重试：${retry.needs_retry ? '需要检查失败帧' : '暂无'}`
-    ], img.image_path || `${runDir}/07_storyboard_image/image_manifest.json`));
-    grid.innerHTML = cards.join('');
+    grid.innerHTML = images.slice(0, 80).map((img, i) => card(`图片任务 ${img.frame_id || i + 1}`, img.execution_mode === 'dry_run' ? 'dry-run 任务，尚未真实生成图片。' : '图片执行任务。', [`图片路径：${img.image_path || '-'}`, `执行状态：${img.status || img.execution_result?.status || '未知'}`, `重试：${retry.needs_retry ? '需要检查失败帧' : '暂无'}`], img.image_path || `${runDir}/07_storyboard_image/image_manifest.json`)).join('');
   }
 
   async function renderAudioCards(grid, runDir) {
     const manifest = await getJson(`${runDir}/08_audio/audio_manifest.json`);
     const timeline = await getJson(`${runDir}/08_audio/audio_timeline.json`);
     const segments = manifest?.segments || manifest?.audio_segments || timeline?.segments || timeline?.items || [];
-    const base = [
-      card('最终音频', '合成后的整章音频。', [`路径：08_audio/final_audio.wav`, `字幕：subtitle.srt / subtitle.ass`, `时间线：audio_timeline.json`], `${runDir}/08_audio/final_audio.wav`)
-    ];
-    const segCards = segments.slice(0, 80).map((seg, i) => card(`音频段 ${seg.segment_id || seg.voice_line_id || i + 1}`, seg.text || seg.content || seg.line_text || '配音段。', [
-      `说话人：${seg.speaker || seg.character_name || seg.voice_id || '-'}`,
-      `类型：${seg.line_type || seg.type || '-'}`,
-      `时长：${seg.duration_sec || seg.duration || '-'} 秒`,
-      `状态：${seg.status || '未知'}`
-    ], seg.audio_path || `${runDir}/08_audio/audio_timeline.json`));
+    const base = [card('最终音频', '合成后的整章音频。', ['路径：08_audio/final_audio.wav', '字幕：subtitle.srt / subtitle.ass', '时间线：audio_timeline.json'], `${runDir}/08_audio/final_audio.wav`)];
+    const segCards = segments.slice(0, 80).map((seg, i) => card(`音频段 ${seg.segment_id || seg.voice_line_id || i + 1}`, seg.text || seg.content || seg.line_text || '配音段。', [`说话人：${seg.speaker || seg.character_name || seg.voice_id || '-'}`, `类型：${seg.line_type || seg.type || '-'}`, `时长：${seg.duration_sec || seg.duration || '-'} 秒`, `状态：${seg.status || '未知'}`], seg.audio_path || `${runDir}/08_audio/audio_timeline.json`));
     grid.innerHTML = [...base, ...segCards].join('');
   }
 
@@ -120,12 +114,7 @@
     const data = await getJson(`${runDir}/09_video/video_manifest.json`);
     const segments = data?.video_segments || data?.segments || data?.clips || [];
     if (!segments.length) { grid.innerHTML = '<div class="muted">暂无视频片段。运行视频生成后显示每段视频卡片。</div>'; return; }
-    grid.innerHTML = segments.slice(0, 80).map((seg, i) => card(`视频片段 ${seg.segment_id || seg.clip_id || i + 1}`, '按音频时间线和分镜图生成的视频片段。', [
-      `视频路径：${seg.video_path || seg.clip_path || '-'}`,
-      `起止：${seg.start_sec ?? '-'} - ${seg.end_sec ?? '-'} 秒`,
-      `状态：${seg.status || '未知'}`,
-      `重试：${seg.needs_retry ? '需要' : '暂无'}`
-    ], seg.video_path || seg.clip_path || `${runDir}/09_video/video_manifest.json`)).join('');
+    grid.innerHTML = segments.slice(0, 80).map((seg, i) => card(`视频片段 ${seg.segment_id || seg.clip_id || i + 1}`, '按音频时间线和分镜图生成的视频片段。', [`视频路径：${seg.video_path || seg.clip_path || '-'}`, `起止：${seg.start_sec ?? '-'} - ${seg.end_sec ?? '-'} 秒`, `状态：${seg.status || '未知'}`, `重试：${seg.needs_retry ? '需要' : '暂无'}`], seg.video_path || seg.clip_path || `${runDir}/09_video/video_manifest.json`)).join('');
   }
 
   async function renderAssemblyCards(grid, runDir) {
@@ -133,8 +122,8 @@
     const meta = await getJson(`${runDir}/10_final_assembly/final_meta.json`);
     grid.innerHTML = [
       card('输入检查', '检查视频、音频、字幕是否齐全。', [`视频：${manifest?.input_video || meta?.input_video || '等待'}`, `音频：${manifest?.input_audio || meta?.input_audio || '等待'}`, `字幕：${manifest?.subtitle || meta?.subtitle || '等待'}`], `${runDir}/10_final_assembly/final_manifest.json`),
-      card('最终成片', '最终导出的完整视频。', [`路径：10_final_assembly/final.mp4`, `状态：${manifest?.status || meta?.status || '等待'}`, `导出器：FFmpeg`], `${runDir}/10_final_assembly/final.mp4`),
-      card('导出元信息', '最终视频的时长、来源、合成参数。', [`manifest：final_manifest.json`, `meta：final_meta.json`], `${runDir}/10_final_assembly/final_meta.json`)
+      card('最终成片', '最终导出的完整视频。', ['路径：10_final_assembly/final.mp4', `状态：${manifest?.status || meta?.status || '等待'}`, '导出器：FFmpeg'], `${runDir}/10_final_assembly/final.mp4`),
+      card('导出元信息', '最终视频的时长、来源、合成参数。', ['manifest：final_manifest.json', 'meta：final_meta.json'], `${runDir}/10_final_assembly/final_meta.json`)
     ].join('');
   }
 
@@ -178,18 +167,16 @@
       const box = document.getElementById('systemMiniLog');
       if (!box) return;
       const line = event.payload.line || '';
-      if (line.includes('[LLM_') || line.includes('[JSON_') || line.includes('[STAGE_') || line.includes('[QUALITY]') || line.includes('[07') || line.includes('[08') || line.includes('[09') || line.includes('[10')) {
+      if (line.includes('[LLM_') || line.includes('[JSON_') || line.includes('[STAGE_') || line.includes('[QUALITY]') || line.includes('[07') || line.includes('[08') || line.includes('[09') || line.includes('[10') || /\b(0[1-9]|10)[A-E]\b/.test(line) || line.includes('故事理解') || line.includes('候选资产')) {
         box.textContent = (box.textContent === '等待运行。启动后会同步显示模型输出、JSON 解析、评分、任务执行和重跑日志。' ? '' : box.textContent + '\n') + line;
         box.scrollTop = box.scrollHeight;
       }
     });
     es.addEventListener('snapshot', () => {
       if (window.refreshCurrentExecutionCards) window.refreshCurrentExecutionCards();
+      if (window.renderLiveStageBoard) window.renderLiveStageBoard();
     });
   };
 
-  window.addEventListener('DOMContentLoaded', function () {
-    installView();
-    installNav();
-  });
+  window.addEventListener('DOMContentLoaded', function () { installView(); installNav(); });
 })();
