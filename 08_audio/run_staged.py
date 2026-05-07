@@ -16,9 +16,9 @@ stage_runner = import_module("08_audio.core.stage_runner")
 
 MODULE_NAME = "08_audio"
 DISPLAY_NAME = "配音生成系统"
-DESCRIPTION = "负责读取 02 剧本文本，构建配音队列，调用本地 index-tts / IndexTTS2 生成分段音频，并合成为 final_audio.wav。"
+DESCRIPTION = "负责读取 02 剧本文本，支持 N/D/M/S 音频标记，绑定音色库，调用本地 index-tts / IndexTTS2 生成分段音频，合成为 final_audio.wav，并输出时间轴与字幕。"
 KEY_OUTPUT = "final_audio.wav"
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 def _read_upstream(module_name: str, filename: str) -> dict[str, Any]:
@@ -33,6 +33,23 @@ def _read_upstream(module_name: str, filename: str) -> dict[str, Any]:
     if not isinstance(data, dict) or not data:
         raise RuntimeError(f"{MODULE_NAME} requires upstream {module_name}/{filename}.")
     return data
+
+
+def _register_if_exists(artifact_name: str, path_value: Any, artifact_type: str, description: str) -> None:
+    if not isinstance(path_value, str) or not path_value:
+        return
+    path = Path(path_value)
+    if not path.exists():
+        return
+    base_module.register_output_artifact(
+        module_name=MODULE_NAME,
+        artifact_name=artifact_name,
+        path=path,
+        artifact_type=artifact_type,
+        description=description,
+        metadata={"schema_version": SCHEMA_VERSION},
+        is_key_output=True,
+    )
 
 
 def main() -> int:
@@ -61,11 +78,15 @@ def main() -> int:
             },
             is_key_output=True,
         )
+        _register_if_exists("audio_timeline.json", data.get("timeline_path"), "json", "08 关键输出：音频时间轴，供 09 按真实音频时长规划视频单元。")
+        _register_if_exists("subtitle.srt", data.get("subtitle_srt_path"), "subtitle", "08 关键输出：SRT 字幕。")
+        _register_if_exists("subtitle.ass", data.get("subtitle_ass_path"), "subtitle", "08 关键输出：ASS 字幕。")
+
         base_module.write_json_key_output(
             MODULE_NAME,
             "audio_manifest.json",
             data,
-            description="08 音频清单：台词队列、分段音频、执行结果、合成信息、评分与 schema 校验。",
+            description="08 音频清单：台词队列、音色绑定、情绪映射、分段音频、时间轴、字幕、执行结果、评分与 schema 校验。",
         )
         base_module.write_json_key_output(
             MODULE_NAME,
@@ -77,11 +98,15 @@ def main() -> int:
                 "execution_mode": data.get("execution_mode"),
                 "final_audio_path": str(final_audio),
                 "duration_seconds": data.get("duration_seconds"),
+                "timeline_path": data.get("timeline_path"),
+                "subtitle_srt_path": data.get("subtitle_srt_path"),
+                "subtitle_ass_path": data.get("subtitle_ass_path"),
+                "voice_binding_summary": data.get("voice_binding_summary", {}),
                 "stage_status": data.get("stage_status", []),
                 "quality_report": data.get("quality_report", {}),
                 "schema_validation": data.get("schema_validation", {}),
             },
-            description="08 元信息：音频阶段状态、执行模式、时长、评分与 schema 校验。",
+            description="08 元信息：音频阶段状态、执行模式、时长、音色绑定、时间轴、字幕、评分与 schema 校验。",
         )
         print(f"{DISPLAY_NAME} finished. key output: {KEY_OUTPUT}")
         return 0
