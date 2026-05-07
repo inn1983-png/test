@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
+from importlib import import_module
 from pathlib import Path
 from typing import Any
-from importlib import import_module
 
 io_utils = import_module("00_common.io_utils")
 workflow_adapter = import_module("09_video.core.workflow_adapter")
@@ -14,11 +13,11 @@ comfyui_client = import_module("09_video.core.comfyui_client")
 quality_checker = import_module("09_video.core.quality_checker")
 schema_validator = import_module("09_video.core.schema_validator")
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 STAGES: list[dict[str, str]] = [
-    {"stage_id": "09A", "name": "audio_image_segment_plan", "output_file": "09A_video_segment_plan.json"},
-    {"stage_id": "09B", "name": "ltx23_comfyui_execution", "output_file": "09B_ltx23_execution.json"},
+    {"stage_id": "09A", "name": "window_segment_plan", "output_file": "09A_video_segment_plan.json"},
+    {"stage_id": "09B", "name": "ltx23_comfyui_one_window_execution", "output_file": "09B_ltx23_execution.json"},
     {"stage_id": "09C", "name": "breakpoint_resume_scan", "output_file": "09C_resume_scan.json"},
     {"stage_id": "09D", "name": "final_merge_and_manifest_check", "output_file": "09D_final_merge.json"},
 ]
@@ -52,7 +51,7 @@ def run_09b(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
             continue
         try:
             result = client.submit_segment(segment, output_dir)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             result = {
                 "status": "failed",
                 "execution_mode": "execute" if not client.dry_run else "dry_run",
@@ -64,13 +63,13 @@ def run_09b(plan: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
         if result.get("status") not in {"success", "submitted"}:
             failed.append(result)
     return {
-        "stage": "09B_ltx23_comfyui_execution",
+        "stage": "09B_ltx23_comfyui_one_window_execution",
         "status": "needs_retry" if failed else "success",
         "execution_mode": "dry_run" if client.dry_run else "execute",
         "execution_results": results,
         "failed_video_segments": failed,
         "notes": [
-            "09B 基于本地已验证 LTX2.3 ComfyUI 工作流思路：分镜图片 + 完整音频切片 + 当前段号 + 自动保存。",
+            "09B 采用外部 Python 一段一提交；ComfyUI 每次只跑一组关键帧窗口。",
             "已有 clip 文件默认跳过，形成断点续跑；需要重抽卡时设置 AI_DRAMA_VIDEO_FORCE_RERUN=1。",
         ],
     }
@@ -87,14 +86,7 @@ def run_09c(plan: dict[str, Any], execution: dict[str, Any], output_dir: str | P
         clip_path = Path(str(result.get("output_clip_path") or segment.get("output_clip_path")))
         exists = clip_path.exists()
         status = "success" if exists else "missing"
-        row = {
-            **segment,
-            "status": status,
-            "resume_hit": bool(result.get("resume_hit")),
-            "prompt_id": result.get("prompt_id"),
-            "output_clip_path": str(clip_path),
-            "execution_result": result,
-        }
+        row = {**segment, "status": status, "resume_hit": bool(result.get("resume_hit")), "prompt_id": result.get("prompt_id"), "output_clip_path": str(clip_path), "execution_result": result}
         rows.append(row)
         if not exists:
             missing.append({"segment_id": segment.get("segment_id"), "output_clip_path": str(clip_path), "reason": "clip file missing"})
@@ -106,11 +98,7 @@ def run_09c(plan: dict[str, Any], execution: dict[str, Any], output_dir: str | P
         "missing_count": len(missing),
         "segments": rows,
         "missing_segments": missing,
-        "resume_policy": {
-            "skip_existing_clips": True,
-            "force_rerun_env": "AI_DRAMA_VIDEO_FORCE_RERUN=1",
-            "retry_scope": "failed_video_segments_only" if missing else "none",
-        },
+        "resume_policy": {"skip_existing_clips": True, "force_rerun_env": "AI_DRAMA_VIDEO_FORCE_RERUN=1", "retry_scope": "failed_video_segments_only" if missing else "none"},
     }
     path = Path(output_dir) / "resume_manifest.json"
     io_utils.write_json(path, resume_manifest)
@@ -146,12 +134,7 @@ def run_09d(plan: dict[str, Any], resume: dict[str, Any], final_audio_path: str 
             merge_status = "success"
             merge_note = "Merged clips with ffmpeg concat."
         else:
-            final_path.write_text(
-                "DRY_RUN_OR_FFMPEG_MERGE_PLACEHOLDER\n"
-                + "\n".join(str(seg.get("output_clip_path")) for seg in segments),
-                encoding="utf-8",
-            )
-            merge_status = "planned" if any(str(seg.get("output_clip_path", "")).endswith(".mp4") for seg in segments) else "planned"
+            final_path.write_text("DRY_RUN_OR_FFMPEG_MERGE_PLACEHOLDER\n" + "\n".join(str(seg.get("output_clip_path")) for seg in segments), encoding="utf-8")
             merge_note = "ffmpeg merge unavailable or source clips are placeholders; wrote merge placeholder for manifest continuity."
     merge_data = {
         "schema_version": SCHEMA_VERSION,
@@ -170,33 +153,22 @@ def run_09d(plan: dict[str, Any], resume: dict[str, Any], final_audio_path: str 
     return {**merge_data, "merge_result_path": str(path)}
 
 
-def run_video_stages(image_manifest: dict[str, Any], audio_timeline: dict[str, Any], final_audio_path: str | Path, output_dir: str | Path) -> dict[str, Any]:
+def run_video_stages(image_manifest: dict[str, Any], audio_timeline: dict[str, Any], final_audio_path: str | Path, output_dir: str | Path, storyboard: dict[str, Any] | None = None) -> dict[str, Any]:
     stage_status: list[dict[str, Any]] = []
     outputs: dict[str, dict[str, Any]] = {}
-    outputs["09A"] = workflow_adapter.build_segment_plan(image_manifest, audio_timeline, final_audio_path, output_dir)
+    outputs["09A"] = workflow_adapter.build_segment_plan(image_manifest, audio_timeline, final_audio_path, output_dir, storyboard=storyboard or {})
     io_utils.write_json(Path(output_dir) / "video_plan.json", outputs["09A"])
     stage_status.append(_run_and_score("09A", outputs["09A"], output_dir, "09A_video_segment_plan.json"))
-
     outputs["09B"] = run_09b(outputs["09A"], output_dir)
     stage_status.append(_run_and_score("09B", outputs["09B"], output_dir, "09B_ltx23_execution.json"))
-
     outputs["09C"] = run_09c(outputs["09A"], outputs["09B"], output_dir)
     stage_status.append(_run_and_score("09C", outputs["09C"], output_dir, "09C_resume_scan.json"))
-
     outputs["09D"] = run_09d(outputs["09A"], outputs["09C"], final_audio_path, output_dir)
     stage_status.append(_run_and_score("09D", outputs["09D"], output_dir, "09D_final_merge.json"))
-
     return {"schema_version": SCHEMA_VERSION, "stage_mode": "video_execution", "stage_status": stage_status, "outputs": outputs}
 
 
-def merge_stage_outputs(
-    image_manifest: dict[str, Any],
-    audio_timeline: dict[str, Any],
-    final_audio_path: str | Path,
-    config: dict[str, Any],
-    stage_result: dict[str, Any],
-    output_dir: str | Path,
-) -> dict[str, Any]:
+def merge_stage_outputs(image_manifest: dict[str, Any], audio_timeline: dict[str, Any], final_audio_path: str | Path, config: dict[str, Any], stage_result: dict[str, Any], output_dir: str | Path, storyboard: dict[str, Any] | None = None) -> dict[str, Any]:
     outputs = stage_result["outputs"]
     a = outputs["09A"]
     b = outputs["09B"]
@@ -217,9 +189,13 @@ def merge_stage_outputs(
         "status": "success",
         "stage_mode": "video_execution",
         "execution_mode": a.get("execution_mode"),
+        "window_mode": a.get("window_mode"),
+        "window_size": a.get("window_size"),
+        "stride": a.get("stride"),
         "source": {
             "required_upstream": ["07_storyboard_image.image_manifest.json", "08_audio.final_audio.wav", "08_audio.audio_timeline.json"],
-            "upstream_schema_versions": {"07": image_manifest.get("schema_version"), "08_timeline": audio_timeline.get("schema_version")},
+            "optional_upstream": ["06_storyboard.storyboard.json"],
+            "upstream_schema_versions": {"06": (storyboard or {}).get("schema_version"), "07": image_manifest.get("schema_version"), "08_timeline": audio_timeline.get("schema_version")},
             "output_dir": str(output_dir),
         },
         "final_audio_path": str(final_audio_path),
@@ -234,17 +210,11 @@ def merge_stage_outputs(
         "retry_plan": retry_plan,
         "settings": a.get("settings", {}),
         "stage_status": stage_result.get("stage_status", []),
-        "quality_report": {
-            "needs_retry": retry_plan["needs_retry"],
-            "stage_scores": stage_scores,
-            "completed_count": c.get("completed_count"),
-            "missing_count": c.get("missing_count"),
-        },
+        "quality_report": {"needs_retry": retry_plan["needs_retry"], "stage_scores": stage_scores, "completed_count": c.get("completed_count"), "missing_count": c.get("missing_count")},
         "notes": [
-            "09 基于本地已验证 LTX2.3 ComfyUI 音频切割控图流：07 分镜图片文件夹 + 08 final_audio.wav。",
-            "09 默认按 AI_DRAMA_VIDEO_SEGMENT_SECONDS=10 切片，可设为 12。",
-            "09 自动循环读取分镜图，图片数量少于音频切片数量时按顺序取模复用。",
-            "09 支持断点续跑：已存在 clip 默认跳过；最终自动合并由 AI_DRAMA_VIDEO_AUTO_MERGE 控制。",
+            "09 采用滑动窗口关键帧方案：4图为 1-4、4-7、7-10；6图为 1-6、6-11；9图为 1-9、9-17。",
+            "09 采用外部 Python 一段一提交，ComfyUI 每次只运行一组关键帧窗口。",
+            "每段 ltx_prompt/negative_prompt/motion_policy 由 09 根据 06/07/08 自动生成并注入工作流。",
         ],
         "config": config,
     }
