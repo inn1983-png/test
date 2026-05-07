@@ -20,7 +20,8 @@
 01 小说解析系统已具备真实 LLM 分阶段解析、评分、JSON 修复、总检重跑和 schema 硬校验。
 02 剧本改编系统已升级到 schema 1.2，成为音频驱动、单帧分镜友好、多版本评估、失败样本回灌的真实 LLM 子系统。
 03/04/05 已从旧 scaffold library 目录切换为真实资产 system：03_character_system、04_scene_system、05_prop_system。
-03/04/05 已加入资产分级与参考图策略：01 提取一切，03/04/05 先合并再分级，06 只引用稳定主资产。
+03/04/05 已升级为五阶段真实资产系统：A 合并、B 资产卡、C 剧本绑定、D 模块总检、E 面向 06 的资产复核。
+03/04/05 已移除 run_staged.py 中的 write_placeholder_output，不再生成占位 result.json。
 ```
 
 ---
@@ -75,7 +76,7 @@
 只要文章里提到过的人、地点、物件，都必须作为候选输出。
 重要性只作为 importance 字段评分，不能作为是否提取的门槛。
 候选过多不算错误；遗漏才需要返工。
-01 不负责最终筛选、合并、去重。03/04/05 负责标准化与资产分级。
+01 不负责最终筛选、合并、去重。03/04/05 负责标准化、资产分级和复核。
 ```
 
 ---
@@ -126,6 +127,7 @@ ComfyUI 调用
 03B character_cards
 03C script_usage_binding
 03D quality_check
+03E asset_review
 ```
 
 03 最高规则：
@@ -140,35 +142,43 @@ ComfyUI 调用
 03 资产分级：
 
 ```text
+asset_importance_score = 0-100
+importance_reason
+source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / character_arc_map / paragraphs
 asset_level = main / supporting / extra_group / mentioned_only
 needs_fixed_face = true / false
 reference_image_priority = required / optional / not_needed
-reference_image_plan 必须给出推荐参考图策略
+reference_image_plan
 ```
 
-03 参考图策略：
+03E 复核：
 
 ```text
-main：front_face_half_body + full_body_front
-supporting：front_face_half_body
-extra_group / mentioned_only：不强制参考图
+面向 06 单帧分镜复核，不是单纯格式检查。
+必须检查遗漏、误合并、误拆分、误分级、过度资产化、固定脸策略、参考图计划和 06 可用性。
+如果 01 candidate_characters 也遗漏但 01 理解中明确存在，写入 upstream_blocking_issues，建议 01D 重跑。
+如果 03 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
+```
+
+03 输出新增：
+
+```text
+asset_review_report
+downstream_readiness_for_06
+main_assets_for_06
+optional_assets_for_06
+do_not_reference_as_main_asset
+upstream_blocking_issues
 ```
 
 03 图像资产最高规则：
 
 ```text
+03 不生成图片，只写参考图计划。
 先单视图稳定，不要一开始做三视图。
 不要把正面/侧面/背面拼成一张三视图图板。
 如后续确实需要三视图，必须拆成 front / side / back 多张独立图。
-```
-
-03 schema 硬校验新增：
-
-```text
-asset_level 合法性
-主/配角 needs_fixed_face=true
-龙套/仅提及角色不强制 required 参考图
-核心角色 reference_image_plan 必须包含 front_face_half_body
+图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
 ---
@@ -188,6 +198,7 @@ asset_level 合法性
 04B scene_cards
 04C script_usage_binding
 04D quality_check
+04E asset_review
 ```
 
 04 最高规则：
@@ -201,35 +212,42 @@ asset_level 合法性
 04 资产分级：
 
 ```text
+asset_importance_score = 0-100
+importance_reason
+source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / scene_value_map / visual_risk_report / paragraphs
 asset_level = main_scene / sub_scene / temporary / background
 needs_reference_image = true / false
 parent_scene
 reference_image_plan
 ```
 
-04 参考图策略：
+04E 复核：
 
 ```text
-main_scene：wide_establishing_view，先用全景图稳定空间
-sub_scene：需要时再补 local_area_view
-temporary / background：只保留文字资产，不强制做图
+面向 06 单帧分镜复核。
+必须检查场景拆太碎、错误合并、主/子/临时分级、parent_scene、全景图计划、临时地点误升主场景、背景物件误作场景和 06 可用性。
+如果 01 candidate_scenes 也遗漏但 01 理解中明确存在，写入 upstream_blocking_issues，建议 01D 重跑。
+如果 04 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
+```
+
+04 输出新增：
+
+```text
+asset_review_report
+downstream_readiness_for_06
+main_assets_for_06
+optional_assets_for_06
+do_not_reference_as_main_asset
+upstream_blocking_issues
 ```
 
 04 图像资产最高规则：
 
 ```text
+04 不生成图片，只写参考图计划。
 场景优先全景图，不要一开始做大量多角度。
 先主场景全景，再根据 06/07 失败情况补子区域局部图。
-```
-
-04 schema 硬校验新增：
-
-```text
-asset_level 合法性
-主场景 needs_reference_image=true
-主场景 reference_image_plan 必须包含 wide_establishing_view
-子场景必须绑定 parent_scene
-禁止出现 prompt / image_prompt / desc_prompt 等越界字段
+图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
 ---
@@ -249,6 +267,7 @@ asset_level 合法性
 05B prop_cards
 05C script_usage_binding
 05D quality_check
+05E asset_review
 ```
 
 05 最高规则：
@@ -262,35 +281,42 @@ asset_level 合法性
 05 资产分级：
 
 ```text
+asset_importance_score = 0-100
+importance_reason
+source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / asset_binding_hints / visual_risk_report / paragraphs
 asset_level = key_prop / action_prop / background_object / mentioned_only
 needs_reference_image = true / false
 reference_image_plan
 ```
 
-05 参考图策略：
+05E 复核：
 
 ```text
-key_prop：clean_front_view；复杂道具可加 side_view
-action_prop：需要时再做 clean_front_view
-background_object / mentioned_only：不强制做图，尽量归入场景元素
+面向 06 单帧分镜复核。
+必须检查关键道具遗漏、背景物件误升关键道具、同一道具拆分、普通道具过度资产化、背景物件归入场景元素、owner_character 和 06 可用性。
+如果 01 candidate_props 也遗漏但 01 理解中明确存在，写入 upstream_blocking_issues，建议 01D 重跑。
+如果 05 内部不通过，输出 retry_stages 和 revision_instructions，从最早问题阶段连锁重跑。
+```
+
+05 输出新增：
+
+```text
+asset_review_report
+downstream_readiness_for_06
+main_assets_for_06
+optional_assets_for_06
+do_not_reference_as_main_asset
+upstream_blocking_issues
 ```
 
 05 图像资产最高规则：
 
 ```text
+05 不生成图片，只写参考图计划。
 关键道具用单独干净图。
 普通道具和背景物件不要全部做图，否则资产库会爆炸。
 道具图不要和角色/场景混在一起。
-```
-
-05 schema 硬校验新增：
-
-```text
-asset_level 合法性
-关键道具 needs_reference_image=true
-关键道具 reference_image_plan 必须包含 clean_front_view
-背景/仅提及道具不强制参考图
-禁止出现 prompt / image_prompt / desc_prompt 等越界字段
+图片由 07 根据 06 实际分镜需求统一生成。
 ```
 
 ---
@@ -321,10 +347,10 @@ set AI_DRAMA_LLM_TEMPERATURE=0.2
 低于阈值时生成 revision_instructions，并把修改意见传回同阶段 LLM 自动重跑。
 ```
 
-## 总检连锁重跑
+## 总检/复核连锁重跑
 
 ```text
-03D / 04D / 05D 输出 needs_retry=true 和 retry_stages 时，stage_runner.py 会从最早问题阶段开始，连同后续阶段再跑一轮。
+03D/03E、04D/04E、05D/05E 输出 needs_retry=true 和 retry_stages 时，stage_runner.py 会从最早问题阶段开始，连同后续阶段再跑一轮。
 ```
 
 ## JSON 修复机制
@@ -332,6 +358,12 @@ set AI_DRAMA_LLM_TEMPERATURE=0.2
 ```text
 LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原因发回 LLM。
 该机制只修复 JSON 格式，不新增业务内容。
+```
+
+## 最终 schema 硬校验
+
+```text
+03/04/05 最终 schema_validator.py 不只查字段，还会检查 asset_importance_score、source_understanding_basis、asset_review_report、downstream_readiness_for_06、main/optional/do_not_reference 清单。
 ```
 
 ---
@@ -373,9 +405,10 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 
 ```text
 01 负责提取一切。
-03/04/05 不要简单删除候选，而是合并、分级、输出稳定资产库。
+03/04/05 不要简单删除候选，而是合并、分级、复核、输出稳定资产库。
+03/04/05 必须真实可用，方便后续测试，不要用占位文件。
+复核必须使用 01 阶段对小说的真正理解来判断遗漏、误合并、误分级、过度资产化。
+复核发现遗漏不能直接在 E 阶段硬补，必须通过 retry_stages 触发前置阶段重跑；如果 01 自己也漏提，则写 upstream_blocking_issues。
 03/04/05 形成稳定资产库，让 06 单帧分镜可以直接引用稳定角色名、稳定场景名、稳定道具名，避免角色串脸、场景漂移、道具混乱。
-角色资产先单视图稳定，不要一开始做三视图；三视图如需要必须拆成多张独立图。
-场景资产主场景优先全景图，子场景后续按需补局部图，不要一开始做大量多角度。
-道具资产关键道具单独干净图，背景物件尽量归入场景，不要全部做图。
+03/04/05 不生成图片，只写参考图计划；图片由 07 根据 06 实际分镜需求统一生成。
 ```
