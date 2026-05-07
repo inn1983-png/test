@@ -7,17 +7,17 @@
 当前 02 的定位已经升级为：
 
 ```text
-音频驱动 + 单帧分镜友好 + 防压缩过狠 + 多版本评估 + 失败样本回灌 的真实 LLM 剧本改编子系统
+音频驱动 + 单帧分镜友好 + 外观/换装状态可追踪 + 防压缩过狠 + 多版本评估 + 失败样本回灌 的真实 LLM 剧本改编子系统
 ```
 
 边界必须清楚：
 
 ```text
-02 负责：剧本改编、对白、OS、留白、动作、情绪、语音行预拆分、剧本生产标注、单帧分镜准备字段、剧本质量评估。
+02 负责：剧本改编、对白、OS、留白、动作、情绪、语音行预拆分、剧本生产标注、外观/换装状态变化标注、单帧分镜准备字段、剧本质量评估。
 02 不负责：角色资产库、场景资产库、道具资产库、正式分镜、图片生成、视频生成、ComfyUI 调用。
 ```
 
-02E 中的 `visual_dramatic_units` / `storyboard_hints` / `continuity_chain` 只是剧本层面的动作链、画面锚点和连续性提示，方便 06 分镜系统继续拆单帧，不是正式分镜，也不是图像提示词。
+02E 中的 `visual_dramatic_units` / `appearance_state_changes` / `storyboard_hints` / `continuity_chain` 只是剧本层面的动作链、外观状态、画面锚点和连续性提示，方便 03 建 costume_variants、方便 06 分镜系统继续拆单帧，不是正式分镜，也不是图像提示词。
 
 ---
 
@@ -31,7 +31,7 @@
 02B 剧本结构 + 角色称呼一致性 + 连续性种子 + 情绪曲线
 02C 语音行预拆分 + 6-12 秒视频单元候选
 02D 多版本正式剧本 + 最终版本选择 + 原文关键句继承 + 口播节奏检查
-02E 剧本生产标注 + 单帧分镜准备字段 + 画面可执行性 + 人物负载 + 连续性链表
+02E 剧本生产标注 + 外观/换装状态变化 + 单帧分镜准备字段 + 画面可执行性 + 人物负载 + 连续性链表
 02F 总检评分 + 失败样本回灌建议
 JSON 修复
 阶段评分与修改意见重跑
@@ -40,7 +40,7 @@ JSON 修复
 script.json / script.txt / script_meta.json 输出
 ```
 
-后续需要根据真实小说解析结果和本地模型表现继续精修 prompt、评分阈值、剧本长度控制、对白质量、语音行时长估计和单帧连续性字段。
+后续需要根据真实小说解析结果和本地模型表现继续精修 prompt、评分阈值、剧本长度控制、对白质量、语音行时长估计、外观状态变化和单帧连续性字段。
 
 ---
 
@@ -143,18 +143,6 @@ script_meta.json
 01_novel_parser/novel_analysis.json
 ```
 
-正式 pipeline 中，02 会优先读取模块输入目录下的：
-
-```text
-02_script_writer/novel_analysis.json
-```
-
-如果不存在，会兜底读取当前 run_dir 下的：
-
-```text
-01_novel_parser/novel_analysis.json
-```
-
 02 重点使用 01 的以下字段：
 
 ```text
@@ -183,18 +171,6 @@ paragraphs
 ---
 
 # 输出
-
-正式 pipeline 输出目录：
-
-```text
-workspace/projects/{project_id}/02_script_writer/
-```
-
-或：
-
-```text
-workspace/books/{book_id}/chapters/{chapter_id}/02_script_writer/
-```
 
 关键输出：
 
@@ -299,6 +275,7 @@ audio_driven_balanced
 production_annotations
 audio_cues
 visual_dramatic_units
+appearance_state_changes
 storyboard_hints
 visual_executability_report
 character_load_report
@@ -307,6 +284,26 @@ risk_report
 ```
 
 说明：02E 只做剧本标注，不生成正式分镜、不生成图像提示词、不生成视频提示词。
+
+`appearance_state_changes` 是 02 给 03/06 的关键字段，用来记录：
+
+```text
+default_appearance：角色默认外观/默认服装
+costume_change：换装
+disguise：伪装
+damage_state：衣服破损、受伤后状态
+wearable_added：戴上/加上穿戴物
+wearable_removed：摘下/去除穿戴物
+wearable_emphasized：特写强调穿戴物
+```
+
+它解决的问题是：
+
+```text
+03 不靠猜来生成 costume_variants。
+06 不靠猜来选择 costume_id / appearance_asset_key。
+07 后续可以按定妆照 → 换装造型照 → 分镜图引用造型照的链路执行。
+```
 
 单帧分镜策略：
 
@@ -338,6 +335,7 @@ failure_learning_notes
 是否存在 12 秒风险
 是否继承 01 golden_lines / 高刺激原文句子
 角色称呼是否稳定
+外观/换装状态变化是否明确
 分集/分段是否合理
 多版本生成和选择是否合理
 情绪曲线是否有起伏
@@ -354,7 +352,7 @@ failure_learning_notes
 {
   "quality_report": {
     "needs_retry": true,
-    "retry_stages": ["02C"],
+    "retry_stages": ["02E"],
     "revision_instructions": []
   }
 }
@@ -378,7 +376,7 @@ failure_learning_notes
 02B 是否有 character_name_usage / script_emotion_curve
 02C 是否有 voice_line_plan / script_video_unit_candidates / 12 秒风险标记
 02D 是否有 script_versions / selected_version_id / segments / voice_line_id / source_line_usage / tts_readability_report
-02E 是否有 audio_cues / visual_dramatic_units / storyboard_hints / visual_executability_report / character_load_report / continuity_chain
+02E 是否有 audio_cues / visual_dramatic_units / appearance_state_changes / storyboard_hints / visual_executability_report / character_load_report / continuity_chain
 02F 是否有 failure_learning_notes 或要求重跑
 ```
 
@@ -432,7 +430,8 @@ segment 是否绑定真实 voice_line_id
 script_versions 是否为空
 selected_version_id 是否存在于 script_versions
 script_text 是否为空
-audio_cues / storyboard_hints / visual_dramatic_units 是否引用真实 segment_id / voice_line_id
+audio_cues / storyboard_hints / visual_dramatic_units / appearance_state_changes 是否引用真实 segment_id / voice_line_id / visual_unit_id
+appearance_state_changes 是否记录角色默认外观和换装/穿戴状态变化
 event_coverage_map 是否为空
 source_line_usage 是否为空
 character_name_usage 是否为空
@@ -486,6 +485,7 @@ tts_readability_report / visual_executability_report / character_load_report 是
   "production_annotations": {},
   "audio_cues": [],
   "visual_dramatic_units": [],
+  "appearance_state_changes": [],
   "storyboard_hints": [],
   "visual_executability_report": {},
   "character_load_report": {},
@@ -511,6 +511,7 @@ tts_readability_report / visual_executability_report / character_load_report 是
 对白 / OS / 留白 / 动作 / 情绪
 N/D/M/S 语音行预拆分
 剧本层面的音频提示
+剧本层面的外观/换装状态变化
 剧本层面的单帧分镜动作链和连续性提示
 剧本质量评分和修改意见
 ```
@@ -533,15 +534,16 @@ ComfyUI 调用
 # 与后续模块的关系
 
 ```text
-01_novel_parser → 02_script_writer → 06_storyboard / 08_audio
+01_novel_parser → 02_script_writer → 03/04/05 assets → 06_storyboard / 08_audio
 ```
-
-03/04/05 资产库系统可以与本模块并行或在本模块之后运行。
 
 下游重点字段：
 
 ```text
-06_storyboard：segments / scene_beats / visual_dramatic_units / storyboard_hints / event_coverage_map / character_name_usage / continuity_chain
+03_character_system：character_name_usage / appearance_state_changes / visual_dramatic_units / storyboard_hints / continuity_chain
+04_scene_system：scene_beats / visual_dramatic_units / storyboard_hints / continuity_chain
+05_prop_system：visual_dramatic_units / appearance_state_changes / storyboard_hints / continuity_chain
+06_storyboard：segments / scene_beats / visual_dramatic_units / appearance_state_changes / storyboard_hints / event_coverage_map / character_name_usage / continuity_chain
 08_audio：voice_line_plan / segments / script_text / audio_cues / tts_readability_report
 09_video：script_video_unit_candidates / duration_risk_report / visual_dramatic_units / character_load_report
 10_final_assembly：script_text / retention_design / quality_report
@@ -596,10 +598,10 @@ workspace/projects/project_test_001/input/novel.txt
 
 本模块会调用本地 LLM。
 
-运行结束后必须执行：
+运行结束后可以调用：
 
 ```python
 resource_manager.release_local_resources(MODULE_NAME)
 ```
 
-当前 `run_staged.py` 已经内置该释放逻辑。
+但 02 属于 LLM_TEXT_PHASE，01–06 不主动卸载 LLM；真正释放 LLM 显存发生在 06→07。
