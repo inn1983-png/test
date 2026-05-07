@@ -8,8 +8,11 @@ REQUIRED_TOP = [
 ]
 REQUIRED_CHARACTER_FIELDS = [
     "character_id", "canonical_name", "aliases", "gender", "age_range", "identity",
-    "appearance", "costume", "temperament", "role_function", "source_evidence", "usage_in_script"
+    "appearance", "costume", "temperament", "role_function", "source_evidence", "usage_in_script",
+    "asset_level", "needs_fixed_face", "reference_image_priority", "reference_image_plan"
 ]
+VALID_ASSET_LEVELS = {"main", "supporting", "extra_group", "mentioned_only"}
+VALID_REFERENCE_PRIORITIES = {"required", "optional", "not_needed"}
 
 
 def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
@@ -43,6 +46,20 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             names.add(name)
         if any(prefix in name for prefix in ["年轻", "少年", "中年", "老年", "年老"]):
             issues.append(f"禁止按年龄段拆角色：{name}")
+        asset_level = item.get("asset_level")
+        ref_priority = item.get("reference_image_priority")
+        if asset_level not in VALID_ASSET_LEVELS:
+            issues.append(f"角色 asset_level 非法：{name or cid} -> {asset_level}")
+        if ref_priority not in VALID_REFERENCE_PRIORITIES:
+            issues.append(f"角色 reference_image_priority 非法：{name or cid} -> {ref_priority}")
+        if asset_level in {"main", "supporting"} and item.get("needs_fixed_face") is not True:
+            issues.append(f"主/配角必须 needs_fixed_face=true：{name or cid}")
+        if asset_level in {"extra_group", "mentioned_only"} and ref_priority == "required":
+            issues.append(f"龙套/仅提及角色不应强制参考图：{name or cid}")
+        plan = item.get("reference_image_plan")
+        if isinstance(plan, dict):
+            if asset_level == "main" and "front_face_half_body" not in plan.get("recommended_images", []):
+                issues.append(f"核心角色参考图计划必须包含 front_face_half_body：{name or cid}")
         for alias in item.get("aliases", []) or []:
             alias_key = str(alias).strip()
             if not alias_key:
