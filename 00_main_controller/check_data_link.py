@@ -190,6 +190,16 @@ def check_project_data_link(results: list[dict[str, Any]], project_id: str) -> N
         add_result(results, "warn", "project_data_link", f"项目目录不存在: {project_id}")
         return
 
+    def _module_has_run(mod: str) -> bool:
+        status_file = run_dir / mod / "status.json"
+        if status_file.exists():
+            return True
+        for suffix in ("_analysis.json", ".json"):
+            candidate = run_dir / mod / f"{mod}{suffix}"
+            if candidate.exists():
+                return True
+        return False
+
     for module_name, link_info in MODULE_DATA_LINK.items():
         expected_inputs = link_info.get("expected_inputs", [])
         expected_outputs = link_info.get("expected_outputs", [])
@@ -211,7 +221,17 @@ def check_project_data_link(results: list[dict[str, Any]], project_id: str) -> N
                 missing_outputs.append(out)
 
         if missing_inputs or missing_outputs:
-            status = "fail" if missing_inputs else "warn"
+            upstream_ran = all(
+                _module_has_run(inp.split("/")[0]) for inp in missing_inputs
+            ) if missing_inputs else True
+            if missing_inputs and upstream_ran:
+                status = "fail"
+            elif missing_inputs:
+                status = "warn"
+            elif missing_outputs and _module_has_run(module_name):
+                status = "fail"
+            else:
+                status = "warn"
             parts = []
             if missing_inputs:
                 parts.append(f"缺失输入: {missing_inputs}")
