@@ -9,6 +9,8 @@ REQUIRED_BY_STAGE = {
     "03B": ["characters"],
     "03C": ["script_usage_map", "coverage_report"],
     "03D": ["quality_report", "evidence_index", "revision_plan"],
+}
+REQUIRED_PRESENT_BY_STAGE = {
     "03E": ["review_report", "downstream_readiness_for_06", "main_assets_for_06", "optional_assets_for_06", "do_not_reference_as_main_asset"],
 }
 
@@ -56,6 +58,10 @@ def _check_review_report(stage_id: str, data: dict[str, Any], issues: list[str])
             if field not in readiness:
                 issues.append(f"downstream_readiness_for_06 缺少字段：{field}")
                 score_delta -= 4
+    for list_field in ["main_assets_for_06", "optional_assets_for_06", "do_not_reference_as_main_asset"]:
+        if list_field in data and not isinstance(data.get(list_field), list):
+            issues.append(f"{list_field} 必须为数组")
+            score_delta -= 8
     return score_delta
 
 
@@ -65,6 +71,10 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
     for field in REQUIRED_BY_STAGE.get(stage_id, []):
         if not _non_empty(data.get(field)):
             issues.append(f"缺少或为空：{field}")
+            score -= 18
+    for field in REQUIRED_PRESENT_BY_STAGE.get(stage_id, []):
+        if field not in data:
+            issues.append(f"缺少字段：{field}")
             score -= 18
 
     if stage_id == "03B":
