@@ -13,6 +13,8 @@ from importlib import import_module
 prompt_guard = import_module("00_common.llm_prompt_guard")
 
 JSON_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
+DEFAULT_TEXT_LLM_BASE_URL = "https://api.deepseek.com/chat/completions"
+DEFAULT_TEXT_LLM_MODEL = "deepseek-v4-pro"
 
 
 def _sanitize_env_key(value: str) -> str:
@@ -20,7 +22,7 @@ def _sanitize_env_key(value: str) -> str:
 
 
 def _max_tokens_for_trace(trace_label: str) -> int:
-    default = int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "4096"))
+    default = int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "8192"))
     candidates = []
     if trace_label:
         sanitized = _sanitize_env_key(trace_label)
@@ -47,30 +49,31 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        base_url = os.getenv("AI_DRAMA_LLM_BASE_URL", "").strip()
-        model = os.getenv("AI_DRAMA_LLM_MODEL", "").strip()
-        if not base_url or not model:
+        base_url = os.getenv("AI_DRAMA_LLM_BASE_URL", DEFAULT_TEXT_LLM_BASE_URL).strip()
+        model = os.getenv("AI_DRAMA_LLM_MODEL", DEFAULT_TEXT_LLM_MODEL).strip()
+        api_key = os.getenv("AI_DRAMA_LLM_API_KEY", "").strip()
+        if not api_key:
             raise RuntimeError(
-                "01_novel_parser requires a real local LLM. "
-                "Please set AI_DRAMA_LLM_BASE_URL and AI_DRAMA_LLM_MODEL."
+                "01_novel_parser text LLM defaults to DeepSeek V4 Pro API. "
+                "Please set AI_DRAMA_LLM_API_KEY. "
+                "Optional overrides: AI_DRAMA_LLM_BASE_URL, AI_DRAMA_LLM_MODEL."
             )
         return cls(
             base_url=base_url,
             model=model,
-            api_key=os.getenv("AI_DRAMA_LLM_API_KEY", ""),
+            api_key=api_key,
             timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "6000")),
             temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.1")),
             stream_log=os.getenv("AI_DRAMA_LLM_STREAM_LOG", "1").strip() not in {"0", "false", "False", "no"},
-            max_tokens=int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "4096")),
+            max_tokens=int(os.getenv("AI_DRAMA_LLM_MAX_TOKENS", "8192")),
         )
 
 
 class LLMClient:
-    """Minimal OpenAI-compatible local/remote LLM client.
+    """OpenAI-compatible text LLM client.
 
-    01_novel_parser must use a real LLM for all stages.
-    Expected endpoint: POST /v1/chat/completions
-    The returned assistant content must contain a JSON object.
+    Text phases now default to DeepSeek V4 Pro API for quality and long-context stability.
+    Local models should be used separately for vision / multimodal understanding.
     """
 
     def __init__(self, config: LLMConfig | None = None) -> None:
@@ -119,7 +122,7 @@ class LLMClient:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             raise RuntimeError(
-                "Local/remote LLM HTTP error:\n"
+                "LLM API HTTP error:\n"
                 f"  status={exc.code} {exc.reason}\n"
                 f"  url={self.config.base_url}\n"
                 f"  model={self.config.model}\n"
@@ -175,7 +178,7 @@ class LLMClient:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace") if exc.fp else ""
             raise RuntimeError(
-                "Local/remote LLM stream HTTP error:\n"
+                "LLM API stream HTTP error:\n"
                 f"  status={exc.code} {exc.reason}\n"
                 f"  url={self.config.base_url}\n"
                 f"  model={self.config.model}\n"
