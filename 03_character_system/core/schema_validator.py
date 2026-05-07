@@ -10,12 +10,58 @@ REQUIRED_TOP = [
 ]
 REQUIRED_CHARACTER_FIELDS = [
     "character_id", "canonical_name", "aliases", "gender", "age_range", "identity",
-    "appearance", "costume", "temperament", "role_function", "source_evidence", "usage_in_script",
+    "appearance", "costume", "default_costume_id", "costume_variants", "temperament", "role_function", "source_evidence", "usage_in_script",
     "asset_level", "needs_fixed_face", "reference_image_priority", "reference_image_plan",
     "asset_importance_score", "importance_reason", "source_understanding_basis"
 ]
+REQUIRED_COSTUME_FIELDS = [
+    "costume_id", "costume_name", "stage_label", "is_default", "appearance_state",
+    "hair_style", "headwear", "upper_garment", "lower_garment", "footwear",
+    "outerwear", "color_palette", "integrated_wearable_props", "script_usage_refs",
+    "continuity_notes", "reference_image_priority"
+]
 VALID_ASSET_LEVELS = {"main", "supporting", "extra_group", "mentioned_only"}
 VALID_REFERENCE_PRIORITIES = {"required", "optional", "not_needed"}
+
+
+def _validate_costumes(item: dict[str, Any], issues: list[str]) -> None:
+    name = str(item.get("canonical_name", "")).strip()
+    asset_level = item.get("asset_level")
+    variants = item.get("costume_variants")
+    default_id = str(item.get("default_costume_id", "")).strip()
+    if asset_level not in {"main", "supporting"}:
+        return
+    if not isinstance(variants, list) or not variants:
+        issues.append(f"主/配角必须包含 costume_variants：{name}")
+        return
+    ids: set[str] = set()
+    default_count = 0
+    for idx, variant in enumerate(variants):
+        if not isinstance(variant, dict):
+            issues.append(f"角色 {name} costume_variants[{idx}] 不是对象")
+            continue
+        for field in REQUIRED_COSTUME_FIELDS:
+            if variant.get(field) in (None, "", []):
+                issues.append(f"角色 {name} 服装版本缺少必要字段：{field}")
+        cid = str(variant.get("costume_id", "")).strip()
+        if cid in ids:
+            issues.append(f"角色 {name} costume_id 重复：{cid}")
+        if cid:
+            ids.add(cid)
+        if variant.get("is_default") is True:
+            default_count += 1
+        if not isinstance(variant.get("integrated_wearable_props", []), list):
+            issues.append(f"角色 {name} integrated_wearable_props 必须为数组")
+        if not isinstance(variant.get("script_usage_refs", []), list):
+            issues.append(f"角色 {name} script_usage_refs 必须为数组")
+        if variant.get("reference_image_priority") not in VALID_REFERENCE_PRIORITIES:
+            issues.append(f"角色 {name} 服装 reference_image_priority 非法：{variant.get('reference_image_priority')}")
+    if not default_id:
+        issues.append(f"角色 {name} 缺少 default_costume_id")
+    elif default_id not in ids:
+        issues.append(f"角色 {name} default_costume_id 不存在于 costume_variants：{default_id}")
+    if default_count != 1:
+        issues.append(f"角色 {name} costume_variants 必须且只能有一个 is_default=true")
 
 
 def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
@@ -71,6 +117,7 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
         if isinstance(plan, dict):
             if asset_level == "main" and "front_face_half_body" not in plan.get("recommended_images", []):
                 issues.append(f"核心角色参考图计划必须包含 front_face_half_body：{name or cid}")
+        _validate_costumes(item, issues)
         for alias in item.get("aliases", []) or []:
             alias_key = str(alias).strip()
             if not alias_key:
