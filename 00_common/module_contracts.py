@@ -10,12 +10,15 @@ artifact_resolver = import_module("00_common.artifact_resolver")
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_CONTRACTS_PATH = ROOT_DIR / "configs" / "module_contracts.json"
+
+# Used by UI/API requirement inspection when a user tries to run a single module
+# without its upstream artifacts. Keep this list aligned with pipeline.json.
 RECOMMENDED_START_MODULES = {
     "01_novel_parser": "01_novel_parser",
     "02_script_writer": "02_script_writer",
     "03_character_system": "03_character_system",
-    "04_scene_system": "03_character_system",
-    "05_prop_system": "03_character_system",
+    "04_scene_system": "04_scene_system",
+    "05_prop_system": "05_prop_system",
     "06_storyboard": "06_storyboard",
     "07_storyboard_image": "07_storyboard_image",
     "08_audio": "08_audio",
@@ -26,6 +29,8 @@ RECOMMENDED_ORDER = [
     "01_novel_parser",
     "02_script_writer",
     "03_character_system",
+    "04_scene_system",
+    "05_prop_system",
     "06_storyboard",
     "07_storyboard_image",
     "08_audio",
