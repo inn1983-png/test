@@ -15,6 +15,14 @@ wav_utils = import_module("08_audio.core.wav_utils")
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
+def _utf8_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.setdefault("PYTHONUTF8", "1")
+    env.setdefault("PYTHONIOENCODING", "utf-8")
+    env.setdefault("PYTHONLEGACYWINDOWSSTDIO", "0")
+    return env
+
+
 def _env_path(name: str, default: str) -> Path:
     value = os.getenv(name, default).strip()
     path = Path(value)
@@ -106,35 +114,8 @@ def build_segment_plan(queue: list[dict[str, Any]], output_dir: str | Path) -> d
             pause_after = float(line.get("pause_after_seconds") or 0.15)
         output_path = segment_dir / f"{segment_id}.wav"
         emotion_mapping = line.get("emotion_mapping", {}) if isinstance(line.get("emotion_mapping"), dict) else {}
-        segments.append(
-            {
-                "segment_id": segment_id,
-                "audio_line_id": line.get("audio_line_id"),
-                "speaker": line.get("speaker") or "Narrator",
-                "line_type": line_type,
-                "text": text,
-                "emotion": line.get("emotion") or "calm",
-                "emotion_mapping": emotion_mapping,
-                "voice_id": line.get("voice_id"),
-                "spk_audio_prompt": line.get("spk_audio_prompt") or get_default_voice_prompt(),
-                "voice_bind_type": line.get("voice_bind_type"),
-                "estimated_duration_seconds": duration,
-                "pause_after_seconds": pause_after,
-                "output_path": str(output_path),
-                "status": "planned",
-            }
-        )
-    return {
-        "stage": "08B_tts_segment_plan",
-        "status": "success" if segments else "needs_review",
-        "execution_mode": get_execution_mode(),
-        "environment": env,
-        "segments": segments,
-        "notes": [
-            "08B 为每条对白/OS/旁白建立独立音频段，后续可按失败段局部重跑。",
-            "本项目只引用本地根目录 index-tts，不把 IndexTTS 权重复制进仓库。",
-        ],
-    }
+        segments.append({"segment_id": segment_id, "audio_line_id": line.get("audio_line_id"), "speaker": line.get("speaker") or "Narrator", "line_type": line_type, "text": text, "emotion": line.get("emotion") or "calm", "emotion_mapping": emotion_mapping, "voice_id": line.get("voice_id"), "spk_audio_prompt": line.get("spk_audio_prompt") or get_default_voice_prompt(), "voice_bind_type": line.get("voice_bind_type"), "estimated_duration_seconds": duration, "pause_after_seconds": pause_after, "output_path": str(output_path), "status": "planned"})
+    return {"stage": "08B_tts_segment_plan", "status": "success" if segments else "needs_review", "execution_mode": get_execution_mode(), "environment": env, "segments": segments, "notes": ["08B 为每条对白/OS/旁白建立独立音频段，后续可按失败段局部重跑。", "本项目只引用本地根目录 index-tts，不把 IndexTTS 权重复制进仓库。"]}
 
 
 def _script_for_index_tts(segment: dict[str, Any], output_path: Path, root: Path) -> str:
@@ -153,6 +134,11 @@ def _script_for_index_tts(segment: dict[str, Any], output_path: Path, root: Path
         f"""
         import os
         import sys
+        try:
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
         sys.path.insert(0, {root_json})
         os.chdir({root_json})
         from indextts.infer_v2 import IndexTTS2
@@ -201,7 +187,7 @@ def synthesize_segments(plan: dict[str, Any], output_dir: str | Path) -> dict[st
                 temp_script = Path(output_dir) / "intermediate" / f"run_{segment['segment_id']}.py"
                 temp_script.parent.mkdir(parents=True, exist_ok=True)
                 temp_script.write_text(code, encoding="utf-8")
-                completed = subprocess.run(["uv", "run", str(temp_script)], cwd=str(root), check=False)
+                completed = subprocess.run(["uv", "run", str(temp_script)], cwd=str(root), check=False, env=_utf8_env(), encoding="utf-8", errors="replace")
                 if completed.returncode != 0:
                     raise RuntimeError(f"IndexTTS uv run failed with return code {completed.returncode}")
             else:
@@ -219,15 +205,4 @@ def synthesize_segments(plan: dict[str, Any], output_dir: str | Path) -> dict[st
             results.append({**segment, "status": "failed", "error": str(exc), "execution_mode": mode})
 
     failed = [item for item in results if item.get("status") != "success"]
-    return {
-        "stage": "08C_tts_execution",
-        "status": "needs_retry" if failed else "success",
-        "execution_mode": mode,
-        "segments": results,
-        "failed_segments": failed,
-        "execution_summary": {
-            "total": len(results),
-            "success": len(results) - len(failed),
-            "failed": len(failed),
-        },
-    }
+    return {"stage": "08C_tts_execution", "status": "needs_retry" if failed else "success", "execution_mode": mode, "segments": results, "failed_segments": failed, "execution_summary": {"total": len(results), "success": len(results) - len(failed), "failed": len(failed)}}
