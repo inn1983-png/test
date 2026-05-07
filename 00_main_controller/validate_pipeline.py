@@ -15,9 +15,9 @@ io_utils = import_module("00_common.io_utils")
 DEFAULT_MODULE_ORDER = [
     "01_novel_parser",
     "02_script_writer",
-    "03_character_library",
-    "04_scene_library",
-    "05_prop_library",
+    "03_character_system",
+    "04_scene_system",
+    "05_prop_system",
     "06_storyboard",
     "07_storyboard_image",
     "08_audio",
@@ -31,6 +31,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pipeline", default="pipeline.json", help="Pipeline config file path.")
     parser.add_argument("--strict-order", action="store_true", help="Warn when modules are out of the recommended order.")
     return parser
+
+
+def _module_has_entrypoint(module_dir: Path) -> bool:
+    return (module_dir / "run_staged.py").exists() or (module_dir / "run.py").exists()
 
 
 def validate_pipeline_config(config: dict[str, Any], strict_order: bool = False) -> tuple[bool, list[str]]:
@@ -49,7 +53,6 @@ def validate_pipeline_config(config: dict[str, Any], strict_order: bool = False)
             continue
 
         module_dir = ROOT_DIR / module_name
-        run_file = module_dir / "run.py"
 
         if module_name in seen:
             ok = False
@@ -61,9 +64,9 @@ def validate_pipeline_config(config: dict[str, Any], strict_order: bool = False)
             messages.append(f"Module directory not found: {module_name}")
             continue
 
-        if not run_file.exists():
+        if not _module_has_entrypoint(module_dir):
             ok = False
-            messages.append(f"Module run.py not found: {module_name}/run.py")
+            messages.append(f"Module entrypoint not found: {module_name}/run_staged.py or {module_name}/run.py")
 
     if strict_order:
         order_index = {name: idx for idx, name in enumerate(DEFAULT_MODULE_ORDER)}
@@ -74,10 +77,16 @@ def validate_pipeline_config(config: dict[str, Any], strict_order: bool = False)
             messages.append(f"Current: {filtered}")
             messages.append(f"Expected: {expected}")
 
-    unknown_modules = [name for name in pipeline if isinstance(name, str) and name.startswith("00_")]
-    if unknown_modules:
+    controller_modules = [name for name in pipeline if isinstance(name, str) and name.startswith("00_")]
+    if controller_modules:
         messages.append("Warning: pipeline usually should not include 00_* controller/common modules.")
-        messages.append(f"Found: {unknown_modules}")
+        messages.append(f"Found: {controller_modules}")
+
+    legacy_modules = [name for name in pipeline if name in {"03_character_library", "04_scene_library", "05_prop_library"}]
+    if legacy_modules:
+        ok = False
+        messages.append("Legacy scaffold modules are not allowed in the active pipeline.")
+        messages.append(f"Found: {legacy_modules}")
 
     if ok:
         messages.insert(0, "Pipeline validation passed.")
