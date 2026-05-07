@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 
 CLOUD_DEFAULT_BASE_URL = "https://api.deepseek.com/chat/completions"
+CLOUD_DEFAULT_MODEL = "deepseek-flash"
+LEGACY_DEFAULT_MODELS = {"deepseek-v4-pro", "deepseek-v4", "deepseek-pro"}
 
 
 def is_local_base_url(base_url: str) -> bool:
@@ -20,6 +22,7 @@ def validate_api_key_requirement(base_url: str, api_key: str, module_name: str) 
     if base_url == CLOUD_DEFAULT_BASE_URL or base_url.startswith("https://api."):
         raise RuntimeError(
             f"{module_name} 当前使用默认云端 LLM，需要设置 AI_DRAMA_LLM_API_KEY；"
+            "默认模型为 DeepSeek Flash。"
             "如果你使用本地模型，请设置 AI_DRAMA_LLM_BASE_URL 和 AI_DRAMA_LLM_MODEL。"
         )
 
@@ -29,7 +32,19 @@ def resolve_llm_base_url(env_default: str) -> str:
 
 
 def resolve_llm_model(env_default: str) -> str:
-    return os.getenv("AI_DRAMA_LLM_MODEL", env_default).strip()
+    """Resolve text LLM model for 01-06.
+
+    Existing module files may still pass old defaults such as deepseek-v4-pro.
+    When AI_DRAMA_LLM_MODEL is not explicitly set, normalize those legacy
+    defaults to the current project default: DeepSeek Flash.
+    """
+    env_model = os.getenv("AI_DRAMA_LLM_MODEL", "").strip()
+    if env_model:
+        return env_model
+    default_model = (env_default or "").strip()
+    if default_model in LEGACY_DEFAULT_MODELS:
+        return CLOUD_DEFAULT_MODEL
+    return default_model or CLOUD_DEFAULT_MODEL
 
 
 def resolve_llm_api_key() -> str:
