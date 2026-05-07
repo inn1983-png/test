@@ -12,18 +12,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1]
 HOST = "127.0.0.1"
 PORT = int(os.getenv("AI_DRAMA_UI_PORT", "1144"))
-MODULES_00_06 = [
-    "01_novel_parser",
-    "02_script_writer",
-    "03_character_system",
-    "04_scene_system",
-    "05_prop_system",
-    "06_storyboard",
-]
-KEY_OUTPUTS = {
+MODULES = ["01_novel_parser", "02_script_writer", "03_character_system", "04_scene_system", "05_prop_system", "06_storyboard"]
+OUTPUTS = {
     "01_novel_parser": ["novel_analysis.json", "novel_meta.json"],
     "02_script_writer": ["script.json", "script.txt", "script_meta.json"],
     "03_character_system": ["characters.json", "characters_meta.json"],
@@ -31,413 +24,265 @@ KEY_OUTPUTS = {
     "05_prop_system": ["props.json", "props_meta.json"],
     "06_storyboard": ["storyboard.json", "storyboard_meta.json"],
 }
-
 STATE_LOCK = threading.Lock()
-STATE: dict[str, Any] = {
-    "running": False,
-    "current_task": "",
-    "started_at": None,
-    "finished_at": None,
-    "last_returncode": None,
-    "logs": [],
-}
+STATE: dict[str, Any] = {"running": False, "task": "", "code": None, "logs": [], "cmd": []}
 
 
-def _project_dir(project_id: str) -> Path:
-    return ROOT_DIR / "workspace" / "projects" / project_id
+def project_dir(pid: str) -> Path:
+    return ROOT / "workspace" / "projects" / pid
 
 
-def _input_file(project_id: str) -> Path:
-    return _project_dir(project_id) / "input" / "novel.txt"
+def novel_file(pid: str) -> Path:
+    return project_dir(pid) / "input" / "novel.txt"
 
 
-def _append_log(line: str) -> None:
-    with STATE_LOCK:
-        logs = STATE.setdefault("logs", [])
-        logs.append(line.rstrip())
-        if len(logs) > 800:
-            del logs[: len(logs) - 800]
+def clean_pid(value: str) -> str:
+    s = "".join(c for c in value.strip() if c.isalnum() or c in "_-." )
+    return s or "project_test_001"
 
 
-def _set_state(**kwargs: Any) -> None:
-    with STATE_LOCK:
-        STATE.update(kwargs)
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
 
 
-def _json_response(handler: BaseHTTPRequestHandler, data: Any, status: int = 200) -> None:
-    raw = json.dumps(data, ensure_ascii=False, indent=2).encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", "application/json; charset=utf-8")
-    handler.send_header("Content-Length", str(len(raw)))
-    handler.end_headers()
-    handler.wfile.write(raw)
-
-
-def _text_response(handler: BaseHTTPRequestHandler, text: str, status: int = 200, content_type: str = "text/html; charset=utf-8") -> None:
-    raw = text.encode("utf-8")
-    handler.send_response(status)
-    handler.send_header("Content-Type", content_type)
-    handler.send_header("Content-Length", str(len(raw)))
-    handler.end_headers()
-    handler.wfile.write(raw)
-
-
-def _read_body(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
-    length = int(handler.headers.get("Content-Length", "0") or "0")
-    if length <= 0:
+def read_json(path: Path) -> dict[str, Any]:
+    if not path.exists():
         return {}
-    raw = handler.rfile.read(length).decode("utf-8")
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
+        return json.loads(read_text(path))
+    except Exception:
         return {}
 
 
-def _safe_project_id(value: str) -> str:
-    clean = "".join(ch for ch in value.strip() if ch.isalnum() or ch in "_-.")
-    return clean or "project_test_001"
+def log(line: str) -> None:
+    with STATE_LOCK:
+        STATE["logs"].append(line.rstrip())
+        STATE["logs"] = STATE["logs"][-1000:]
 
 
-def _run_command(args: list[str], task_name: str) -> None:
-    if STATE.get("running"):
-        return
-    _set_state(running=True, current_task=task_name, started_at=time.time(), finished_at=None, last_returncode=None, logs=[])
-    _append_log(f"开始：{task_name}")
-    _append_log("命令：" + " ".join(args))
+def state() -> dict[str, Any]:
+    with STATE_LOCK:
+        s = dict(STATE)
+        s["logs"] = list(STATE["logs"])
+        return s
+
+
+def run_cmd(args: list[str], task: str) -> None:
+    with STATE_LOCK:
+        STATE.update({"running": True, "task": task, "code": None, "logs": [], "cmd": args})
+    log("开始：" + task)
+    log("工作目录：" + str(ROOT))
+    log("命令：" + " ".join(args))
     try:
         env = os.environ.copy()
         env.setdefault("PYTHONUTF8", "1")
         env.setdefault("PYTHONIOENCODING", "utf-8")
-        process = subprocess.Popen(
-            args,
-            cwd=str(ROOT_DIR),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-        )
-        assert process.stdout is not None
-        for line in process.stdout:
-            _append_log(line)
-        code = process.wait()
-        _append_log(f"结束：returncode={code}")
-        _set_state(last_returncode=code)
-    except Exception as exc:  # noqa: BLE001
-        _append_log(f"运行失败：{exc}")
-        _set_state(last_returncode=-1)
+        p = subprocess.Popen(args, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace", env=env)
+        assert p.stdout is not None
+        for line in p.stdout:
+            log(line)
+        code = p.wait()
+        log(f"结束：returncode={code}")
+        with STATE_LOCK:
+            STATE["code"] = code
+    except Exception as exc:
+        log("运行失败：" + repr(exc))
+        with STATE_LOCK:
+            STATE["code"] = -1
     finally:
-        _set_state(running=False, finished_at=time.time())
+        with STATE_LOCK:
+            STATE["running"] = False
 
 
-def _start_thread(args: list[str], task_name: str) -> bool:
+def start(args: list[str], task: str) -> bool:
     with STATE_LOCK:
-        if STATE.get("running"):
+        if STATE["running"]:
             return False
-    thread = threading.Thread(target=_run_command, args=(args, task_name), daemon=True)
-    thread.start()
+    threading.Thread(target=run_cmd, args=(args, task), daemon=True).start()
     return True
 
 
-def _module_status(project_id: str, module: str) -> dict[str, Any]:
-    module_dir = _project_dir(project_id) / module
+def file_info(path: Path) -> dict[str, Any]:
+    info = {"exists": path.exists(), "path": str(path.relative_to(ROOT)) if path.exists() else str(path.relative_to(ROOT))}
+    if path.exists():
+        info["size"] = path.stat().st_size
+    return info
+
+
+def input_info(pid: str) -> dict[str, Any]:
+    path = novel_file(pid)
+    text = read_text(path)
+    info = file_info(path)
+    info.update({"chars": len(text), "non_empty": bool(text.strip()), "preview": text[:300]})
+    return info
+
+
+def module_status(pid: str, module: str) -> dict[str, Any]:
+    base = project_dir(pid) / module
     outputs = []
-    exists_any = False
     status = "not_run"
-    for filename in KEY_OUTPUTS.get(module, []):
-        path = module_dir / filename
-        item = {"filename": filename, "exists": path.exists(), "path": str(path.relative_to(ROOT_DIR)) if path.exists() else ""}
-        if path.exists():
-            exists_any = True
-            item["size"] = path.stat().st_size
-            item["mtime"] = path.stat().st_mtime
-            if filename.endswith(".json"):
-                try:
-                    data = json.loads(path.read_text(encoding="utf-8"))
-                    item["json_status"] = data.get("status")
-                    item["schema_passed"] = (data.get("schema_validation") or {}).get("passed")
-                    qr = data.get("quality_report") or {}
-                    item["needs_review"] = qr.get("needs_review")
-                except Exception as exc:  # noqa: BLE001
-                    item["read_error"] = str(exc)
-        outputs.append(item)
-    if exists_any:
-        status = "done"
-        for item in outputs:
-            if item.get("json_status") == "needs_review" or item.get("needs_review"):
-                status = "needs_review"
-                break
+    for fn in OUTPUTS[module]:
+        p = base / fn
+        row = file_info(p)
+        row["file"] = fn
+        if p.exists():
+            status = "done"
+            if fn.endswith(".json"):
+                data = read_json(p)
+                row["json_status"] = data.get("status")
+                row["schema_passed"] = (data.get("schema_validation") or {}).get("passed")
+                row["needs_review"] = (data.get("quality_report") or {}).get("needs_review")
+                if row.get("json_status") == "needs_review" or row.get("needs_review"):
+                    status = "needs_review"
+        outputs.append(row)
     return {"module": module, "status": status, "outputs": outputs}
 
 
-def _read_output(project_id: str, module: str, filename: str) -> dict[str, Any]:
-    if module not in KEY_OUTPUTS or filename not in KEY_OUTPUTS[module]:
+def short(value: Any, n: int = 80) -> str:
+    s = "" if value is None else str(value)
+    return s if len(s) <= n else s[:n] + "..."
+
+
+def summarize(pid: str, module: str) -> dict[str, Any]:
+    base = project_dir(pid) / module
+    if module == "01_novel_parser":
+        d = read_json(base / "novel_analysis.json")
+        return {"title": "01 小说解析摘要", "items": [
+            {"名称": "状态", "内容": d.get("status", "")},
+            {"名称": "候选角色数", "内容": len(d.get("candidate_characters", []) or [])},
+            {"名称": "候选场景数", "内容": len(d.get("candidate_scenes", []) or [])},
+            {"名称": "候选道具数", "内容": len(d.get("candidate_props", []) or [])},
+            {"名称": "故事主轴", "内容": short(d.get("story_spine", {}), 220)},
+        ]}
+    if module == "02_script_writer":
+        d = read_json(base / "script.json")
+        return {"title": "02 剧本摘要", "script_text": d.get("script_text", ""), "items": [
+            {"名称": "状态", "内容": d.get("status", "")},
+            {"名称": "剧本段数", "内容": len(d.get("segments", []) or [])},
+            {"名称": "语音行数", "内容": len(d.get("voice_line_plan", []) or [])},
+            {"名称": "外观变化数", "内容": len(d.get("appearance_state_changes", []) or [])},
+        ]}
+    if module == "03_character_system":
+        d = read_json(base / "characters.json")
+        rows = [{"角色": x.get("canonical_name"), "等级": x.get("asset_level"), "默认服装": x.get("default_costume_id"), "服装数": len(x.get("costume_variants", []) or [])} for x in d.get("characters", []) or [] if isinstance(x, dict)]
+        return {"title": "03 角色库摘要", "table": rows, "items": [{"名称": "状态", "内容": d.get("status", "")}, {"名称": "角色数", "内容": len(rows)}]}
+    if module == "04_scene_system":
+        d = read_json(base / "scenes.json")
+        rows = [{"场景": x.get("canonical_scene_name"), "等级": x.get("asset_level"), "父场景": x.get("parent_scene", "")} for x in d.get("scenes", []) or [] if isinstance(x, dict)]
+        return {"title": "04 场景库摘要", "table": rows, "items": [{"名称": "状态", "内容": d.get("status", "")}, {"名称": "场景数", "内容": len(rows)}]}
+    if module == "05_prop_system":
+        d = read_json(base / "props.json")
+        rows = [{"道具": x.get("canonical_prop_name"), "等级": x.get("asset_level"), "穿戴策略": x.get("wearable_policy", "")} for x in d.get("props", []) or [] if isinstance(x, dict)]
+        return {"title": "05 道具库摘要", "table": rows, "items": [{"名称": "状态", "内容": d.get("status", "")}, {"名称": "道具数", "内容": len(rows)}]}
+    if module == "06_storyboard":
+        d = read_json(base / "storyboard.json")
+        rows = []
+        for x in d.get("frames", []) or []:
+            if not isinstance(x, dict):
+                continue
+            chars = ", ".join([c.get("canonical_name", "") for c in x.get("characters", []) if isinstance(c, dict)])
+            scene = (x.get("scene") or {}).get("canonical_scene_name", "") if isinstance(x.get("scene"), dict) else ""
+            rows.append({"序号": x.get("sequence_index"), "帧": x.get("frame_id"), "场景": scene, "角色": chars, "动作": short(x.get("story_action", ""), 80)})
+        return {"title": "06 单帧分镜摘要", "table": rows, "items": [{"名称": "状态", "内容": d.get("status", "")}, {"名称": "分镜帧数", "内容": len(rows)}, {"名称": "造型需求数", "内容": len(d.get("appearance_asset_requirements", []) or [])}]}
+    return {"title": module, "items": []}
+
+
+def raw_output(pid: str, module: str, fn: str) -> dict[str, Any]:
+    if module not in OUTPUTS or fn not in OUTPUTS[module]:
         return {"error": "不允许读取该文件"}
-    path = _project_dir(project_id) / module / filename
-    if not path.exists():
-        return {"error": "文件不存在", "path": str(path.relative_to(ROOT_DIR))}
-    text = path.read_text(encoding="utf-8", errors="replace")
-    parsed: Any = None
-    if filename.endswith(".json"):
-        try:
-            parsed = json.loads(text)
-        except Exception:
-            parsed = None
-    return {"path": str(path.relative_to(ROOT_DIR)), "text": text, "json": parsed}
+    p = project_dir(pid) / module / fn
+    if not p.exists():
+        return {"error": "文件不存在", "path": str(p.relative_to(ROOT))}
+    text = read_text(p)
+    return {"path": str(p.relative_to(ROOT)), "text": text, "json": read_json(p) if fn.endswith(".json") else None}
 
 
-HTML = r"""
-<!doctype html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AI Drama 00-06 测试控制台</title>
-<style>
-:root { --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --ok:#22c55e; --warn:#f59e0b; --bad:#ef4444; --blue:#60a5fa; }
-* { box-sizing: border-box; }
-body { margin:0; background:linear-gradient(180deg,#0f172a,#020617); color:var(--text); font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-header { padding:22px 28px; border-bottom:1px solid #1f2937; background:rgba(15,23,42,.88); position:sticky; top:0; z-index:2; }
-h1 { margin:0 0 6px; font-size:24px; }
-small { color:var(--muted); }
-main { max-width:1200px; margin:0 auto; padding:22px; display:grid; gap:18px; }
-.card { background:rgba(17,24,39,.88); border:1px solid #243244; border-radius:16px; padding:18px; box-shadow:0 10px 30px rgba(0,0,0,.22); }
-.row { display:flex; gap:12px; flex-wrap:wrap; align-items:center; }
-input, textarea, select { background:#020617; color:var(--text); border:1px solid #334155; border-radius:10px; padding:10px 12px; font-size:14px; }
-input { min-width:260px; }
-textarea { width:100%; min-height:170px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-button { border:0; border-radius:10px; padding:10px 14px; background:#2563eb; color:white; cursor:pointer; font-weight:600; }
-button.secondary { background:#334155; }
-button.warn { background:#b45309; }
-button:disabled { opacity:.45; cursor:not-allowed; }
-.grid { display:grid; grid-template-columns: repeat(6, minmax(130px, 1fr)); gap:10px; }
-.mod { border:1px solid #334155; border-radius:14px; padding:12px; background:#020617; }
-.mod h3 { margin:0 0 8px; font-size:14px; }
-.badge { display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; color:#020617; background:var(--muted); }
-.badge.done { background:var(--ok); }
-.badge.needs_review { background:var(--warn); }
-.badge.not_run { background:#64748b; }
-pre { white-space:pre-wrap; word-break:break-word; background:#020617; border:1px solid #334155; border-radius:12px; padding:12px; max-height:460px; overflow:auto; }
-.tabs { display:flex; gap:8px; flex-wrap:wrap; }
-.linkbtn { background:#1e293b; color:#dbeafe; border:1px solid #334155; }
-.kv { display:grid; grid-template-columns:140px 1fr; gap:8px; color:var(--muted); }
-.footer-note { color:var(--muted); font-size:13px; line-height:1.7; }
-@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
-</style>
-</head>
-<body>
-<header>
-  <h1>AI Drama 00–06 测试控制台</h1>
-  <small>本地网页，只负责测试和查看结果；不改变 01–06 核心逻辑。</small>
-</header>
-<main>
-  <section class="card">
-    <h2>1. 项目与小说输入</h2>
-    <div class="row">
-      <label>项目 ID：<input id="projectId" value="project_test_001" /></label>
-      <button onclick="saveInput()">保存小说输入</button>
-      <button class="secondary" onclick="refreshAll()">刷新状态</button>
-    </div>
-    <p class="footer-note">小说会保存到 <code>workspace/projects/{项目ID}/input/novel.txt</code>。</p>
-    <textarea id="novelText" placeholder="把小说章节粘贴到这里，然后点“保存小说输入”。如果你已经手动放好了 novel.txt，可以不填。"></textarea>
-  </section>
+def send_json(h: BaseHTTPRequestHandler, data: Any, code: int = 200) -> None:
+    raw = json.dumps(data, ensure_ascii=False).encode("utf-8")
+    h.send_response(code); h.send_header("Content-Type", "application/json; charset=utf-8"); h.send_header("Content-Length", str(len(raw))); h.end_headers(); h.wfile.write(raw)
 
-  <section class="card">
-    <h2>2. 运行 00–06</h2>
-    <div class="row">
-      <button onclick="runAll()" id="runAllBtn">一键运行 01–06</button>
-      <select id="moduleSelect">
-        <option value="01_novel_parser">01 小说解析</option>
-        <option value="02_script_writer">02 剧本改编</option>
-        <option value="03_character_system">03 角色库</option>
-        <option value="04_scene_system">04 场景库</option>
-        <option value="05_prop_system">05 道具库</option>
-        <option value="06_storyboard">06 单帧分镜</option>
-      </select>
-      <button class="secondary" onclick="runModule()" id="runModuleBtn">只运行选中模块</button>
-    </div>
-    <div class="kv" style="margin-top:12px">
-      <div>当前任务</div><div id="currentTask">-</div>
-      <div>运行状态</div><div id="runningState">-</div>
-      <div>最后返回码</div><div id="returnCode">-</div>
-    </div>
-  </section>
 
-  <section class="card">
-    <h2>3. 模块状态</h2>
-    <div class="grid" id="moduleGrid"></div>
-  </section>
+def send_html(h: BaseHTTPRequestHandler) -> None:
+    raw = HTML.encode("utf-8")
+    h.send_response(200); h.send_header("Content-Type", "text/html; charset=utf-8"); h.send_header("Content-Length", str(len(raw))); h.end_headers(); h.wfile.write(raw)
 
-  <section class="card">
-    <h2>4. 查看输出</h2>
-    <div class="row">
-      <select id="outputModule" onchange="fillFileOptions()"></select>
-      <select id="outputFile"></select>
-      <button onclick="loadOutput()">查看</button>
-    </div>
-    <pre id="outputBox">等待选择输出文件...</pre>
-  </section>
 
-  <section class="card">
-    <h2>5. 运行日志</h2>
-    <pre id="logBox">等待运行...</pre>
-  </section>
-</main>
-<script>
-const modules = ["01_novel_parser","02_script_writer","03_character_system","04_scene_system","05_prop_system","06_storyboard"];
-const outputFiles = {
-  "01_novel_parser": ["novel_analysis.json", "novel_meta.json"],
-  "02_script_writer": ["script.json", "script.txt", "script_meta.json"],
-  "03_character_system": ["characters.json", "characters_meta.json"],
-  "04_scene_system": ["scenes.json", "scenes_meta.json"],
-  "05_prop_system": ["props.json", "props_meta.json"],
-  "06_storyboard": ["storyboard.json", "storyboard_meta.json"]
-};
-function pid(){ return document.getElementById('projectId').value.trim() || 'project_test_001'; }
-async function api(path, options={}){
-  const res = await fetch(path, options);
-  return await res.json();
-}
-async function saveInput(){
-  const body = {project_id: pid(), text: document.getElementById('novelText').value};
-  const data = await api('/api/save_input', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  alert(data.ok ? '已保存：' + data.path : '保存失败：' + data.error);
-  refreshAll();
-}
-async function runAll(){
-  const data = await api('/api/run_all', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id: pid()})});
-  if(!data.ok) alert(data.error || '启动失败');
-  refreshAll();
-}
-async function runModule(){
-  const module = document.getElementById('moduleSelect').value;
-  const data = await api('/api/run_module', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({project_id: pid(), module})});
-  if(!data.ok) alert(data.error || '启动失败');
-  refreshAll();
-}
-function fillFileOptions(){
-  const m = document.getElementById('outputModule').value;
-  const f = document.getElementById('outputFile');
-  f.innerHTML = '';
-  for(const name of outputFiles[m] || []){
-    const opt = document.createElement('option'); opt.value = name; opt.textContent = name; f.appendChild(opt);
-  }
-}
-function initSelectors(){
-  const sel = document.getElementById('outputModule');
-  sel.innerHTML = '';
-  for(const m of modules){ const opt = document.createElement('option'); opt.value = m; opt.textContent = m; sel.appendChild(opt); }
-  fillFileOptions();
-}
-async function loadOutput(){
-  const m = document.getElementById('outputModule').value;
-  const f = document.getElementById('outputFile').value;
-  const data = await api(`/api/output?project_id=${encodeURIComponent(pid())}&module=${encodeURIComponent(m)}&file=${encodeURIComponent(f)}`);
-  const box = document.getElementById('outputBox');
-  if(data.error){ box.textContent = data.error + '\n' + (data.path || ''); return; }
-  if(data.json){ box.textContent = JSON.stringify(data.json, null, 2); }
-  else { box.textContent = data.text || ''; }
-}
-async function refreshAll(){
-  const data = await api('/api/status?project_id=' + encodeURIComponent(pid()));
-  document.getElementById('currentTask').textContent = data.state.current_task || '-';
-  document.getElementById('runningState').textContent = data.state.running ? '运行中' : '空闲';
-  document.getElementById('returnCode').textContent = data.state.last_returncode ?? '-';
-  document.getElementById('runAllBtn').disabled = data.state.running;
-  document.getElementById('runModuleBtn').disabled = data.state.running;
-  const grid = document.getElementById('moduleGrid'); grid.innerHTML = '';
-  for(const item of data.modules){
-    const div = document.createElement('div'); div.className = 'mod';
-    const files = item.outputs.map(o => `${o.exists ? '✅' : '—'} ${o.filename}${o.json_status ? ' / ' + o.json_status : ''}`).join('<br>');
-    div.innerHTML = `<h3>${item.module}</h3><span class="badge ${item.status}">${item.status}</span><p style="font-size:12px;color:#94a3b8;line-height:1.7">${files}</p>`;
-    grid.appendChild(div);
-  }
-  document.getElementById('logBox').textContent = (data.state.logs || []).join('\n') || '等待运行...';
-}
-initSelectors(); refreshAll(); setInterval(refreshAll, 2000);
-</script>
-</body>
-</html>
-"""
+def body(h: BaseHTTPRequestHandler) -> dict[str, Any]:
+    n = int(h.headers.get("Content-Length", "0") or 0)
+    if not n: return {}
+    try: return json.loads(h.rfile.read(n).decode("utf-8"))
+    except Exception: return {}
+
+
+HTML = r'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>00-06控制台</title><style>
+body{margin:0;background:#0b1220;color:#e5e7eb;font-family:system-ui,"Segoe UI",sans-serif}header{padding:18px 24px;background:#111827}main{padding:18px;display:grid;gap:14px}.card{background:#0f172a;border:1px solid #334155;border-radius:14px;padding:16px}.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}input,textarea,select{background:#020617;color:#e5e7eb;border:1px solid #475569;border-radius:8px;padding:9px}button{background:#2563eb;color:#fff;border:0;border-radius:8px;padding:9px 12px;font-weight:700}button.secondary{background:#475569}button:disabled{opacity:.45}.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:10px}.mod{background:#020617;border:1px solid #334155;border-radius:10px;padding:10px;cursor:pointer}.badge{padding:2px 7px;border-radius:99px;background:#64748b;color:#020617;font-size:12px}.done{background:#22c55e}.needs_review{background:#f59e0b}.not_run{background:#94a3b8}pre{background:#020617;border:1px solid #334155;border-radius:10px;padding:12px;white-space:pre-wrap;max-height:520px;overflow:auto}table{width:100%;border-collapse:collapse}td,th{border-bottom:1px solid #334155;padding:7px;text-align:left}.note{color:#94a3b8;font-size:13px}.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:900px){.grid,.cols{grid-template-columns:1fr}}
+</style></head><body><header><h1>00–06 Pipeline 测试控制台</h1><div class="note">用于运行 Pipeline、查看摘要、查看原始 JSON/TXT。端口 1144。</div></header><main>
+<div class="card"><h2>项目</h2><div class="row"><input id="pid" value="project_test_001"><button onclick="refresh()">刷新</button><button onclick="saveInput()">保存输入框到 novel.txt</button><button onclick="loadInput()" class="secondary">读取 novel.txt</button></div><p id="inputInfo" class="note"></p><textarea id="novel" style="width:100%;height:100px" placeholder="可选：粘贴小说后保存。你也可以手动放入 novel.txt。"></textarea></div>
+<div class="card"><h2>运行</h2><div class="row"><button onclick="run('validate')" class="secondary">校验 pipeline</button><button onclick="run('all')">运行 01–06</button><select id="modSel"></select><button onclick="run('module')" class="secondary">运行选中模块</button></div><p id="runState" class="note"></p><pre id="logs">等待运行...</pre></div>
+<div class="card"><h2>模块状态（点击模块看摘要）</h2><div id="mods" class="grid"></div></div>
+<div class="cols"><div class="card"><h2>结果摘要</h2><div id="summary">点击上面的模块查看。</div></div><div class="card"><h2>原始输出</h2><div class="row"><select id="rawMod" onchange="fillFiles()"></select><select id="rawFile"></select><button onclick="loadRaw()">查看原始文件</button></div><pre id="raw">等待选择文件...</pre></div></div>
+</main><script>
+const modules=['01_novel_parser','02_script_writer','03_character_system','04_scene_system','05_prop_system','06_storyboard'];
+const files={'01_novel_parser':['novel_analysis.json','novel_meta.json'],'02_script_writer':['script.json','script.txt','script_meta.json'],'03_character_system':['characters.json','characters_meta.json'],'04_scene_system':['scenes.json','scenes_meta.json'],'05_prop_system':['props.json','props_meta.json'],'06_storyboard':['storyboard.json','storyboard_meta.json']};
+function pid(){return document.getElementById('pid').value||'project_test_001'}
+async function api(u,o){let r=await fetch(u,o);return await r.json()}
+function init(){let a=document.getElementById('modSel'),b=document.getElementById('rawMod');modules.forEach(m=>{a.innerHTML+=`<option>${m}</option>`;b.innerHTML+=`<option>${m}</option>`});fillFiles();refresh();setInterval(refresh,2000)}
+function fillFiles(){let m=document.getElementById('rawMod').value;document.getElementById('rawFile').innerHTML=files[m].map(f=>`<option>${f}</option>`).join('')}
+async function refresh(){let d=await api('/api/status?project_id='+encodeURIComponent(pid()));document.getElementById('inputInfo').textContent=`输入文件：${d.input.path}｜存在：${d.input.exists}｜大小：${d.input.size}｜字符：${d.input.chars}`;document.getElementById('runState').textContent=`状态：${d.state.running?'运行中':'空闲'}｜任务：${d.state.task||'-'}｜返回码：${d.state.code??'-'}`;document.getElementById('logs').textContent=(d.state.logs||[]).join('\n')||'等待运行...';document.getElementById('mods').innerHTML=d.modules.map(x=>`<div class="mod" onclick="showSummary('${x.module}')"><b>${x.module}</b><br><span class="badge ${x.status}">${x.status}</span><div class="note">${x.outputs.map(o=>(o.exists?'✅ ':'— ')+o.file).join('<br>')}</div></div>`).join('')}
+async function saveInput(){let d=await api('/api/save_input',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project_id:pid(),text:document.getElementById('novel').value})});alert(d.ok?'已保存':'失败：'+d.error);refresh()}
+async function loadInput(){let d=await api('/api/input?project_id='+encodeURIComponent(pid()));document.getElementById('novel').value=d.text||''}
+async function run(kind){let body={project_id:pid(),module:document.getElementById('modSel').value};let d=await api('/api/run_'+kind,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!d.ok)alert(d.error||'启动失败');refresh()}
+async function showSummary(m){let d=await api('/api/summary?project_id='+encodeURIComponent(pid())+'&module='+encodeURIComponent(m));let h=`<h3>${d.title}</h3>`;(d.items||[]).forEach(i=>h+=`<p><b>${i['名称']}：</b>${i['内容']}</p>`);if(d.script_text)h+=`<h4>剧本文本</h4><pre>${esc(d.script_text)}</pre>`;if(d.table){h+='<table><tr>'+Object.keys(d.table[0]||{}).map(k=>`<th>${k}</th>`).join('')+'</tr>'+d.table.map(r=>'<tr>'+Object.values(r).map(v=>`<td>${esc(String(v??''))}</td>`).join('')+'</tr>').join('')+'</table>'}document.getElementById('summary').innerHTML=h}
+async function loadRaw(){let m=document.getElementById('rawMod').value,f=document.getElementById('rawFile').value;let d=await api(`/api/raw?project_id=${encodeURIComponent(pid())}&module=${encodeURIComponent(m)}&file=${encodeURIComponent(f)}`);document.getElementById('raw').textContent=d.error?d.error+'\n'+(d.path||''):(d.json?JSON.stringify(d.json,null,2):d.text)}
+function esc(s){return s.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+init();</script></body></html>'''
 
 
 class Handler(BaseHTTPRequestHandler):
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A003
+    def log_message(self, *args: Any) -> None:
         return
 
-    def do_GET(self) -> None:  # noqa: N802
-        parsed = urlparse(self.path)
-        if parsed.path == "/":
-            _text_response(self, HTML)
-            return
-        if parsed.path == "/api/status":
-            query = parse_qs(parsed.query)
-            project_id = _safe_project_id(query.get("project_id", ["project_test_001"])[0])
-            with STATE_LOCK:
-                state = dict(STATE)
-                state["logs"] = list(STATE.get("logs", []))
-            data = {
-                "project_id": project_id,
-                "input_exists": _input_file(project_id).exists(),
-                "modules": [_module_status(project_id, module) for module in MODULES_00_06],
-                "state": state,
-            }
-            _json_response(self, data)
-            return
-        if parsed.path == "/api/output":
-            query = parse_qs(parsed.query)
-            project_id = _safe_project_id(query.get("project_id", ["project_test_001"])[0])
-            module = query.get("module", [""])[0]
-            filename = query.get("file", [""])[0]
-            _json_response(self, _read_output(project_id, module, filename))
-            return
-        _json_response(self, {"error": "not found"}, status=404)
+    def do_GET(self) -> None:
+        q = urlparse(self.path)
+        qs = parse_qs(q.query)
+        pid = clean_pid(qs.get("project_id", ["project_test_001"])[0])
+        if q.path == "/": send_html(self); return
+        if q.path == "/api/status": send_json(self, {"input": input_info(pid), "modules": [module_status(pid, m) for m in MODULES], "state": state()}); return
+        if q.path == "/api/input": send_json(self, {"text": read_text(novel_file(pid))}); return
+        if q.path == "/api/summary": send_json(self, summarize(pid, qs.get("module", [""])[0])); return
+        if q.path == "/api/raw": send_json(self, raw_output(pid, qs.get("module", [""])[0], qs.get("file", [""])[0])); return
+        send_json(self, {"error": "not found"}, 404)
 
-    def do_POST(self) -> None:  # noqa: N802
-        parsed = urlparse(self.path)
-        body = _read_body(self)
-        project_id = _safe_project_id(str(body.get("project_id", "project_test_001")))
-        if parsed.path == "/api/save_input":
-            text = str(body.get("text", ""))
-            if not text.strip():
-                _json_response(self, {"ok": False, "error": "小说内容为空"}, status=400)
-                return
-            path = _input_file(project_id)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text, encoding="utf-8")
-            _json_response(self, {"ok": True, "path": str(path.relative_to(ROOT_DIR))})
-            return
-        if parsed.path == "/api/run_all":
-            args = [sys.executable, "00_main_controller/run_pipeline.py", "--mode", "project", "--project-id", project_id, "--from-module", "01_novel_parser", "--to-module", "06_storyboard"]
-            ok = _start_thread(args, f"运行 01–06：{project_id}")
-            _json_response(self, {"ok": ok, "error": "已有任务正在运行" if not ok else ""})
-            return
-        if parsed.path == "/api/run_module":
-            module = str(body.get("module", ""))
-            if module not in MODULES_00_06:
-                _json_response(self, {"ok": False, "error": "模块不允许"}, status=400)
-                return
-            args = [sys.executable, "00_main_controller/run_pipeline.py", "--mode", "project", "--project-id", project_id, "--only-module", module]
-            ok = _start_thread(args, f"运行 {module}：{project_id}")
-            _json_response(self, {"ok": ok, "error": "已有任务正在运行" if not ok else ""})
-            return
-        _json_response(self, {"error": "not found"}, status=404)
+    def do_POST(self) -> None:
+        q = urlparse(self.path)
+        b = body(self)
+        pid = clean_pid(str(b.get("project_id", "project_test_001")))
+        if q.path == "/api/save_input":
+            text = str(b.get("text", ""))
+            if not text.strip(): send_json(self, {"ok": False, "error": "输入框为空"}, 400); return
+            p = novel_file(pid); p.parent.mkdir(parents=True, exist_ok=True); p.write_text(text, encoding="utf-8")
+            send_json(self, {"ok": True, "path": str(p.relative_to(ROOT))}); return
+        if q.path == "/api/run_validate":
+            send_json(self, {"ok": start([sys.executable, "00_main_controller/validate_pipeline.py", "--pipeline", "pipeline.json", "--strict-order"], "校验 pipeline")}); return
+        if q.path == "/api/run_all":
+            args = [sys.executable, "00_main_controller/run_pipeline.py", "--mode", "project", "--project-id", pid, "--from-module", "01_novel_parser", "--to-module", "06_storyboard"]
+            send_json(self, {"ok": start(args, "运行 01–06")}); return
+        if q.path == "/api/run_module":
+            m = str(b.get("module", ""))
+            if m not in MODULES: send_json(self, {"ok": False, "error": "模块不允许"}, 400); return
+            args = [sys.executable, "00_main_controller/run_pipeline.py", "--mode", "project", "--project-id", pid, "--only-module", m]
+            send_json(self, {"ok": start(args, "运行 " + m)}); return
+        send_json(self, {"error": "not found"}, 404)
 
 
 def main() -> int:
-    server = ThreadingHTTPServer((HOST, PORT), Handler)
     url = f"http://{HOST}:{PORT}"
-    print(f"AI Drama 00-06 测试控制台已启动：{url}")
-    print("按 Ctrl+C 停止。")
-    if os.getenv("AI_DRAMA_UI_NO_BROWSER", "0") != "1":
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        print("\n已停止。")
-    finally:
-        server.server_close()
+    print("AI Drama 00-06 控制台：" + url)
+    if os.getenv("AI_DRAMA_UI_NO_BROWSER", "0") != "1": threading.Timer(0.6, lambda: webbrowser.open(url)).start()
+    server = ThreadingHTTPServer((HOST, PORT), Handler)
+    try: server.serve_forever()
+    except KeyboardInterrupt: pass
+    finally: server.server_close()
     return 0
 
 
