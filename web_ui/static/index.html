@@ -174,8 +174,9 @@
         <div class="asset-hero panel">
           <div>
             <h2>资产库工作台</h2>
-            <p>角色、场景、道具先以 JSON 资产卡呈现；后续 07 接入后显示定妆照、造型照、场景图、道具图。</p>
+            <p>每个资产都以卡片呈现，并支持编辑图片生成提示词、保存草稿、重新生成图片。</p>
           </div>
+          <div class="panel-chip">Prompt Editable</div>
         </div>
         <div class="grid three-cols">
           <div class="panel asset-panel character-card" data-output="03_character_system/characters.json">
@@ -194,6 +195,7 @@
             <div id="propSummary" class="muted">等待 05 输出</div>
           </div>
         </div>
+        <div id="assetCardGrid" class="editable-card-grid"></div>
       </section>
 
       <section class="view" id="view-storyboard">
@@ -201,7 +203,7 @@
           <div class="panel-header">
             <div>
               <h2>分镜工作台</h2>
-              <p>06 当前先显示分镜 JSON 摘要；07 图片生成后这里升级为图文分镜表。</p>
+              <p>每帧分镜都可以编辑图片生成提示词，后续接入 07 后支持单帧重绘。</p>
             </div>
             <button id="previewStoryboardBtn" class="btn small">预览 storyboard.json</button>
           </div>
@@ -229,8 +231,8 @@
             <div><h3>2. 生产控制台</h3><p>小说输入、章节选择、模块选择、本地 LLM、ComfyUI、TTS、视频参数。</p></div>
             <div><h3>3. 阶段透明区</h3><p>阶段目标、输入摘要、LLM 输出、JSON 修复、评分、修改意见、重跑次数。</p></div>
             <div><h3>4. 返工中心</h3><p>集中展示所有阻塞问题，并从最早问题阶段触发重跑。</p></div>
-            <div><h3>5. 资产库</h3><p>角色卡、场景卡、道具卡，以及 07 后的参考图绑定。</p></div>
-            <div><h3>6. 分镜工作台</h3><p>帧序列、角色引用、服装版本、造型引用、连续性和图文预览。</p></div>
+            <div><h3>5. 资产库</h3><p>角色卡、场景卡、道具卡，提示词可编辑，支持单资产重绘。</p></div>
+            <div><h3>6. 分镜工作台</h3><p>帧序列、角色引用、服装版本、造型引用、连续性、提示词编辑和单帧重绘。</p></div>
             <div><h3>7. 媒体生产区</h3><p>07 图片、08 音频、09 视频、10 合成的队列、预览、失败重试。</p></div>
           </div>
         </div>
