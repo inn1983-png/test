@@ -16,7 +16,8 @@
 ```text
 01 = 提取一切，宁可多提，不漏掉
 05 = 先合并，再分级，再复核，不简单删除候选
-06 = 只引用 05 输出的稳定道具名和关键/动作道具
+05 = 区分普通道具、独立关键道具、可并入角色造型的穿戴物
+06 = 只引用 05 输出的稳定道具名，并按 wearable_policy 决定是否并入 appearance_asset
 ```
 
 ## 资产分级
@@ -30,6 +31,10 @@ source_understanding_basis
 asset_level = key_prop / action_prop / background_object / mentioned_only
 needs_reference_image = true / false
 reference_image_plan
+wearable_type
+wearable_policy
+bound_character_names
+bound_costume_ids
 ```
 
 分级必须参考 01 的真正理解：
@@ -45,6 +50,32 @@ visual_risk_report
 paragraphs
 ```
 
+## 穿戴物归属策略
+
+服装主体不由 05 主管。
+
+```text
+官服、常服、夜行衣、婚服、孝服、破损衣服等完整服装版本：归 03_character_system.costume_variants。
+腰牌、面具、玉佩、凤冠、面纱、特殊披风、官帽、护腕等可独立强调的穿戴物：归 05_prop_system。
+```
+
+05 每个道具必须用 `wearable_policy` 标明后续引用方式：
+
+```text
+not_wearable：普通非穿戴道具。
+merge_into_appearance_asset：并入角色造型照，07 后续基于定妆照换装时一起融合。
+independent_prop_reference：正式分镜图阶段仍作为独立道具参考。
+both：既可并入造型照，也可能在特写/动作帧中独立引用。
+```
+
+这样后续 07 可以先生成：
+
+```text
+角色定妆照 → 图生图换衣服 + 加常驻穿戴物 → 角色造型照 → 分镜图引用造型照
+```
+
+而不是每帧都塞大量零散参考图。
+
 ## 复核机制
 
 05E 是面向 06 的资产可用性复核，不是格式检查。
@@ -59,6 +90,8 @@ paragraphs
 普通道具是否被过度资产化
 背景物件是否归入场景元素
 owner_character 是否合理
+wearable_policy 是否合理
+可并入角色造型的穿戴物是否绑定角色/服装关系
 06 是否能直接引用 canonical_prop_name
 ```
 
@@ -80,6 +113,8 @@ upstream_blocking_issues
 ```text
 key_prop：clean_front_view；复杂道具可加 side_view。
 action_prop：需要时再做 clean_front_view。
+merge_into_appearance_asset：后续可由 07 融入角色造型照。
+independent_prop_reference / both：需要时保留独立干净道具参考图。
 background_object / mentioned_only：不强制做图，尽量归入场景元素。
 ```
 
@@ -101,6 +136,7 @@ background_object / mentioned_only：不强制做图，尽量归入场景元素�
 道具合并
 道具别名归并
 关键道具/动作道具/背景物件区分
+穿戴物归属策略
 道具资产分级
 稳定道具卡
 剧本使用绑定
@@ -120,6 +156,7 @@ background_object / mentioned_only：不强制做图，尽量归入场景元素�
 ComfyUI 调用
 角色资产标准化
 场景资产标准化
+完整服装版本主管
 ```
 
 ## 分阶段真实 LLM 流程
@@ -134,7 +171,7 @@ python 05_prop_system/run_staged.py
 
 ```text
 05A prop_merge_plan：合并同一道具的不同说法
-05B prop_cards：输出稳定道具卡 + 资产分级 + 重要性评分
+05B prop_cards：输出稳定道具卡 + 资产分级 + 重要性评分 + wearable_policy
 05C script_usage_binding：绑定 02 剧本里的道具使用
 05D quality_check：模块内部总检评分
 05E asset_review：基于 01 真正理解，面向 06 复核资产可用性
@@ -164,6 +201,9 @@ aliases 是否互相冲突
 asset_importance_score 是否为 0-100
 source_understanding_basis 是否引用 01 理解依据
 asset_level 是否合法
+wearable_type 是否合法
+wearable_policy 是否合法
+bound_character_names / bound_costume_ids 是否为数组
 关键道具是否 needs_reference_image=true
 关键道具 reference_image_plan 是否包含 clean_front_view
 asset_review_report 是否存在
@@ -181,6 +221,10 @@ usage_in_script 是否为数组
 canonical_prop_name
 aliases
 prop_type
+wearable_type
+wearable_policy
+bound_character_names
+bound_costume_ids
 asset_importance_score
 importance_reason
 source_understanding_basis
