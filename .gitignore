@@ -29,6 +29,7 @@ shared_assets/
 # Local models and checkpoints
 models/
 checkpoints/
+index-tts/
 *.safetensors
 *.ckpt
 *.pt
