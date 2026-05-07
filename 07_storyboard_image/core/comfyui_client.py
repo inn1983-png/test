@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+PLACEHOLDER_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
 
 
 class ComfyUIClient:
@@ -85,6 +90,32 @@ class ComfyUIClient:
             raise RuntimeError(f"ComfyUI {path} response must be an object.")
         return value
 
+    def _write_dry_run_placeholder(self, output_path: str, task: dict[str, Any]) -> None:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            path.write_bytes(PLACEHOLDER_PNG)
+            meta_path = path.with_suffix(path.suffix + ".dry_run.json")
+            meta_path.write_text(
+                json.dumps(
+                    {
+                        "status": "planned",
+                        "execution_mode": "dry_run",
+                        "task_type": task.get("task_type"),
+                        "frame_id": task.get("frame_id"),
+                        "task_id": task.get("task_id"),
+                        "positive_prompt": task.get("positive_prompt", ""),
+                        "negative_prompt": task.get("negative_prompt", ""),
+                        "note": "This is a 1x1 placeholder image created so downstream dry-run modules can validate file paths.",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        else:
+            path.write_text("DRY_RUN_PLACEHOLDER_IMAGE\n", encoding="utf-8")
+
     def submit_task(self, task: dict[str, Any], output_dir: str | Path) -> dict[str, Any]:
         output_path = str(task.get("output_image_path") or "")
         if not output_path:
@@ -95,6 +126,7 @@ class ComfyUIClient:
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         image_id = str(task.get("frame_id") or task.get("appearance_asset_key") or task.get("lock_key") or task.get("task_id") or "image")
         if self.dry_run:
+            self._write_dry_run_placeholder(output_path, task)
             return {
                 "status": "planned",
                 "execution_mode": "dry_run",
@@ -103,7 +135,7 @@ class ComfyUIClient:
                 "frame_id": task.get("frame_id"),
                 "task_id": task.get("task_id"),
                 "output_path": output_path,
-                "note": "Dry run only. Set AI_DRAMA_IMAGE_EXECUTION_MODE=execute and configure workflow mapping to generate images.",
+                "note": "Dry-run placeholder image written. Set AI_DRAMA_IMAGE_EXECUTION_MODE=execute and configure workflow mapping to generate real images.",
             }
         workflow = self.build_workflow(task)
         response = self._post_json("/prompt", {"prompt": workflow, "client_id": self.client_id})
