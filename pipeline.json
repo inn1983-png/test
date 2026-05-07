@@ -5,9 +5,9 @@
   "pipeline": [
     "01_novel_parser",
     "02_script_writer",
-    "03_character_library",
-    "04_scene_library",
-    "05_prop_library",
+    "03_character_system",
+    "04_scene_system",
+    "05_prop_system",
     "06_storyboard",
     "07_storyboard_image",
     "08_audio",
