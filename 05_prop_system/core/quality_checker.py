@@ -15,13 +15,15 @@ REQUIRED_PRESENT_BY_STAGE = {
 }
 
 REQUIRED_PROP_FIELDS = [
-    "prop_id", "canonical_prop_name", "aliases", "prop_type", "owner_character",
-    "usage_function", "appearance", "material", "risk_notes", "source_evidence", "usage_in_script",
-    "asset_level", "needs_reference_image", "reference_image_plan",
-    "asset_importance_score", "importance_reason", "source_understanding_basis"
+    "prop_id", "canonical_prop_name", "aliases", "prop_type", "wearable_type", "wearable_policy",
+    "bound_character_names", "bound_costume_ids", "owner_character", "usage_function", "appearance", "material",
+    "risk_notes", "source_evidence", "usage_in_script", "asset_level", "needs_reference_image",
+    "reference_image_plan", "asset_importance_score", "importance_reason", "source_understanding_basis"
 ]
 
 VALID_ASSET_LEVELS = {"key_prop", "action_prop", "background_object", "mentioned_only"}
+VALID_WEARABLE_TYPES = {"none", "accessory", "headwear", "outerwear", "symbolic_item", "mask", "jewelry", "weapon_attached"}
+VALID_WEARABLE_POLICIES = {"not_wearable", "merge_into_appearance_asset", "independent_prop_reference", "both"}
 VALID_RETRY_STAGES = {"05A", "05B", "05C", "05D"}
 
 
@@ -40,6 +42,9 @@ def _check_review_report(stage_id: str, data: dict[str, Any], issues: list[str])
         if field not in report:
             issues.append(f"{stage_id}.review_report 缺少字段：{field}")
             score_delta -= 5
+    if "wearable_policy_check" not in report:
+        issues.append(f"{stage_id}.review_report 缺少字段：wearable_policy_check")
+        score_delta -= 5
     for retry_stage in report.get("retry_stages", []) or []:
         if retry_stage not in VALID_RETRY_STAGES:
             issues.append(f"{stage_id}.review_report.retry_stages 非法：{retry_stage}")
@@ -82,7 +87,7 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
                 score -= 10
                 continue
             for field in REQUIRED_PROP_FIELDS:
-                if not _non_empty(item.get(field)):
+                if field not in item or item.get(field) in (None, ""):
                     issues.append(f"道具 {item.get('canonical_prop_name', idx)} 缺少字段：{field}")
                     score -= 5
             if "prompt" in item or "image_prompt" in item:
@@ -92,6 +97,18 @@ def evaluate_stage(stage_id: str, data: dict[str, Any]) -> dict[str, Any]:
             if item.get("asset_level") not in VALID_ASSET_LEVELS:
                 issues.append(f"道具 {name} asset_level 非法：{item.get('asset_level')}")
                 score -= 10
+            if item.get("wearable_type") not in VALID_WEARABLE_TYPES:
+                issues.append(f"道具 {name} wearable_type 非法：{item.get('wearable_type')}")
+                score -= 8
+            if item.get("wearable_policy") not in VALID_WEARABLE_POLICIES:
+                issues.append(f"道具 {name} wearable_policy 非法：{item.get('wearable_policy')}")
+                score -= 8
+            if item.get("wearable_type") == "none" and item.get("wearable_policy") != "not_wearable":
+                issues.append(f"非穿戴道具 wearable_policy 应为 not_wearable：{name}")
+                score -= 6
+            if item.get("wearable_policy") in {"merge_into_appearance_asset", "both"} and not isinstance(item.get("bound_character_names"), list):
+                issues.append(f"并入角色造型的穿戴物必须 bound_character_names 为数组：{name}")
+                score -= 6
             if item.get("asset_level") == "key_prop" and item.get("needs_reference_image") is not True:
                 issues.append(f"关键道具必须 needs_reference_image=true：{name}")
                 score -= 10
