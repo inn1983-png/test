@@ -18,7 +18,7 @@
 ```text
 00 + 01–10 子系统框架已能闭环。
 01 小说解析系统已修正为真实 LLM 分阶段入口 run_llm_stages，不再调用旧 scaffold。
-02 剧本改编系统已升级到 schema 1.2，成为音频驱动、单帧分镜友好、多版本评估、失败样本回灌的真实 LLM 子系统。
+02 剧本改编系统已升级到 schema 1.2，成为音频驱动、单帧分镜友好、外观/换装状态可追踪、多版本评估、失败样本回灌的真实 LLM 子系统。
 03/04/05 已从旧 scaffold library 目录切换为真实资产 system：03_character_system、04_scene_system、05_prop_system。
 03/04/05 已升级为五阶段真实资产系统：A 合并、B 资产卡、C 剧本绑定、D 模块总检、E 面向 06 的资产复核。
 06_storyboard 已升级为五阶段真实 LLM 单帧分镜系统：A 资产闸门、B 分镜规划、C 单帧分镜、D 连续性绑定、E 总检。
@@ -123,9 +123,10 @@ complete_json 的 repair_callback 返回后也必须再次调用 remove_internal
 为保证角色一致性与换装稳定，采用以下链路：
 
 ```text
-03 建立角色稳定身份、定妆照需求、costume_variants。
+02 记录 appearance_state_changes，明确默认外观、换装、伪装、衣服破损、穿戴物新增/摘除/强调等剧情状态变化。
+03 建立角色稳定身份、定妆照需求、costume_variants，并直接读取 02 appearance_state_changes。
 05 只管理可独立强调的穿戴物/关键道具，并用 wearable_policy 标明是否并入造型。
-06 输出 character_lock_reference 与 appearance_asset_requirements，只定义引用关系，不生成图片。
+06 输出 character_lock_reference 与 appearance_asset_requirements，并直接读取 02 appearance_state_changes，只定义引用关系，不生成图片。
 07 后续先生成/引用角色定妆照锁脸，再基于定妆照图生图换衣服、加常驻穿戴物，生成角色造型照，最后正式分镜图引用角色造型照。
 ```
 
@@ -135,6 +136,8 @@ complete_json 的 repair_callback 返回后也必须再次调用 remove_internal
 先锁脸，再换装。
 服装主体归 03 costume_variants，不把同一角色的不同衣服拆成不同角色。
 腰牌、面具、玉佩、凤冠、面纱、特殊披风、官帽、护腕等可独立强调的穿戴物归 05。
+02 负责记录换装事件和外观状态变化，不负责生成资产。
+03 负责把外观状态变化转成 costume_variants，不生成图片。
 06 每帧引用 canonical_name + character_lock_reference + costume_id + appearance_asset_key + wearable_props。
 07 暂未实现，后续新开对话单独做。
 ```
@@ -186,7 +189,14 @@ complete_json 的 repair_callback 返回后也必须再次调用 remove_internal
 ```text
 单帧 = 生产单位
 四宫格 = 后续连续性预览 / 检查单位
-02 只输出 visual_dramatic_units / storyboard_hints / continuity_chain 等剧本层动作链和连续性提示。
+02 输出 visual_dramatic_units / storyboard_hints / continuity_chain 等剧本层动作链和连续性提示。
+02 还必须输出 appearance_state_changes，用于 03 生成 costume_variants、用于 06 选择 costume_id / appearance_asset_key。
+```
+
+02E 必须输出：
+
+```text
+appearance_state_changes：记录 default_appearance / costume_change / disguise / damage_state / wearable_added / wearable_removed / wearable_emphasized。
 ```
 
 02 禁止做：
@@ -243,6 +253,7 @@ main/supporting 必须包含 default_costume_id / costume_variants。
 default_costume_id 必须存在于 costume_variants。
 costume_variants 必须且只能有一个 is_default=true。
 换装不能拆成新角色。
+03 必须参考 02 appearance_state_changes 生成服装版本。
 03 不生成图片，只写定妆照和服装版本需求。
 ```
 
@@ -286,7 +297,7 @@ importance_reason
 source_understanding_basis 必须引用 01 story_understanding / story_spine / events / conflicts / high_retention_segments / scene_value_map / visual_risk_report / paragraphs
 asset_level = main_scene / sub_scene / temporary / background
 needs_reference_image = true / false
-parent_scene：字段必须存在；只有 sub_scene 必须非空绑定主场景，main_scene/temporary/background 可为空但字段需存在
+parent_scene：字段必须存在；只有 sub_scene 必须非空绑定 parent_scene，main_scene/temporary/background 可为空但字段需存在
 reference_image_plan
 ```
 
@@ -394,6 +405,7 @@ independent_prop_reference 表示正式分镜图阶段仍可独立引用。
 每帧角色服装必须引用 03 costume_id。
 每帧场景必须引用 04 canonical_scene_name。
 每帧道具必须引用 05 canonical_prop_name。
+必须参考 02 appearance_state_changes 选择 costume_id / appearance_asset_key。
 不允许新增不存在于资产库的主角色、服装版本、主场景、关键道具。
 如发现资产缺失，写入 upstream_blocking_issues，建议 03/04/05 对应阶段重跑。
 ```
@@ -443,6 +455,7 @@ LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原
 ## 最终 schema 硬校验
 
 ```text
+02 最终 schema_validator.py 会检查 appearance_state_changes 是否存在、是否引用真实 segment_id / voice_line_id / visual_unit_id。
 03 最终 schema_validator.py 会检查角色去重、主/配角 fixed face、default_costume_id、costume_variants、默认服装唯一性。
 04 最终 schema_validator.py 会检查场景层级、parent_scene、主场景参考图计划。
 05 最终 schema_validator.py 会检查道具分级、wearable_type、wearable_policy、bound_character_names、bound_costume_ids、禁止图像提示词字段。
@@ -500,6 +513,7 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 不同阶段角色可能有不同衣服，服装主体要归入 03 costume_variants，不要把换装拆成新角色。
 为了保证角色一致性，后续 07 应先生成角色定妆照锁脸，再用定妆照图生图换衣服加道具，生成角色造型照，再被正式分镜图引用。
 05 只处理可独立强调或可并入造型的穿戴物，不主管完整服装版本。
+02 必须记录 appearance_state_changes，给 03/06 提供换装和穿戴状态依据，不能让 03/06 靠猜。
 06 只生成单帧分镜 JSON，不生成图片、不调用 ComfyUI、不生成最终视频。
 06 必须严格引用 03/04/05 稳定资产名和 03 costume_id，不允许新增不存在于资产库的主角色、服装版本、主场景、关键道具。
 06 如发现资产缺失，不能自己硬补，要输出 upstream_blocking_issues，建议 03/04/05 对应阶段重跑。
