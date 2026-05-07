@@ -11,18 +11,47 @@
 02_script_writer/script.json
 ```
 
-重点使用：
+核心原则：
 
 ```text
-01: candidate_props / paragraphs / events / asset_binding_hints
-02: segments / visual_dramatic_units / storyboard_hints / scene_beats / continuity_chain
+01 = 提取一切，宁可多提，不漏掉
+05 = 先合并，再分级，不简单删除候选
+06 = 只引用 05 输出的稳定道具名和关键/动作道具
 ```
 
-输出：
+## 资产分级
+
+05B 必须给每个道具输出：
 
 ```text
-05_prop_system/props.json
-05_prop_system/prop_meta.json
+asset_level = key_prop / action_prop / background_object / mentioned_only
+needs_reference_image = true / false
+reference_image_plan
+```
+
+分级规则：
+
+```text
+key_prop：关键道具，影响剧情或反复出现，必须有独立参考图计划。
+action_prop：动作道具，会被拿、递、摔、使用，可选参考图。
+background_object：背景物件，不单独做图，优先归入场景 key_visual_elements。
+mentioned_only：仅被提及，不进入主生图资产。
+```
+
+参考图策略：
+
+```text
+key_prop：clean_front_view；复杂道具可加 side_view。
+action_prop：需要时再做 clean_front_view。
+background_object / mentioned_only：不强制做图，尽量归入场景元素。
+```
+
+最高图像资产规则：
+
+```text
+关键道具用单独干净图。
+普通道具和背景物件不要全部做图，否则资产库会爆炸。
+道具图不要和角色/场景混在一起。
 ```
 
 ## 绝对边界
@@ -32,7 +61,8 @@
 ```text
 道具合并
 道具别名归并
-关键道具/普通道具/背景物件区分
+关键道具/动作道具/背景物件区分
+道具资产分级
 稳定道具卡
 剧本使用绑定
 证据链
@@ -64,7 +94,7 @@ python 05_prop_system/run_staged.py
 
 ```text
 05A prop_merge_plan：合并同一道具的不同说法
-05B prop_cards：输出稳定道具卡
+05B prop_cards：输出稳定道具卡 + 资产分级
 05C script_usage_binding：绑定 02 剧本里的道具使用
 05D quality_check：总检评分，可触发连锁重跑
 ```
@@ -92,10 +122,6 @@ python 05_prop_system/run_staged.py
 05A → 05B → 05C → 05D
 ```
 
-## JSON 修复机制
-
-LLM 返回 JSON 解析失败时，`json_repair.py` 会把 broken_json 和错误原因发回 LLM，只修复 JSON 格式，不新增业务内容。
-
 ## 最终硬规则校验
 
 `schema_validator.py` 会检查：
@@ -105,6 +131,9 @@ props 是否为空
 prop_id 是否重复
 canonical_prop_name 是否重复
 aliases 是否互相冲突
+asset_level 是否合法
+关键道具是否 needs_reference_image=true
+关键道具 reference_image_plan 是否包含 clean_front_view
 是否出现 prompt / image_prompt / desc_prompt 等越界字段
 source_evidence 是否存在
 usage_in_script 是否为数组
@@ -118,6 +147,9 @@ usage_in_script 是否为数组
 canonical_prop_name
 aliases
 prop_type
+asset_level
+needs_reference_image
+reference_image_plan
 owner_character
 usage_function
 appearance
@@ -131,7 +163,7 @@ usage_in_script
 
 ```text
 合并同一道具的不同说法。
-区分关键道具、普通道具、背景物件。
+区分关键道具、动作道具、背景物件、仅提及物件。
 道具描述要适合后续 06 单帧分镜引用，但不要写图像提示词。
 ```
 
