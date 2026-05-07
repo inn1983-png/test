@@ -29,6 +29,7 @@
 configs/local_resource_release.json 已从旧 library 模块名切换为 system 模块名，并新增 phase_commands。
 04_scene_system 已修正 parent_scene 校验：只有 sub_scene 必须非空绑定 parent_scene，main/temporary/background 可为空但字段需存在。
 05_prop_system 已修正 05B prop_type 枚举，与 asset_level 统一为 key_prop/action_prop/background_object/mentioned_only。
+web_ui 已新增最终版总控工作台骨架：不是测试 UI，而是面向 01–10 全流程的生产控制台、阶段透明区、资产库入口、产物中心和后续媒体生产区扩展基础。
 ```
 
 ---
@@ -61,6 +62,56 @@ configs/local_resource_release.json 已从旧 library 模块名切换为 system 
 08_audio/final_audio.wav
 09_video/video_manifest.json
 10_final_assembly/final.mp4
+```
+
+---
+
+# Web UI 最终版总控工作台
+
+目录：
+
+```text
+web_ui/
+```
+
+启动：
+
+```bash
+python web_ui/server.py --host 127.0.0.1 --port 7860
+```
+
+浏览器：
+
+```text
+http://127.0.0.1:7860
+```
+
+定位：
+
+```text
+web_ui 不是简易测试 UI，而是最终版生产工作台的第一版骨架。
+目标是让用户看到 LLM / ComfyUI / TTS / Video 每一步具体在做什么，而不是黑盒等待。
+```
+
+当前已实现：
+
+```text
+总览页：显示 pipeline 01–10、当前任务、run_status、关键产物、最近项目、实时日志。
+生产控制台：支持 project/book_chapter、粘贴小说、从指定模块继续、只跑单模块、本地 LLM 参数、启动/停止任务。
+阶段透明区：读取 workspace/.../<module>/intermediate/*.json，展示阶段输出、评分、是否通过、问题数量，并支持 JSON 预览。
+资产库入口：接入 03 characters、04 scenes、05 props，当前先做 JSON 预览，后续升级为可视化角色卡/场景卡/道具卡。
+产物中心：集中展示 01–10 关键产物并支持 JSON 预览。
+最终 UI 设计页：记录首页、生产控制台、阶段透明区、资产库、分镜工作台、媒体生产区、返工中心的长期结构。
+```
+
+后续 UI 必须继续沿这个方向扩展：
+
+```text
+不是只看日志，而是看阶段产物、评分、修改意见、自动重跑次数、schema 校验、upstream_blocking_issues。
+07 图片阶段接入后，资产库要能显示定妆照、造型照、场景图、道具图。
+06/07 接通后，分镜工作台要从 JSON 预览升级为图文分镜表。
+08/09/10 接入后，媒体生产区要显示音频队列、视频队列、显存资源状态、失败重试和最终导出。
+返工中心要集中展示 needs_retry / retry_stages / upstream_blocking_issues / schema_validation_issues，并支持从最早问题阶段重跑。
 ```
 
 ---
@@ -481,6 +532,12 @@ set AI_DRAMA_LLM_TEMPERATURE=0.1
 set AI_DRAMA_LLM_TIMEOUT_SEC=240
 ```
 
+启动最终版 Web UI：
+
+```bash
+python web_ui/server.py --host 127.0.0.1 --port 7860
+```
+
 先校验 pipeline：
 
 ```bash
@@ -521,4 +578,5 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 07 暂不改，等 01–06 全部完成后新开对话单独处理。
 用户准备使用本地 Gemma 4 31B Q4，所以 01/02/03/04/05/06 需要强 JSON 护栏、低温度默认值、输出控制字段清理。
 00–06 都属于 LLM 文本阶段，不应每个模块结束就释放 LLM；06→07 才释放 LLM 显存。
+Web UI 不是测试用 UI，而是最终版 UI 设计：要让用户在界面里看到每一步发生了什么，阶段输出、评分、修改意见、返工、产物都要有对应显示区域。当前 web_ui 已按最终工作台骨架落地，后续 07/08/09/10 必须继续接入同一工作台。
 ```
