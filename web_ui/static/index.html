@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI 短剧工厂 · 总控工作台</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/image_phase.css" />
 </head>
 <body>
   <div class="ambient ambient-a"></div>
@@ -29,163 +30,23 @@
         <button class="nav-item" data-view="outputs"><span>⌁</span>产物中心</button>
         <button class="nav-item" data-view="design"><span>✦</span>UI 设计蓝图</button>
       </nav>
-      <div class="sidebar-card status-orb-card">
-        <div class="sidebar-card-title">当前运行</div>
-        <div id="currentJobMini" class="muted">暂无任务</div>
-      </div>
+      <div class="sidebar-card status-orb-card"><div class="sidebar-card-title">当前运行</div><div id="currentJobMini" class="muted">暂无任务</div></div>
       <div class="sidebar-foot">默认端口 1144 · 本地生产环境</div>
     </aside>
 
     <main class="main">
-      <header class="hero">
-        <div>
-          <div class="eyebrow">Novel → Script → Assets → Storyboard → Image → Audio → Video</div>
-          <h1>总控工作台</h1>
-          <p>最终版生产 UI：每一步都有状态、输出、评分、返工、产物和后续媒体生产入口。</p>
-        </div>
-        <div class="topbar-actions">
-          <button id="refreshBtn" class="btn ghost">刷新</button>
-          <button id="stopBtn" class="btn danger" disabled>停止当前任务</button>
-        </div>
-      </header>
+      <header class="hero"><div><div class="eyebrow">Novel → Script → Assets → Storyboard → Image → Audio → Video</div><h1>总控工作台</h1><p>最终版生产 UI：每一步都有状态、输出、评分、返工、产物和后续媒体生产入口。</p></div><div class="topbar-actions"><button id="refreshBtn" class="btn ghost">刷新</button><button id="stopBtn" class="btn danger" disabled>停止当前任务</button></div></header>
 
-      <section class="view active" id="view-dashboard">
-        <div class="hero-grid">
-          <div class="panel hero-panel">
-            <div class="panel-header compact">
-              <div>
-                <h2>生产进度</h2>
-                <p>实时跟踪 01–10 模块状态。</p>
-              </div>
-              <div id="heroStatusBadge" class="badge pending">待开始</div>
-            </div>
-            <div class="progress-shell"><div id="pipelineProgressBar" class="progress-bar" style="width:0%"></div></div>
-            <div id="pipelineTimeline" class="timeline"></div>
-          </div>
-          <div class="panel insight-panel">
-            <div class="panel-header compact"><h2>运行洞察</h2></div>
-            <div class="insight-stack">
-              <div class="insight-row"><span>流程阶段</span><strong id="metricModules">0</strong></div>
-              <div class="insight-row"><span>当前任务</span><strong id="metricJob">无</strong></div>
-              <div class="insight-row"><span>项目状态</span><strong id="metricRunStatus">待开始</strong></div>
-              <div class="insight-row"><span>关键产物</span><strong id="metricOutputs">0</strong></div>
-              <div class="insight-row"><span>返工问题</span><strong id="metricIssues">0</strong></div>
-            </div>
-            <button class="btn primary wide" data-jump="runner">进入生产控制台</button>
-          </div>
-        </div>
+      <section class="view active" id="view-dashboard"><div class="hero-grid"><div class="panel hero-panel"><div class="panel-header compact"><div><h2>生产进度</h2><p>实时跟踪 01–10 模块状态。</p></div><div id="heroStatusBadge" class="badge pending">待开始</div></div><div class="progress-shell"><div id="pipelineProgressBar" class="progress-bar" style="width:0%"></div></div><div id="pipelineTimeline" class="timeline"></div></div><div class="panel insight-panel"><div class="panel-header compact"><h2>运行洞察</h2></div><div class="insight-stack"><div class="insight-row"><span>流程阶段</span><strong id="metricModules">0</strong></div><div class="insight-row"><span>当前任务</span><strong id="metricJob">无</strong></div><div class="insight-row"><span>项目状态</span><strong id="metricRunStatus">待开始</strong></div><div class="insight-row"><span>关键产物</span><strong id="metricOutputs">0</strong></div><div class="insight-row"><span>返工问题</span><strong id="metricIssues">0</strong></div></div><button class="btn primary wide" data-jump="runner">进入生产控制台</button></div></div><div class="grid two-cols"><div class="panel"><div class="panel-header"><h2>最近项目</h2><p>自动读取 workspace/projects。</p></div><div id="projectList" class="list"></div></div><div class="panel"><div class="panel-header"><h2>实时日志</h2><p>LLM / ComfyUI 长时间运行时可以看到 stdout。</p></div><pre id="liveLog" class="log-box">暂无日志</pre></div></div></section>
 
-        <div class="grid two-cols">
-          <div class="panel">
-            <div class="panel-header"><h2>最近项目</h2><p>自动读取 workspace/projects。</p></div>
-            <div id="projectList" class="list"></div>
-          </div>
-          <div class="panel">
-            <div class="panel-header"><h2>实时日志</h2><p>LLM / ComfyUI 长时间运行时可以看到 stdout。</p></div>
-            <pre id="liveLog" class="log-box">暂无日志</pre>
-          </div>
-        </div>
-      </section>
-
-      <section class="view" id="view-runner">
-        <div class="panel command-panel">
-          <div class="panel-header">
-            <div>
-              <h2>生产控制台</h2>
-              <p>输入小说、选择运行范围、配置本地 LLM / 图片执行参数，一键启动全流程或指定模块。</p>
-            </div>
-            <div class="panel-chip">LLM 01–06 / IMAGE 07</div>
-          </div>
-          <div class="form-grid">
-            <label>运行模式
-              <select id="modeInput">
-                <option value="project">单项目 project</option>
-                <option value="book_chapter">长篇章节 book_chapter</option>
-              </select>
-            </label>
-            <label>项目 ID
-              <input id="projectIdInput" placeholder="project_test_001" />
-            </label>
-            <label>书籍 ID
-              <input id="bookIdInput" placeholder="book_001" />
-            </label>
-            <label>章节 ID
-              <input id="chapterIdInput" placeholder="chapter_001" />
-            </label>
-            <label>从哪个模块开始
-              <select id="fromModuleInput"></select>
-            </label>
-            <label>只运行单个模块
-              <select id="onlyModuleInput"></select>
-            </label>
-            <label>LLM Base URL
-              <input id="llmBaseUrlInput" placeholder="http://127.0.0.1:8000/v1/chat/completions" />
-            </label>
-            <label>LLM Model
-              <input id="llmModelInput" placeholder="本地 Gemma 模型名" />
-            </label>
-            <label>Temperature
-              <input id="llmTemperatureInput" value="0.1" />
-            </label>
-            <label>Timeout 秒
-              <input id="llmTimeoutInput" value="240" />
-            </label>
-            <label>07 图片执行模式
-              <select id="imageExecutionModeInput">
-                <option value="dry_run">dry_run 只生成任务清单</option>
-                <option value="execute">execute 调用 ComfyUI</option>
-              </select>
-            </label>
-            <label>ComfyUI 地址
-              <input id="comfyuiBaseUrlInput" placeholder="http://127.0.0.1:8188" />
-            </label>
-            <label>Workflow Mapping
-              <input id="workflowMappingInput" placeholder="D:\\path\\workflow_mapping.json" />
-            </label>
-            <label>图片统一风格后缀
-              <input id="imageStyleSuffixInput" placeholder="Chinese historical drama..." />
-            </label>
-          </div>
-          <label class="wide-label">07 负向提示词
-            <textarea id="imageNegativePromptInput" class="small-textarea" placeholder="modern objects, cartoon, 3d render..."></textarea>
-          </label>
-          <label class="wide-label">小说输入 / 本章正文
-            <textarea id="novelTextInput" placeholder="粘贴小说正文。留空则使用 workspace 对应 input/novel.txt"></textarea>
-          </label>
-          <div class="checkbox-row">
-            <label><input type="checkbox" id="strictOrderInput" checked /> 严格顺序检查</label>
-            <label><input type="checkbox" id="skipValidationInput" /> 跳过 pipeline 校验</label>
-            <label><input type="checkbox" id="skipDependencyInput" /> 跳过依赖检查</label>
-          </div>
-          <div class="action-row">
-            <button id="startBtn" class="btn primary">启动生产</button>
-            <button id="startTextPhaseBtn" class="btn">只跑 01–06 文本阶段</button>
-            <button id="startImagePhaseBtn" class="btn">只跑 07 图片阶段</button>
-          </div>
-        </div>
-      </section>
+      <section class="view" id="view-runner"><div class="panel command-panel"><div class="panel-header"><div><h2>生产控制台</h2><p>输入小说、选择运行范围、配置本地 LLM / 图片执行参数，一键启动全流程或指定模块。</p></div><div class="panel-chip">LLM 01–06 / IMAGE 07</div></div><div class="form-grid"><label>运行模式<select id="modeInput"><option value="project">单项目 project</option><option value="book_chapter">长篇章节 book_chapter</option></select></label><label>项目 ID<input id="projectIdInput" placeholder="project_test_001" /></label><label>书籍 ID<input id="bookIdInput" placeholder="book_001" /></label><label>章节 ID<input id="chapterIdInput" placeholder="chapter_001" /></label><label>从哪个模块开始<select id="fromModuleInput"></select></label><label>只运行单个模块<select id="onlyModuleInput"></select></label><label>LLM Base URL<input id="llmBaseUrlInput" placeholder="http://127.0.0.1:8000/v1/chat/completions" /></label><label>LLM Model<input id="llmModelInput" placeholder="本地 Gemma 模型名" /></label><label>Temperature<input id="llmTemperatureInput" value="0.1" /></label><label>Timeout 秒<input id="llmTimeoutInput" value="240" /></label><label>07 图片执行模式<select id="imageExecutionModeInput"><option value="dry_run">dry_run 只生成任务清单</option><option value="execute">execute 调用 ComfyUI</option></select></label><label>ComfyUI 地址<input id="comfyuiBaseUrlInput" placeholder="http://127.0.0.1:8188" /></label><label>Workflow Mapping<input id="workflowMappingInput" placeholder="D:\\path\\workflow_mapping.json" /></label><label>图片统一风格后缀<input id="imageStyleSuffixInput" placeholder="Chinese historical drama..." /></label></div><label class="wide-label">07 负向提示词<textarea id="imageNegativePromptInput" class="small-textarea" placeholder="modern objects, cartoon, 3d render..."></textarea></label><label class="wide-label">小说输入 / 本章正文<textarea id="novelTextInput" placeholder="粘贴小说正文。留空则使用 workspace 对应 input/novel.txt"></textarea></label><div class="checkbox-row"><label><input type="checkbox" id="strictOrderInput" checked /> 严格顺序检查</label><label><input type="checkbox" id="skipValidationInput" /> 跳过 pipeline 校验</label><label><input type="checkbox" id="skipDependencyInput" /> 跳过依赖检查</label></div><div class="action-row"><button id="startBtn" class="btn primary">启动生产</button><button id="startTextPhaseBtn" class="btn">只跑 01–06 文本阶段</button><button id="startImagePhaseBtn" class="btn">只跑 07 图片阶段</button></div></div></section>
 
       <section class="view" id="view-stages"><div class="panel"><div class="panel-header"><div><h2>阶段透明区</h2><p>每个模块阶段都会显示输出文件、评分、是否通过、问题数量。</p></div></div><div id="stageExplorer" class="stage-explorer"></div></div></section>
       <section class="view" id="view-retry"><div class="panel"><div class="panel-header"><div><h2>返工中心</h2><p>集中展示 needs_retry、upstream_blocking_issues、schema_validation_issues 和低分阶段。</p></div><div class="panel-chip danger-chip">问题集中处理</div></div><div id="retryCenter" class="retry-list"></div></div></section>
 
-      <section class="view" id="view-assets">
-        <div class="asset-hero panel"><div><h2>资产库工作台</h2><p>每个资产都以卡片呈现，并支持编辑图片生成提示词、保存草稿、重新生成图片。</p></div><div class="panel-chip">Prompt Editable</div></div>
-        <div class="grid three-cols">
-          <div class="panel asset-panel character-card" data-output="03_character_system/characters.json"><div class="asset-icon">人</div><div class="panel-header"><h2>角色库</h2><button class="btn small preview-main-output">预览</button></div><div id="characterSummary" class="muted">等待 03 输出</div></div>
-          <div class="panel asset-panel scene-card" data-output="04_scene_system/scenes.json"><div class="asset-icon">景</div><div class="panel-header"><h2>场景库</h2><button class="btn small preview-main-output">预览</button></div><div id="sceneSummary" class="muted">等待 04 输出</div></div>
-          <div class="panel asset-panel prop-card" data-output="05_prop_system/props.json"><div class="asset-icon">物</div><div class="panel-header"><h2>道具库</h2><button class="btn small preview-main-output">预览</button></div><div id="propSummary" class="muted">等待 05 输出</div></div>
-        </div>
-        <div id="assetCardGrid" class="editable-card-grid"></div>
-      </section>
+      <section class="view" id="view-assets"><div class="asset-hero panel"><div><h2>资产库工作台</h2><p>每个资产都以卡片呈现，并支持编辑图片生成提示词、保存草稿、重新生成图片。</p></div><div class="panel-chip">Prompt Editable</div></div><div class="grid three-cols"><div class="panel asset-panel character-card" data-output="03_character_system/characters.json"><div class="asset-icon">人</div><div class="panel-header"><h2>角色库</h2><button class="btn small preview-main-output">预览</button></div><div id="characterSummary" class="muted">等待 03 输出</div></div><div class="panel asset-panel scene-card" data-output="04_scene_system/scenes.json"><div class="asset-icon">景</div><div class="panel-header"><h2>场景库</h2><button class="btn small preview-main-output">预览</button></div><div id="sceneSummary" class="muted">等待 04 输出</div></div><div class="panel asset-panel prop-card" data-output="05_prop_system/props.json"><div class="asset-icon">物</div><div class="panel-header"><h2>道具库</h2><button class="btn small preview-main-output">预览</button></div><div id="propSummary" class="muted">等待 05 输出</div></div></div><div id="assetCardGrid" class="editable-card-grid"></div></section>
 
-      <section class="view" id="view-images">
-        <div class="panel image-phase-hero"><div><h2>07 图片阶段工作台</h2><p>定妆图 → 造型图 → 场景/道具参考图 → 正式分镜图 → 总检与局部重跑。</p></div><div class="action-row"><button id="previewImageManifestBtn" class="btn small">预览 image_manifest</button><button id="previewDependencyBtn" class="btn small">预览 dependency_index</button></div></div>
-        <div id="imagePhaseSummary" class="grid four-cols"></div>
-        <div class="panel"><div class="panel-header"><h2>角色定妆图</h2><p>07A：文生图锁脸。</p></div><div id="characterLockGrid" class="media-card-grid"></div></div>
-        <div class="panel"><div class="panel-header"><h2>角色造型图 / 换装图</h2><p>07B：基于定妆图生成 costume_id + wearable_props。</p></div><div id="appearanceGrid" class="media-card-grid"></div></div>
-        <div class="panel"><div class="panel-header"><h2>场景 / 道具参考图</h2><p>07C：本章实际用到的场景与关键道具。</p></div><div id="referenceAssetGrid" class="media-card-grid"></div></div>
-        <div class="panel"><div class="panel-header"><h2>正式单帧分镜图</h2><p>07D：锚点帧优先，普通帧可引用锚点/上一帧。</p></div><div id="storyboardImageGrid" class="media-card-grid"></div></div>
-      </section>
+      <section class="view" id="view-images"><div class="panel image-phase-hero"><div><h2>07 图片阶段工作台</h2><p>定妆图 → 造型图 → 场景/道具参考图 → 正式分镜图 → 总检与局部重跑。</p></div><div class="action-row"><button id="previewImageManifestBtn" class="btn small">预览 image_manifest</button><button id="previewDependencyBtn" class="btn small">预览 dependency_index</button></div></div><div id="imagePhaseSummary" class="grid four-cols"></div><div class="panel"><div class="panel-header"><h2>角色定妆图</h2><p>07A：文生图锁脸。</p></div><div id="characterLockGrid" class="media-card-grid"></div></div><div class="panel"><div class="panel-header"><h2>角色造型图 / 换装图</h2><p>07B：基于定妆图生成 costume_id + wearable_props。</p></div><div id="appearanceGrid" class="media-card-grid"></div></div><div class="panel"><div class="panel-header"><h2>场景 / 道具参考图</h2><p>07C：本章实际用到的场景与关键道具。</p></div><div id="referenceAssetGrid" class="media-card-grid"></div></div><div class="panel"><div class="panel-header"><h2>正式单帧分镜图</h2><p>07D：锚点帧优先，普通帧可引用锚点/上一帧。</p></div><div id="storyboardImageGrid" class="media-card-grid"></div></div></section>
 
       <section class="view" id="view-storyboard"><div class="panel"><div class="panel-header"><div><h2>分镜工作台</h2><p>每帧分镜都可以编辑图片生成提示词，07 接入后可查看对应生成图。</p></div><button id="previewStoryboardBtn" class="btn small">预览 storyboard.json</button></div><div id="storyboardWorkspace" class="storyboard-grid"></div></div></section>
       <section class="view" id="view-outputs"><div class="panel"><div class="panel-header"><div><h2>产物中心</h2><p>集中查看每个模块最终产物。JSON 文件可直接预览。</p></div></div><div id="outputList" class="output-list"></div></div></section>
