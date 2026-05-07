@@ -8,8 +8,10 @@ REQUIRED_TOP = [
 ]
 REQUIRED_PROP_FIELDS = [
     "prop_id", "canonical_prop_name", "aliases", "prop_type", "owner_character",
-    "usage_function", "appearance", "material", "risk_notes", "source_evidence", "usage_in_script"
+    "usage_function", "appearance", "material", "risk_notes", "source_evidence", "usage_in_script",
+    "asset_level", "needs_reference_image", "reference_image_plan"
 ]
+VALID_ASSET_LEVELS = {"key_prop", "action_prop", "background_object", "mentioned_only"}
 
 
 def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
@@ -43,6 +45,16 @@ def validate_final_output(data: dict[str, Any]) -> dict[str, Any]:
             issues.append(f"canonical_prop_name 重复：{name}")
         if name:
             names.add(name)
+        asset_level = item.get("asset_level")
+        if asset_level not in VALID_ASSET_LEVELS:
+            issues.append(f"道具 asset_level 非法：{name or pid} -> {asset_level}")
+        if asset_level == "key_prop" and item.get("needs_reference_image") is not True:
+            issues.append(f"关键道具必须 needs_reference_image=true：{name or pid}")
+        plan = item.get("reference_image_plan")
+        if isinstance(plan, dict):
+            images = plan.get("recommended_images", [])
+            if asset_level == "key_prop" and "clean_front_view" not in images:
+                issues.append(f"关键道具参考图计划必须包含 clean_front_view：{name or pid}")
         for alias in item.get("aliases", []) or []:
             alias_key = str(alias).strip()
             if not alias_key:
