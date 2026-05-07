@@ -15,46 +15,11 @@
 
 # 当前阶段
 
-当前阶段：
-
 ```text
 00 + 01–10 子系统框架已能闭环。
-01 理论搭建已完成，进入等待统一测试阶段。
+01 小说解析系统已具备真实 LLM 分阶段解析、评分、JSON 修复、总检重跑和 schema 硬校验。
 02 剧本改编系统已升级到 schema 1.2，成为音频驱动、单帧分镜友好、多版本评估、失败样本回灌的真实 LLM 子系统。
-```
-
-01 当前能力：
-
-```text
-真实 LLM 分阶段解析
-程序锁定段落边界
-LLM 标注段落属性
-事件图谱生成
-长文本分批候选提取
-候选批次合并
-声音/视频生产预判
-JSON 修复
-阶段评分与修改意见重跑
-01F 总检触发阶段重跑
-最终 schema 硬规则校验
-测试样例与测试清单
-```
-
-02 当前能力：
-
-```text
-真实 LLM 分阶段剧本改编
-02A 改编蓝图 + 长度策略 + 分集/分段计划 + 多版本策略
-02B 剧本结构 + 角色称呼一致性 + 连续性种子 + 情绪曲线
-02C 语音行预拆分 + 6-12 秒视频单元候选
-02D 多版本正式剧本 + 最终版本选择 + 原文关键句继承 + 口播节奏检查
-02E 剧本生产标注 + 单帧分镜准备字段 + 画面可执行性 + 人物负载 + 连续性链表
-02F 总检评分 + 失败样本回灌建议
-JSON 修复
-阶段评分与修改意见重跑
-02F 总检触发阶段重跑
-最终 schema 硬规则校验
-script.json / script.txt / script_meta.json 输出
+03/04/05 已从旧 scaffold library 目录切换为真实资产 system：03_character_system、04_scene_system、05_prop_system。
 ```
 
 ---
@@ -70,7 +35,34 @@ script.json / script.txt / script_meta.json 输出
 否则运行 run.py。
 ```
 
-## 01 小说解析系统
+当前 pipeline 模块顺序：
+
+```text
+01_novel_parser
+02_script_writer
+03_character_system
+04_scene_system
+05_prop_system
+06_storyboard
+07_storyboard_image
+08_audio
+09_video
+10_final_assembly
+```
+
+旧 scaffold 目录：
+
+```text
+03_character_library
+04_scene_library
+05_prop_library
+```
+
+已不再作为正式 pipeline 模块使用；旧 run.py scaffold 入口已删除。
+
+---
+
+# 01 小说解析系统
 
 正式入口：
 
@@ -78,77 +70,21 @@ script.json / script.txt / script_meta.json 输出
 01_novel_parser/run_staged.py
 ```
 
-核心文件：
+当前能力：
 
 ```text
-01_novel_parser/core/llm_client.py
-01_novel_parser/core/json_repair.py
-01_novel_parser/core/paragraph_splitter.py
-01_novel_parser/core/chunk_manager.py
-01_novel_parser/core/quality_checker.py
-01_novel_parser/core/schema_validator.py
-01_novel_parser/core/stage_runner.py
-```
-
-## 02 剧本改编系统
-
-正式入口：
-
-```text
-02_script_writer/run_staged.py
-```
-
-核心文件：
-
-```text
-02_script_writer/core/llm_client.py
-02_script_writer/core/json_repair.py
-02_script_writer/core/quality_checker.py
-02_script_writer/core/schema_validator.py
-02_script_writer/core/stage_runner.py
-```
-
-阶段提示词：
-
-```text
-02_script_writer/prompts/02A_adaptation_blueprint.md
-02_script_writer/prompts/02B_script_structure.md
-02_script_writer/prompts/02C_voice_line_plan.md
-02_script_writer/prompts/02D_script_draft.md
-02_script_writer/prompts/02E_production_annotations.md
-02_script_writer/prompts/02F_quality_check.md
-```
-
-测试与回灌：
-
-```text
-02_script_writer/tests/README.md
-02_script_writer/tests/failure_cases/README.md
-02_script_writer/prompt_tuning_notes.md
-```
-
-关键输出：
-
-```text
-02_script_writer/script.json
-02_script_writer/script.txt
-02_script_writer/script_meta.json
-```
-
----
-
-# 01 核心原则
-
-schema：
-
-```text
-schema_version = 1.2
-```
-
-01 最高任务：
-
-```text
-先通读全文，理解故事到底讲什么，再做结构解析。
+真实 LLM 分阶段解析
+程序锁定段落边界
+LLM 标注段落属性
+事件图谱生成
+长文本分批候选提取
+候选批次合并
+声音/视频生产预判
+JSON 修复
+阶段评分与修改意见重跑
+01F 总检触发阶段重跑
+最终 schema 硬规则校验
+测试样例与测试清单
 ```
 
 01 只做：
@@ -183,18 +119,29 @@ schema_version = 1.2
 
 ---
 
-# 02 核心原则
+# 02 剧本改编系统
 
-schema：
+正式入口：
 
 ```text
-schema_version = 1.2
+02_script_writer/run_staged.py
 ```
 
-02 最高任务：
+当前能力：
 
 ```text
-把 01 的小说解析结果改编成正式剧本，并提前适配音频驱动、6-12 秒视频单元和后续单帧分镜。
+真实 LLM 分阶段剧本改编
+02A 改编蓝图 + 长度策略 + 分集/分段计划 + 多版本策略
+02B 剧本结构 + 角色称呼一致性 + 连续性种子 + 情绪曲线
+02C 语音行预拆分 + 6-12 秒视频单元候选
+02D 多版本正式剧本 + 最终版本选择 + 原文关键句继承 + 口播节奏检查
+02E 剧本生产标注 + 单帧分镜准备字段 + 画面可执行性 + 人物负载 + 连续性链表
+02F 总检评分 + 失败样本回灌建议
+JSON 修复
+阶段评分与修改意见重跑
+02F 总检触发阶段重跑
+最终 schema 硬规则校验
+script.json / script.txt / script_meta.json 输出
 ```
 
 02 只做：
@@ -236,32 +183,266 @@ ComfyUI 调用
 02 只输出 visual_dramatic_units / storyboard_hints / continuity_chain 等剧本层动作链和连续性提示。
 ```
 
-02 反过度压缩规则：
+---
+
+# 03 角色库系统
+
+正式入口：
 
 ```text
-不得把多个关键事件压成一句话。
-不得只用 OS 概括冲突。
-原文信息量较大时，宁可增加剧本段落和语音行，也不能强行压成 2 分钟。
-02F 必须检查是否压缩过狠，并可触发 02A、02B、02C、02D 或 02E 重跑。
+03_character_system/run_staged.py
 ```
 
-02 音频驱动规则：
+核心文件：
 
 ```text
-02C 必须输出 voice_line_plan。
-语音行类型只能为 N / D / M / S。
-N/D/M 必须有 tts_text。
-D 必须有稳定 speaker。
-语音行和 script_video_unit_candidates 必须提前标记 12 秒风险。
+03_character_system/core/llm_client.py
+03_character_system/core/json_repair.py
+03_character_system/core/quality_checker.py
+03_character_system/core/schema_validator.py
+03_character_system/core/stage_runner.py
+```
+
+阶段提示词：
+
+```text
+03_character_system/prompts/03A_alias_merge_plan.md
+03_character_system/prompts/03B_character_cards.md
+03_character_system/prompts/03C_script_usage_binding.md
+03_character_system/prompts/03D_quality_check.md
+```
+
+输入：
+
+```text
+01: candidate_characters / paragraphs / events / character_arc_map
+02: segments / character_name_usage / visual_dramatic_units / storyboard_hints / continuity_chain
+```
+
+输出：
+
+```text
+03_character_system/characters.json
+03_character_system/character_meta.json
+```
+
+03 只做：
+
+```text
+角色资产标准化
+角色别名合并
+角色卡稳定化
+角色剧本使用绑定
+证据链
+角色连续性注意事项
+```
+
+03 禁止做：
+
+```text
+生成图片
+生成分镜
+生成图像提示词
+生成视频提示词
+场景资产标准化
+道具资产标准化
+ComfyUI 调用
+```
+
+03 阶段：
+
+```text
+03A alias_merge_plan
+03B character_cards
+03C script_usage_binding
+03D quality_check
+```
+
+03 最高规则：
+
+```text
+合并同一角色的不同称呼。
+禁止按年龄段拆角色。
+禁止把身份称谓、昵称、职务称谓拆成新角色。
+输出 canonical_name、aliases、gender、age_range、identity、appearance、costume、temperament、role_function、source_evidence、usage_in_script。
+角色描述必须稳定、清晰、不可互相污染，服务 06 单帧分镜引用稳定角色名。
 ```
 
 ---
 
-# 02 真实执行机制
+# 04 场景库系统
+
+正式入口：
+
+```text
+04_scene_system/run_staged.py
+```
+
+核心文件：
+
+```text
+04_scene_system/core/llm_client.py
+04_scene_system/core/json_repair.py
+04_scene_system/core/quality_checker.py
+04_scene_system/core/schema_validator.py
+04_scene_system/core/stage_runner.py
+```
+
+阶段提示词：
+
+```text
+04_scene_system/prompts/04A_scene_merge_plan.md
+04_scene_system/prompts/04B_scene_cards.md
+04_scene_system/prompts/04C_script_usage_binding.md
+04_scene_system/prompts/04D_quality_check.md
+```
+
+输入：
+
+```text
+01: candidate_scenes / paragraphs / events / scene_value_map
+02: scene_beats / visual_dramatic_units / storyboard_hints / segments / continuity_chain
+```
+
+输出：
+
+```text
+04_scene_system/scenes.json
+04_scene_system/scene_meta.json
+```
+
+04 只做：
+
+```text
+场景资产标准化
+场景别名合并
+主场景/子场景/临时地点区分
+场景剧本使用绑定
+证据链
+场景连续性规则
+```
+
+04 禁止做：
+
+```text
+生成图片
+生成分镜
+生成图像提示词
+生成视频提示词
+角色资产标准化
+道具资产标准化
+ComfyUI 调用
+```
+
+04 阶段：
+
+```text
+04A scene_merge_plan
+04B scene_cards
+04C script_usage_binding
+04D quality_check
+```
+
+04 最高规则：
+
+```text
+合并同一场景的不同说法。
+区分主场景、子场景、临时地点。
+输出 canonical_scene_name、aliases、scene_type、time_period、lighting、weather、atmosphere、layout、key_visual_elements、continuity_rules、source_evidence、usage_in_script。
+场景描述要适合后续 06 单帧分镜引用，但不要写图像提示词。
+```
+
+---
+
+# 05 道具库系统
+
+正式入口：
+
+```text
+05_prop_system/run_staged.py
+```
+
+核心文件：
+
+```text
+05_prop_system/core/llm_client.py
+05_prop_system/core/json_repair.py
+05_prop_system/core/quality_checker.py
+05_prop_system/core/schema_validator.py
+05_prop_system/core/stage_runner.py
+```
+
+阶段提示词：
+
+```text
+05_prop_system/prompts/05A_prop_merge_plan.md
+05_prop_system/prompts/05B_prop_cards.md
+05_prop_system/prompts/05C_script_usage_binding.md
+05_prop_system/prompts/05D_quality_check.md
+```
+
+输入：
+
+```text
+01: candidate_props / paragraphs / events / asset_binding_hints
+02: segments / visual_dramatic_units / storyboard_hints / scene_beats / continuity_chain
+```
+
+输出：
+
+```text
+05_prop_system/props.json
+05_prop_system/prop_meta.json
+```
+
+05 只做：
+
+```text
+道具资产标准化
+道具别名合并
+关键道具/普通道具/背景物件区分
+道具剧本使用绑定
+证据链
+道具连续性注意事项
+```
+
+05 禁止做：
+
+```text
+生成图片
+生成分镜
+生成图像提示词
+生成视频提示词
+角色资产标准化
+场景资产标准化
+ComfyUI 调用
+```
+
+05 阶段：
+
+```text
+05A prop_merge_plan
+05B prop_cards
+05C script_usage_binding
+05D quality_check
+```
+
+05 最高规则：
+
+```text
+合并同一道具的不同说法。
+区分关键道具、普通道具、背景物件。
+输出 canonical_prop_name、aliases、prop_type、owner_character、usage_function、appearance、material、risk_notes、source_evidence、usage_in_script。
+道具描述要适合后续 06 单帧分镜引用，但不要写图像提示词。
+```
+
+---
+
+# 03/04/05 共同真实执行机制
 
 ## 真实 LLM
 
-02 不支持正式流程使用占位剧本。必须配置：
+03/04/05 不支持正式流程使用 scaffold 占位结果。必须配置：
 
 ```bash
 set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
@@ -271,78 +452,49 @@ set AI_DRAMA_LLM_MODEL=你的本地模型名
 可选：
 
 ```bash
-set AI_DRAMA_LLM_TEMPERATURE=0.25
+set AI_DRAMA_LLM_API_KEY=你的 key
+set AI_DRAMA_LLM_TIMEOUT_SEC=180
+set AI_DRAMA_LLM_TEMPERATURE=0.2
 ```
 
-## 分阶段
-
-```text
-02A 改编蓝图
-02B 剧本结构
-02C 语音行预拆分
-02D 正式剧本
-02E 剧本生产标注
-02F 总检评分
-```
-
-## 评分与重跑
+## 阶段评分与修改意见重跑
 
 ```text
 每阶段生成后 quality_checker.py 评分。
-低于阈值时生成 revision_instructions，并把修改意见传回同阶段重跑。
-02F 总检如果输出 needs_retry=true 和 retry_stages，会从最早有问题的阶段开始，连同后续阶段再跑一轮。
+低于阈值时生成 revision_instructions，并把修改意见传回同阶段 LLM 自动重跑。
+```
+
+## 总检连锁重跑
+
+```text
+03D / 04D / 05D 输出 needs_retry=true 和 retry_stages 时，stage_runner.py 会从最早问题阶段开始，连同后续阶段再跑一轮。
 ```
 
 示例：
 
 ```text
-02F 发现语音行超过 12 秒 → retry_stages = ["02C"]
-系统会重跑：02C → 02D → 02E → 02F
+03D 发现角色一开始就合并错了 → retry_stages = ["03A"]
+系统会重跑：03A → 03B → 03C → 03D
 ```
 
-## 硬规则校验
-
-最终合并后 `schema_validator.py` 检查：
+## JSON 修复机制
 
 ```text
-必要顶层字段
-voice_line_plan 是否为空
-voice_line_id 是否缺失或重复
-voice_line_type 是否只能为 N/D/M/S
-D 类型 voice_line 是否有 speaker
-N/D/M 是否有 tts_text
-voice_line / video_unit 是否超过 12 秒
-segments 是否为空
-segment_id 是否缺失或重复
-segment type 是否合法
-对白 segment 是否有 speaker
-segment 是否绑定真实 voice_line_id
-script_versions 是否为空
-selected_version_id 是否存在于 script_versions
-script_text 是否为空
-audio_cues / storyboard_hints / visual_dramatic_units 是否引用真实 segment_id / voice_line_id
-event_coverage_map 是否为空
-source_line_usage 是否为空
-character_name_usage 是否为空
-episode_split_plan 是否为空
-script_emotion_curve 是否为空
-continuity_chain 是否引用真实 visual_unit_id
-failure_learning_notes 是否为空
-tts_readability_report / visual_executability_report / character_load_report 是否为空
+LLM 返回 JSON 解析失败时，json_repair.py 会把 broken_json 和错误原因发回 LLM。
+该机制只修复 JSON 格式，不新增业务内容。
+```
+
+## 最终 schema 硬规则校验
+
+```text
+03 schema_validator.py 检查角色字段完整、别名冲突、年龄段误拆、证据链和剧本使用绑定。
+04 schema_validator.py 检查场景字段完整、别名冲突、越界 prompt 字段、证据链和剧本使用绑定。
+05 schema_validator.py 检查道具字段完整、别名冲突、越界 prompt 字段、证据链和剧本使用绑定。
 ```
 
 ---
 
-# 下一步计划
-
-进入统一测试阶段。
-
-建议本地测试前先配置：
-
-```bash
-set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
-set AI_DRAMA_LLM_MODEL=你的本地模型名
-```
+# 下一步建议测试顺序
 
 准备：
 
@@ -350,19 +502,24 @@ set AI_DRAMA_LLM_MODEL=你的本地模型名
 workspace/projects/project_test_001/input/novel.txt
 ```
 
-先测试 01：
+配置本地 LLM：
+
+```bash
+set AI_DRAMA_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
+set AI_DRAMA_LLM_MODEL=你的本地模型名
+```
+
+建议依次测试：
 
 ```bash
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 01_novel_parser
-```
-
-再测试 02：
-
-```bash
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 02_script_writer
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 03_character_system
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 04_scene_system
+python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --only-module 05_prop_system
 ```
 
-或完整测试 01→02：
+完整测试：
 
 ```bash
 python 00_main_controller/run_pipeline.py --mode project --project-id project_test_001 --from-module 01_novel_parser
@@ -373,11 +530,16 @@ python 00_main_controller/run_pipeline.py --mode project --project-id project_te
 # 用户最新明确要求
 
 ```text
-02 是剧本改编系统，重点生成正式剧本，不是分镜系统、资产系统或视频系统。
-02 必须延续 01 的分阶段真实 LLM + 评分 + 修改意见重跑机制。
-02 必须防止剧本压缩过狠，不能把多个关键事件压成一句话。
-02 采用单帧分镜路线：单帧分镜作为生产单位，四宫格仅作为后续连续性检查/预览单位。
-02 要补齐音频行、视频单元预切分、单帧分镜准备字段、原文继承、角色一致、长度策略和总检重跑。
-02 还要补齐：多版本剧本选择、强制分集/分段、剧本情绪曲线、口播节奏检查、画面可执行性检查、角色上场人数控制、单帧连续性链表、失败样本回灌机制。
-后续根据真实测试数据继续精修。
+03/04/05 必须是真实可用子系统，不要 scaffold 占位。
+必须采用分阶段真实 LLM 调用。
+每个阶段都要有评分。
+评分不合格要生成修改意见。
+修改意见要能传回 LLM 自动重跑。
+总检阶段要能触发从最早问题阶段开始连锁重跑。
+必须有 JSON 修复机制。
+必须有最终 schema 硬规则校验。
+每个系统都要有 run_staged.py。
+每个系统都要写 README。
+必须更新 docs/development_log.md。
+03/04/05 形成稳定资产库，让 06 单帧分镜可以直接引用稳定角色名、稳定场景名、稳定道具名，避免角色串脸、场景漂移、道具混乱。
 ```
