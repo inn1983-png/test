@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import urllib.request
 from dataclasses import dataclass
 from typing import Any, Callable
 from importlib import import_module
 
 prompt_guard = import_module("00_common.llm_prompt_guard")
+llm_streaming = import_module("00_common.llm_streaming")
 
 JSON_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
 
@@ -34,29 +34,35 @@ class LLMClient:
     def __init__(self, config: LLMConfig | None = None) -> None:
         self.config = config or LLMConfig.from_env()
 
-    def complete_text(self, system_prompt: str, user_prompt: str) -> str:
-        payload = {"model": self.config.model, "temperature": self.config.temperature, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]}
-        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        headers = {"Content-Type": "application/json"}
-        if self.config.api_key:
-            headers["Authorization"] = f"Bearer {self.config.api_key}"
-        request = urllib.request.Request(self.config.base_url, data=data, headers=headers, method="POST")
-        with urllib.request.urlopen(request, timeout=self.config.timeout_sec) as response:
-            raw = response.read().decode("utf-8")
-        result = json.loads(raw)
-        return result["choices"][0]["message"]["content"]
+    def complete_text(self, system_prompt: str, user_prompt: str, trace_label: str = "05_prop_system") -> str:
+        return llm_streaming.complete_text_with_logs(
+            base_url=self.config.base_url,
+            model=self.config.model,
+            api_key=self.config.api_key,
+            timeout_sec=self.config.timeout_sec,
+            temperature=self.config.temperature,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            trace_label=trace_label,
+        )
 
-    def complete_json(self, system_prompt: str, user_payload: dict[str, Any], repair_callback: Callable[[str, str], dict[str, Any]] | None = None) -> dict[str, Any]:
+    def complete_json(self, system_prompt: str, user_payload: dict[str, Any], repair_callback: Callable[[str, str], dict[str, Any]] | None = None, trace_label: str = "05_prop_system") -> dict[str, Any]:
         guarded_prompt = prompt_guard.apply_json_guard(system_prompt)
         guarded_payload = prompt_guard.compact_payload_hint(user_payload)
-        text = self.complete_text(guarded_prompt, json.dumps(guarded_payload, ensure_ascii=False, indent=2))
+        text = self.complete_text(guarded_prompt, json.dumps(guarded_payload, ensure_ascii=False, indent=2), trace_label=trace_label)
         try:
-            return parse_json_from_text(text)
+            parsed = parse_json_from_text(text)
+            print(f"[JSON_PARSE] {trace_label} JSON 解析成功 keys={list(parsed.keys())[:12]}", flush=True)
+            return parsed
         except Exception as exc:
+            print(f"[JSON_PARSE_ERROR] {trace_label} JSON 解析失败：{exc}", flush=True)
             if repair_callback is None:
                 raise
+            print(f"[JSON_REPAIR] {trace_label} 开始调用 JSON 修复", flush=True)
             repaired = repair_callback(text, str(exc))
-            return prompt_guard.remove_internal_output_fields(repaired)
+            cleaned = prompt_guard.remove_internal_output_fields(repaired)
+            print(f"[JSON_REPAIR_DONE] {trace_label} 修复完成 keys={list(cleaned.keys())[:12]}", flush=True)
+            return cleaned
 
 
 def parse_json_from_text(text: str) -> dict[str, Any]:
