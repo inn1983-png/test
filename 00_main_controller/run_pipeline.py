@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-dependency-check", action="store_true", help="Skip module input dependency checks.")
     parser.add_argument("--strict-order", action="store_true", help="Warn when modules differ from recommended 01→10 order.")
     parser.add_argument("--from-module", default=None, help="Start running from the specified module in pipeline order.")
+    parser.add_argument("--to-module", default=None, help="Stop running after the specified module in pipeline order.")
     parser.add_argument("--only-module", default=None, help="Run only one specified module.")
     parser.add_argument("--dry-run", action="store_true", help="Print runtime plan without executing modules.")
     parser.add_argument(
@@ -56,26 +57,42 @@ def load_pipeline_config(pipeline_arg: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def select_pipeline(pipeline: list[str], from_module: str | None = None, only_module: str | None = None) -> tuple[list[str], list[str]]:
+def select_pipeline(
+    pipeline: list[str],
+    from_module: str | None = None,
+    only_module: str | None = None,
+    to_module: str | None = None,
+) -> tuple[list[str], list[str]]:
     messages: list[str] = []
 
-    if from_module and only_module:
-        return [], ["Cannot use --from-module and --only-module together."]
+    if only_module and (from_module or to_module):
+        return [], ["Cannot use --only-module together with --from-module or --to-module."]
 
     if only_module:
         if only_module not in pipeline:
             return [], [f"--only-module not found in pipeline: {only_module}"]
         return [only_module], [f"Selected only module: {only_module}"]
 
+    start_index = 0
+    end_index = len(pipeline) - 1
+
     if from_module:
         if from_module not in pipeline:
             return [], [f"--from-module not found in pipeline: {from_module}"]
-        index = pipeline.index(from_module)
-        selected = pipeline[index:]
-        messages.append(f"Selected pipeline from {from_module}: {selected}")
-        return selected, messages
+        start_index = pipeline.index(from_module)
 
-    return pipeline, messages
+    if to_module:
+        if to_module not in pipeline:
+            return [], [f"--to-module not found in pipeline: {to_module}"]
+        end_index = pipeline.index(to_module)
+
+    if start_index > end_index:
+        return [], [f"Invalid module range: {from_module or pipeline[start_index]} is after {to_module or pipeline[end_index]}"]
+
+    selected = pipeline[start_index : end_index + 1]
+    if from_module or to_module:
+        messages.append(f"Selected pipeline range: {selected}")
+    return selected, messages
 
 
 def print_dry_run_plan(context: Any, selected_pipeline: list[str], contracts: dict[str, Any]) -> None:
@@ -143,6 +160,7 @@ def main() -> int:
         pipeline,
         from_module=args.from_module,
         only_module=args.only_module,
+        to_module=args.to_module,
     )
     for message in selection_messages:
         print(message)
