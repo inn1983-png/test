@@ -11,6 +11,8 @@ prompt_guard = import_module("00_common.llm_prompt_guard")
 llm_streaming = import_module("00_common.llm_streaming")
 
 JSON_RE = re.compile(r"```json\s*(.*?)\s*```", re.DOTALL)
+DEFAULT_TEXT_LLM_BASE_URL = "https://api.deepseek.com/chat/completions"
+DEFAULT_TEXT_LLM_MODEL = "deepseek-v4-pro"
 
 
 @dataclass
@@ -23,21 +25,30 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        base_url = os.getenv("AI_DRAMA_LLM_BASE_URL", "").strip()
-        model = os.getenv("AI_DRAMA_LLM_MODEL", "").strip()
-        if not base_url or not model:
-            raise RuntimeError("02_script_writer requires a real local LLM. Please set AI_DRAMA_LLM_BASE_URL and AI_DRAMA_LLM_MODEL.")
+        base_url = os.getenv("AI_DRAMA_LLM_BASE_URL", DEFAULT_TEXT_LLM_BASE_URL).strip()
+        model = os.getenv("AI_DRAMA_LLM_MODEL", DEFAULT_TEXT_LLM_MODEL).strip()
+        api_key = os.getenv("AI_DRAMA_LLM_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError(
+                "02_script_writer text LLM defaults to DeepSeek V4 Pro API. "
+                "Please set AI_DRAMA_LLM_API_KEY. "
+                "Optional overrides: AI_DRAMA_LLM_BASE_URL, AI_DRAMA_LLM_MODEL."
+            )
         return cls(
             base_url=base_url,
             model=model,
-            api_key=os.getenv("AI_DRAMA_LLM_API_KEY", ""),
+            api_key=api_key,
             timeout_sec=int(os.getenv("AI_DRAMA_LLM_TIMEOUT_SEC", "6000")),
             temperature=float(os.getenv("AI_DRAMA_LLM_TEMPERATURE", "0.15")),
         )
 
 
 class LLMClient:
-    """OpenAI-compatible local LLM client for staged script writing."""
+    """OpenAI-compatible text LLM client for staged script writing.
+
+    Text phases default to DeepSeek V4 Pro API. Local models should be used
+    separately for vision / multimodal understanding.
+    """
 
     def __init__(self, config: LLMConfig | None = None) -> None:
         self.config = config or LLMConfig.from_env()
