@@ -328,8 +328,11 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
         cmd.append("--strict-order")
 
     for source_key, env_key in [
+        ("llm_api_key", "AI_DRAMA_LLM_API_KEY"),
         ("llm_base_url", "AI_DRAMA_LLM_BASE_URL"),
         ("llm_model", "AI_DRAMA_LLM_MODEL"),
+        ("llm_max_tokens", "AI_DRAMA_LLM_MAX_TOKENS"),
+        ("llm_input_compact", "AI_DRAMA_LLM_INPUT_COMPACT"),
         ("llm_temperature", "AI_DRAMA_LLM_TEMPERATURE"),
         ("llm_timeout_sec", "AI_DRAMA_LLM_TIMEOUT_SEC"),
         ("image_execution_mode", "AI_DRAMA_IMAGE_EXECUTION_MODE"),
@@ -567,6 +570,7 @@ def main() -> int:
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Web UI running: http://{args.host}:{args.port}")
     print("00-10 controller, data-link check, pipeline runner, artifacts preview are enabled.")
+    print("Text LLM defaults to DeepSeek V4 Pro. API key can be supplied by UI or AI_DRAMA_LLM_API_KEY.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
