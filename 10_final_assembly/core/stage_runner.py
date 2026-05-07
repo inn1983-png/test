@@ -234,7 +234,9 @@ def run_10d(video_prepare: dict[str, Any], audio_subtitle: dict[str, Any], outpu
             "stage": "10D_final_export",
             "status": "skipped",
             "export_mode": "skip_existing",
+            "final_video_ready": True,
             "final_video_path": str(final_path),
+            "final_video_placeholder_path": None,
             "skip_reason": "final.mp4 already exists and is valid; set AI_DRAMA_FINAL_FORCE_RERUN=1 to re-export.",
         }
 
@@ -297,7 +299,9 @@ def run_10d(video_prepare: dict[str, Any], audio_subtitle: dict[str, Any], outpu
         "stage": "10D_final_export",
         "status": "success" if ok else "needs_review",
         "export_mode": export_mode,
-        "final_video_path": str(final_path),
+        "final_video_ready": bool(ok),
+        "final_video_path": str(final_path) if ok else None,
+        "final_video_placeholder_path": None,
         "mux_result": mux_result,
         "burn_result": burn_result,
         "burn_subtitles": burn,
@@ -333,7 +337,7 @@ def merge_stage_outputs(video_manifest: dict[str, Any], paths: dict[str, Path], 
     final_manifest_path = output_dir / "final_manifest.json"
     final_meta_path = output_dir / "final_meta.json"
     stage_scores = {item["stage_id"]: (item.get("quality") or {}).get("score") for item in stage_result.get("stage_status", [])}
-    final_video_ready = bool(d.get("final_video_ready", False)) if d.get("export_mode") != "skip_existing" else True
+    final_video_ready = bool(d.get("final_video_ready", False))
     final_video_placeholder_path = d.get("final_video_placeholder_path") if not final_video_ready else None
     data = {
         "schema_version": SCHEMA_VERSION,
