@@ -27,6 +27,10 @@ TEXT_MIME = {
     ".js": "application/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
 }
 
 
@@ -225,8 +229,11 @@ def discover_stage_outputs(module_dir: Path) -> list[dict[str, Any]]:
 
 
 def discover_quality(module_dir: Path) -> dict[str, Any]:
-    candidates = list(module_dir.glob("*.json"))
-    for path in candidates:
+    for name in ["image_manifest.json", "storyboard.json", "characters.json", "scenes.json", "props.json", "script.json", "novel_analysis.json"]:
+        data = read_json(module_dir / name, {})
+        if isinstance(data, dict) and isinstance(data.get("quality_report"), dict):
+            return data["quality_report"]
+    for path in module_dir.glob("*.json"):
         data = read_json(path, {})
         if isinstance(data, dict) and isinstance(data.get("quality_report"), dict):
             return data["quality_report"]
@@ -242,6 +249,12 @@ def discover_important_outputs(run_dir: Path) -> list[dict[str, Any]]:
         "05_prop_system/props.json",
         "06_storyboard/storyboard.json",
         "06_storyboard/storyboard_meta.json",
+        "07_storyboard_image/character_lock_manifest.json",
+        "07_storyboard_image/appearance_manifest.json",
+        "07_storyboard_image/reference_asset_manifest.json",
+        "07_storyboard_image/dependency_index.json",
+        "07_storyboard_image/asset_image_registry.json",
+        "07_storyboard_image/storyboard_image_meta.json",
         "07_storyboard_image/image_manifest.json",
         "08_audio/final_audio.wav",
         "09_video/video_manifest.json",
@@ -292,18 +305,20 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
     if payload.get("strict_order", True):
         cmd.append("--strict-order")
 
-    llm_base_url = str(payload.get("llm_base_url") or "").strip()
-    llm_model = str(payload.get("llm_model") or "").strip()
-    llm_temperature = str(payload.get("llm_temperature") or "").strip()
-    llm_timeout = str(payload.get("llm_timeout_sec") or "").strip()
-    if llm_base_url:
-        env["AI_DRAMA_LLM_BASE_URL"] = llm_base_url
-    if llm_model:
-        env["AI_DRAMA_LLM_MODEL"] = llm_model
-    if llm_temperature:
-        env["AI_DRAMA_LLM_TEMPERATURE"] = llm_temperature
-    if llm_timeout:
-        env["AI_DRAMA_LLM_TIMEOUT_SEC"] = llm_timeout
+    for source_key, env_key in [
+        ("llm_base_url", "AI_DRAMA_LLM_BASE_URL"),
+        ("llm_model", "AI_DRAMA_LLM_MODEL"),
+        ("llm_temperature", "AI_DRAMA_LLM_TEMPERATURE"),
+        ("llm_timeout_sec", "AI_DRAMA_LLM_TIMEOUT_SEC"),
+        ("image_execution_mode", "AI_DRAMA_IMAGE_EXECUTION_MODE"),
+        ("comfyui_base_url", "AI_DRAMA_COMFYUI_BASE_URL"),
+        ("comfyui_workflow_mapping", "AI_DRAMA_COMFYUI_WORKFLOW_MAPPING"),
+        ("image_style_suffix", "AI_DRAMA_IMAGE_STYLE_SUFFIX"),
+        ("image_negative_prompt", "AI_DRAMA_IMAGE_NEGATIVE_PROMPT"),
+    ]:
+        value = str(payload.get(source_key) or "").strip()
+        if value:
+            env[env_key] = value
 
     return cmd, env
 
@@ -401,6 +416,8 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"job": job_summary(job), "snapshot": discover_run_snapshot(job.run_dir)})
         if path.startswith("/api/file"):
             return self.send_file_preview(parsed.query)
+        if path.startswith("/media/"):
+            return self.serve_media(path)
         return self.serve_static(path)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -485,7 +502,21 @@ class Handler(SimpleHTTPRequestHandler):
         if suffix in {".txt", ".md", ".log"}:
             text = path.read_text(encoding="utf-8", errors="replace")
             return self.send_json({"path": rel, "type": "text", "content": text[-200000:]})
+        if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+            return self.send_json({"path": rel, "type": "image", "url": "/media/" + rel})
         return self.send_json({"path": rel, "type": "binary", "size": path.stat().st_size})
+
+    def serve_media(self, path: str) -> None:
+        rel = path.replace("/media/", "", 1)
+        file_path = ROOT_DIR / safe_rel_path(rel)
+        if not file_path.exists() or not file_path.is_file() or ROOT_DIR not in file_path.resolve().parents:
+            return self.send_json({"error": "media not found"}, status=404)
+        raw = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", TEXT_MIME.get(file_path.suffix.lower(), "application/octet-stream"))
+        self.send_header("Content-Length", str(len(raw)))
+        self.end_headers()
+        self.wfile.write(raw)
 
     def serve_static(self, path: str) -> None:
         rel = "index.html" if path in {"/", ""} else path.lstrip("/")
