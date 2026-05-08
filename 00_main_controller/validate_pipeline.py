@@ -13,6 +13,7 @@ from importlib import import_module
 io_utils = import_module("00_common.io_utils")
 
 DEFAULT_MODULE_ORDER = [
+    "00_style_system",
     "01_novel_parser",
     "02_script_writer",
     "03_character_system",
@@ -24,6 +25,8 @@ DEFAULT_MODULE_ORDER = [
     "09_video",
     "10_final_assembly",
 ]
+
+STYLE_PIPELINE_MODULE = "00_style_system"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,11 +76,14 @@ def validate_pipeline_config(config: dict[str, Any], strict_order: bool = False)
         filtered = [name for name in pipeline if name in order_index]
         expected = sorted(filtered, key=lambda name: order_index[name])
         if filtered != expected:
-            messages.append("Pipeline order differs from recommended 01→10 order.")
+            messages.append("Pipeline order differs from recommended 00→10 order.")
             messages.append(f"Current: {filtered}")
             messages.append(f"Expected: {expected}")
 
-    controller_modules = [name for name in pipeline if isinstance(name, str) and name.startswith("00_")]
+    controller_modules = [
+        name for name in pipeline
+        if isinstance(name, str) and name[:3] == "00_" and name != STYLE_PIPELINE_MODULE
+    ]
     if controller_modules:
         messages.append("Warning: pipeline usually should not include 00_* controller/common modules.")
         messages.append(f"Found: {controller_modules}")
