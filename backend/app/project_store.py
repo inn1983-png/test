@@ -22,6 +22,8 @@ def ensure_project_dirs(project_id: str) -> Path:
         "assets/characters",
         "assets/scenes",
         "assets/props",
+        "assets/voices",
+        "assets/styles",
         "images",
         "grids",
         "audio",
@@ -29,10 +31,18 @@ def ensure_project_dirs(project_id: str) -> Path:
         "manifests",
         "history",
         "final",
+        "workflows/image",
+        "workflows/video",
+        "workflows/audio",
+        "workflows/grid",
+        "workflows/final",
+        "workflows/utility",
         "tasks/pending",
         "tasks/running",
         "tasks/done",
         "tasks/failed",
+        "tasks/cancelled",
+        "tasks/logs",
     ]:
         (project_dir / rel).mkdir(parents=True, exist_ok=True)
     return project_dir
