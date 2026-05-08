@@ -1,0 +1,171 @@
+.module-result-summary {
+  margin-bottom: 18px;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.result-header h3 {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--primary);
+}
+
+.result-card {
+  border: 1px solid rgba(92,224,216,0.18);
+  background: linear-gradient(180deg, rgba(92,224,216,0.08), rgba(255,255,255,0.035));
+  border-radius: 16px;
+  padding: 16px;
+  margin-bottom: 14px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+
+.result-card.empty {
+  border-color: var(--line);
+  background: var(--glass);
+  color: var(--muted);
+}
+
+.result-card h4 {
+  font-size: 15px;
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+
+.result-card h5 {
+  font-size: 12px;
+  color: var(--accent);
+  margin: 12px 0 6px;
+}
+
+.result-card p {
+  color: #d7e5f6;
+  font-size: 13px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.result-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.result-metric {
+  background: rgba(0,0,0,0.22);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  min-width: 0;
+}
+
+.result-metric .rm-num {
+  font-size: 16px;
+  font-weight: 900;
+  color: var(--primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-metric .rm-label {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.result-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.result-chips span {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(139,124,247,0.14);
+  border: 1px solid rgba(139,124,247,0.22);
+  color: #dcd6ff;
+}
+
+.result-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(0,0,0,0.22);
+}
+
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.result-table th,
+.result-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  vertical-align: top;
+  text-align: left;
+}
+
+.result-table th {
+  color: var(--muted);
+  font-weight: 800;
+  background: rgba(255,255,255,0.035);
+  white-space: nowrap;
+}
+
+.result-table tr:last-child td {
+  border-bottom: none;
+}
+
+.result-loading,
+.muted {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.review-box {
+  border: 1px dashed rgba(255,184,108,0.35);
+  border-radius: 14px;
+  background: rgba(255,184,108,0.06);
+  padding: 12px;
+  margin: 12px 0 18px;
+}
+
+.review-box h4 {
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+
+.review-box textarea {
+  min-height: 90px;
+  margin-top: 8px;
+  background: rgba(0,0,0,0.28);
+}
+
+.review-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.stage-detail-card {
+  opacity: 0.92;
+}
+
+@media (max-width: 900px) {
+  .result-metrics {
+    grid-template-columns: 1fr;
+  }
+}
