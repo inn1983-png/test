@@ -31,6 +31,16 @@
   const $id = (id) => document.getElementById(id);
   const htmlEsc = (v) => String(v ?? "").replace(/[&<>\"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;"}[c]));
   const attrEsc = (v) => htmlEsc(v).replace(/'/g, "&#39;");
+  const appState = () => window.state || {};
+  const appApi = (...args) => {
+    if (typeof window.api !== "function") throw new Error("UI api bridge not ready");
+    return window.api(...args);
+  };
+  const preview = (path) => {
+    if (typeof window.previewFile === "function") return window.previewFile(path);
+    alert(`预览功能未就绪：${path}`);
+  };
+
   const get = (obj, paths, fallback = "") => {
     for (const path of paths) {
       const value = path.split(".").reduce((cur, key) => (cur && cur[key] !== undefined ? cur[key] : undefined), obj);
@@ -46,7 +56,7 @@
   const count = (v) => Array.isArray(v) ? v.length : 0;
 
   function resultPath(moduleName) {
-    const runDir = state.currentSnapshot?.run_dir;
+    const runDir = appState().currentSnapshot?.run_dir;
     const file = MODULE_RESULT_FILES[moduleName];
     if (!runDir || !file) return "";
     return `${runDir}/${moduleName}/${file}`;
@@ -56,7 +66,7 @@
     const path = resultPath(moduleName);
     if (!path) return null;
     try {
-      const data = await api(`/api/file?path=${encodeURIComponent(path)}`);
+      const data = await appApi(`/api/file?path=${encodeURIComponent(path)}`);
       if (data.type === "json") return {path, content: data.content};
       return {path, content: null};
     } catch (_) {
@@ -106,101 +116,55 @@
       ...genericArray(data, ["candidate_scenes", "asset_candidates.scenes", "outputs.01D.candidate_scenes"]),
       ...genericArray(data, ["candidate_props", "asset_candidates.props", "outputs.01D.candidate_props"]),
     ];
-    return `<div class="result-card">
-      <h4>故事理解</h4>
-      <p>${htmlEsc(story || "未找到摘要字段，可点击原始 JSON 查看完整结果。")}</p>
-      <div class="result-metrics">${metric("事件", count(events))}${metric("候选资产", count(candidates))}${metric("主题", Array.isArray(themes) ? themes.length : (themes ? 1 : 0))}</div>
-      <h5>主题/关键词</h5>${chips(Array.isArray(themes) ? themes : [themes])}
-      <h5>前几个事件</h5>${table(["事件", "说明"], events.slice(0, 8).map((e, i) => [htmlEsc(e.event_id || e.id || i + 1), htmlEsc(short(e.summary || e.event || e.description || e.text || JSON.stringify(e), 120))]))}
-    </div>`;
+    return `<div class="result-card"><h4>故事理解</h4><p>${htmlEsc(story || "未找到摘要字段，可点击原始 JSON 查看完整结果。")}</p><div class="result-metrics">${metric("事件", count(events))}${metric("候选资产", count(candidates))}${metric("主题", Array.isArray(themes) ? themes.length : (themes ? 1 : 0))}</div><h5>主题/关键词</h5>${chips(Array.isArray(themes) ? themes : [themes])}<h5>前几个事件</h5>${table(["事件", "说明"], events.slice(0, 8).map((e, i) => [htmlEsc(e.event_id || e.id || i + 1), htmlEsc(short(e.summary || e.event || e.description || e.text || JSON.stringify(e), 120))]))}</div>`;
   }
 
   function summarizeScript(data) {
     const lines = genericArray(data, ["voice_lines", "script_lines", "lines", "segments", "script.voice_lines"]);
     const acts = genericArray(data, ["acts", "structure.acts", "story_beats", "beats"]);
     const sample = lines.length ? lines : acts;
-    return `<div class="result-card">
-      <h4>剧本改编</h4>
-      <div class="result-metrics">${metric("台词/旁白行", count(lines))}${metric("结构段", count(acts))}${metric("状态", data.status || "-")}</div>
-      <h5>前几条内容</h5>${table(["序号", "角色/类型", "内容"], sample.slice(0, 10).map((x, i) => [htmlEsc(x.line_id || x.segment_id || i + 1), htmlEsc(x.speaker || x.character || x.line_type || x.type || ""), htmlEsc(short(x.text || x.content || x.dialogue || x.summary || JSON.stringify(x), 140))]))}
-    </div>`;
+    return `<div class="result-card"><h4>剧本改编</h4><div class="result-metrics">${metric("台词/旁白行", count(lines))}${metric("结构段", count(acts))}${metric("状态", data.status || "-")}</div><h5>前几条内容</h5>${table(["序号", "角色/类型", "内容"], sample.slice(0, 10).map((x, i) => [htmlEsc(x.line_id || x.segment_id || i + 1), htmlEsc(x.speaker || x.character || x.line_type || x.type || ""), htmlEsc(short(x.text || x.content || x.dialogue || x.summary || JSON.stringify(x), 140))]))}</div>`;
   }
 
   function summarizeCharacters(data) {
     const chars = asArray(data.characters);
-    return `<div class="result-card">
-      <h4>角色库</h4>
-      <div class="result-metrics">${metric("角色", chars.length)}${metric("主资产", count(data.main_assets_for_06))}${metric("可选资产", count(data.optional_assets_for_06))}</div>
-      ${table(["角色", "性别", "身份", "外观/气质"], chars.slice(0, MAX_ITEMS).map((c) => [htmlEsc(c.canonical_name || c.name || ""), htmlEsc(c.gender || ""), htmlEsc(short(c.identity || c.role_function || "", 50)), htmlEsc(short(c.appearance || c.temperament || "", 110))]))}
-    </div>`;
+    return `<div class="result-card"><h4>角色库</h4><div class="result-metrics">${metric("角色", chars.length)}${metric("主资产", count(data.main_assets_for_06))}${metric("可选资产", count(data.optional_assets_for_06))}</div>${table(["角色", "性别", "身份", "外观/气质"], chars.slice(0, MAX_ITEMS).map((c) => [htmlEsc(c.canonical_name || c.name || ""), htmlEsc(c.gender || ""), htmlEsc(short(c.identity || c.role_function || "", 50)), htmlEsc(short(c.appearance || c.temperament || "", 110))]))}</div>`;
   }
 
   function summarizeScenes(data) {
     const scenes = asArray(data.scenes);
-    return `<div class="result-card">
-      <h4>场景库</h4>
-      <div class="result-metrics">${metric("场景", scenes.length)}${metric("主场景", scenes.filter(s => s.asset_level === "main").length)}${metric("状态", data.status || "-")}</div>
-      ${table(["场景", "类型", "视觉描述"], scenes.slice(0, MAX_ITEMS).map((s) => [htmlEsc(s.canonical_scene_name || s.name || ""), htmlEsc(s.scene_type || s.asset_level || ""), htmlEsc(short(s.visual_description || s.appearance || s.description || "", 130))]))}
-    </div>`;
+    return `<div class="result-card"><h4>场景库</h4><div class="result-metrics">${metric("场景", scenes.length)}${metric("主场景", scenes.filter(s => s.asset_level === "main").length)}${metric("状态", data.status || "-")}</div>${table(["场景", "类型", "视觉描述"], scenes.slice(0, MAX_ITEMS).map((s) => [htmlEsc(s.canonical_scene_name || s.name || ""), htmlEsc(s.scene_type || s.asset_level || ""), htmlEsc(short(s.visual_description || s.appearance || s.description || "", 130))]))}</div>`;
   }
 
   function summarizeProps(data) {
     const props = asArray(data.props);
-    return `<div class="result-card">
-      <h4>道具库</h4>
-      <div class="result-metrics">${metric("道具", props.length)}${metric("关键道具", props.filter(p => p.asset_level === "main" || p.importance === "key").length)}${metric("状态", data.status || "-")}</div>
-      ${table(["道具", "用途", "视觉描述"], props.slice(0, MAX_ITEMS).map((p) => [htmlEsc(p.canonical_prop_name || p.name || ""), htmlEsc(short(p.role_function || p.usage || p.story_function || "", 60)), htmlEsc(short(p.visual_description || p.appearance || p.description || "", 130))]))}
-    </div>`;
+    return `<div class="result-card"><h4>道具库</h4><div class="result-metrics">${metric("道具", props.length)}${metric("关键道具", props.filter(p => p.asset_level === "main" || p.importance === "key").length)}${metric("状态", data.status || "-")}</div>${table(["道具", "用途", "视觉描述"], props.slice(0, MAX_ITEMS).map((p) => [htmlEsc(p.canonical_prop_name || p.name || ""), htmlEsc(short(p.role_function || p.usage || p.story_function || "", 60)), htmlEsc(short(p.visual_description || p.appearance || p.description || "", 130))]))}</div>`;
   }
 
   function summarizeStoryboard(data) {
     const frames = asArray(data.frames);
-    return `<div class="result-card">
-      <h4>分镜</h4>
-      <div class="result-metrics">${metric("分镜帧", frames.length)}${metric("四宫格组", count(data.four_grid_preview_groups))}${metric("出图造型需求", count(data.appearance_asset_requirements))}</div>
-      ${table(["序号", "场景", "人物", "动作/镜头"], frames.slice(0, MAX_ITEMS).map((f) => {
-        const scene = typeof f.scene === "object" ? f.scene.canonical_scene_name : f.scene;
-        const chars = asArray(f.characters).map(c => c.canonical_name || c.name).filter(Boolean).join("、");
-        return [htmlEsc(f.sequence_index || f.frame_id || ""), htmlEsc(scene || ""), htmlEsc(chars || "无"), htmlEsc(short(`${f.story_action || ""} ${f.camera_plan || ""}`, 140))];
-      }))}
-    </div>`;
+    return `<div class="result-card"><h4>分镜</h4><div class="result-metrics">${metric("分镜帧", frames.length)}${metric("四宫格组", count(data.four_grid_preview_groups))}${metric("出图造型需求", count(data.appearance_asset_requirements))}</div>${table(["序号", "场景", "人物", "动作/镜头"], frames.slice(0, MAX_ITEMS).map((f) => { const scene = typeof f.scene === "object" ? f.scene.canonical_scene_name : f.scene; const chars = asArray(f.characters).map(c => c.canonical_name || c.name).filter(Boolean).join("、"); return [htmlEsc(f.sequence_index || f.frame_id || ""), htmlEsc(scene || ""), htmlEsc(chars || "无"), htmlEsc(short(`${f.story_action || ""} ${f.camera_plan || ""}`, 140))]; }))}</div>`;
   }
 
   function summarizeImages(data) {
     const manifest = data.image_manifest || data;
     const images = asArray(manifest.images || data.images);
     const done = images.filter(x => x.status === "success" || x.execution_mode === "dry_run").length;
-    return `<div class="result-card">
-      <h4>分镜图</h4>
-      <div class="result-metrics">${metric("图片任务", images.length)}${metric("完成/规划", done)}${metric("执行模式", data.execution_mode || manifest.execution_mode || "-")}</div>
-      ${table(["帧", "状态", "输出路径"], images.slice(0, MAX_ITEMS).map((img) => [htmlEsc(img.frame_id || img.sequence_index || ""), htmlEsc(img.status || img.execution_mode || ""), htmlEsc(short(img.image_path || img.output_image_path || "", 90))]))}
-    </div>`;
+    return `<div class="result-card"><h4>分镜图</h4><div class="result-metrics">${metric("图片任务", images.length)}${metric("完成/规划", done)}${metric("执行模式", data.execution_mode || manifest.execution_mode || "-")}</div>${table(["帧", "状态", "输出路径"], images.slice(0, MAX_ITEMS).map((img) => [htmlEsc(img.frame_id || img.sequence_index || ""), htmlEsc(img.status || img.execution_mode || ""), htmlEsc(short(img.image_path || img.output_image_path || "", 90))]))}</div>`;
   }
 
   function summarizeAudio(data) {
     const entries = asArray(data.entries || data.lines || data.segments);
-    return `<div class="result-card">
-      <h4>音频时间线</h4>
-      <div class="result-metrics">${metric("音频段", entries.length)}${metric("总时长", data.duration_seconds || data.total_duration_seconds || "-")}${metric("状态", data.status || "-")}</div>
-      ${table(["时间", "角色/类型", "文本"], entries.slice(0, MAX_ITEMS).map((e) => [htmlEsc(`${e.start_seconds ?? e.start ?? ""}-${e.end_seconds ?? e.end ?? ""}`), htmlEsc(e.speaker || e.character || e.line_type || e.type || ""), htmlEsc(short(e.text || e.content || "", 120))]))}
-    </div>`;
+    return `<div class="result-card"><h4>音频时间线</h4><div class="result-metrics">${metric("音频段", entries.length)}${metric("总时长", data.duration_seconds || data.total_duration_seconds || "-")}${metric("状态", data.status || "-")}</div>${table(["时间", "角色/类型", "文本"], entries.slice(0, MAX_ITEMS).map((e) => [htmlEsc(`${e.start_seconds ?? e.start ?? ""}-${e.end_seconds ?? e.end ?? ""}`), htmlEsc(e.speaker || e.character || e.line_type || e.type || ""), htmlEsc(short(e.text || e.content || "", 120))]))}</div>`;
   }
 
   function summarizeVideo(data) {
     const segments = asArray(data.segments || data.video_segments || data.video_manifest?.segments || data.outputs?.["09A"]?.segments);
-    return `<div class="result-card">
-      <h4>视频生成</h4>
-      <div class="result-metrics">${metric("视频段", segments.length)}${metric("状态", data.status || "-")}${metric("最终视频", data.final_video_ready === true ? "已生成" : "未生成")}</div>
-      ${table(["段", "状态", "输出"], segments.slice(0, MAX_ITEMS).map((s) => [htmlEsc(s.segment_id || s.segment_index || ""), htmlEsc(s.status || s.execution_mode || ""), htmlEsc(short(s.output_clip_path || s.final_video_path || "", 100))]))}
-    </div>`;
+    return `<div class="result-card"><h4>视频生成</h4><div class="result-metrics">${metric("视频段", segments.length)}${metric("状态", data.status || "-")}${metric("最终视频", data.final_video_ready === true ? "已生成" : "未生成")}</div>${table(["段", "状态", "输出"], segments.slice(0, MAX_ITEMS).map((s) => [htmlEsc(s.segment_id || s.segment_index || ""), htmlEsc(s.status || s.execution_mode || ""), htmlEsc(short(s.output_clip_path || s.final_video_path || "", 100))]))}</div>`;
   }
 
   function summarizeFinal(data) {
-    return `<div class="result-card">
-      <h4>最终成片</h4>
-      <div class="result-metrics">${metric("状态", data.status || "-")}${metric("视频就绪", data.final_video_ready === true ? "是" : "否")}${metric("输出", data.final_video_path || data.final_path || "-")}</div>
-      <p>${htmlEsc(data.merge_note || data.note || data.message || "")}</p>
-    </div>`;
+    return `<div class="result-card"><h4>最终成片</h4><div class="result-metrics">${metric("状态", data.status || "-")}${metric("视频就绪", data.final_video_ready === true ? "是" : "否")}${metric("输出", data.final_video_path || data.final_path || "-")}</div><p>${htmlEsc(data.merge_note || data.note || data.message || "")}</p></div>`;
   }
 
   function summarize(moduleName, data) {
@@ -219,23 +183,24 @@
     return `<div class="result-card"><pre>${htmlEsc(JSON.stringify(data, null, 2).slice(0, 4000))}</pre></div>`;
   }
 
-  const originalRenderStageDetail = window.renderStageDetail || renderStageDetail;
-
   async function renderResultSummary(moduleName) {
     const wrap = $id("moduleResultSummary");
     if (!wrap) return;
     wrap.innerHTML = `<div class="result-loading">正在读取模块成果...</div>`;
     const result = await fetchResultJson(moduleName);
     const content = result?.content || null;
-    const rawButton = result?.path ? `<button class="btn small ghost" onclick="previewFile('${attrEsc(result.path)}')">查看原始 JSON</button>` : "";
+    const rawButton = result?.path ? `<button class="btn small ghost" onclick="window.previewFile ? previewFile('${attrEsc(result.path)}') : alert('预览未就绪')">查看原始 JSON</button>` : "";
     wrap.innerHTML = `<div class="result-header"><h3>${htmlEsc(MODULE_RESULT_TITLES[moduleName] || "模块成果")}</h3>${rawButton}</div>${summarize(moduleName, content)}`;
   }
 
-  window.renderStageDetail = async function patchedRenderStageDetail() {
-    await originalRenderStageDetail();
+  const originalRenderStageDetail = window.renderStageDetail;
+  window.renderStageDetail = async function patchedRenderStageDetail(...args) {
+    if (typeof originalRenderStageDetail === "function") {
+      await originalRenderStageDetail.apply(this, args);
+    }
     const wrap = $id("stageDetail");
-    const moduleName = state.selectedModule;
-    if (!wrap || !moduleName || !state.currentSnapshot) return;
+    const moduleName = appState().selectedModule;
+    if (!wrap || !moduleName || !appState().currentSnapshot) return;
     if (!MODULE_RESULT_FILES[moduleName]) return;
     if (!wrap.querySelector("#moduleResultSummary")) {
       wrap.insertAdjacentHTML("afterbegin", `<div id="moduleResultSummary" class="module-result-summary"></div>`);
@@ -244,4 +209,5 @@
   };
 
   window.renderResultSummary = renderResultSummary;
+  window.previewReviewedFile = preview;
 })();
