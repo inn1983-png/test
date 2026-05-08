@@ -1,4 +1,7 @@
 (() => {
+  let restoreTimer = null;
+  let observerStarted = false;
+
   function setActiveStageTab() {
     if (typeof window.switchTab === "function") {
       window.switchTab("stage");
@@ -6,6 +9,40 @@
     }
     document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.tab === "stage"));
     document.querySelectorAll(".tab-content").forEach((c) => c.classList.toggle("active", c.id === "tabStage"));
+  }
+
+  async function restoreWorkbench() {
+    const moduleName = window.state?.selectedModule;
+    const wrap = document.getElementById("stageDetail");
+    if (!moduleName || !wrap || !window.state?.currentSnapshot) return;
+    if (!wrap.querySelector("#moduleResultSummary") && typeof window.renderStageDetail === "function") {
+      await window.renderStageDetail();
+    }
+    if (!wrap.querySelector("#moduleReviewBox") && typeof window.renderModuleReviewBox === "function") {
+      window.renderModuleReviewBox(moduleName);
+    }
+  }
+
+  function scheduleRestoreWorkbench() {
+    if (restoreTimer) clearTimeout(restoreTimer);
+    restoreTimer = setTimeout(() => {
+      restoreWorkbench().catch(() => {});
+    }, 80);
+  }
+
+  function observeStageDetail() {
+    if (observerStarted) return;
+    const wrap = document.getElementById("stageDetail");
+    if (!wrap) return;
+    observerStarted = true;
+    const observer = new MutationObserver(() => {
+      const moduleName = window.state?.selectedModule;
+      if (!moduleName || !window.state?.currentSnapshot) return;
+      if (!wrap.querySelector("#moduleResultSummary") || !wrap.querySelector("#moduleReviewBox")) {
+        scheduleRestoreWorkbench();
+      }
+    });
+    observer.observe(wrap, {childList: true, subtree: false});
   }
 
   function patchSelectModule() {
@@ -31,12 +68,14 @@
     }
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
+  function initPatch() {
     patchModuleNames();
     patchSelectModule();
-  });
-  setTimeout(() => {
-    patchModuleNames();
-    patchSelectModule();
-  }, 300);
+    observeStageDetail();
+    scheduleRestoreWorkbench();
+  }
+
+  document.addEventListener("DOMContentLoaded", initPatch);
+  setTimeout(initPatch, 300);
+  setTimeout(initPatch, 1000);
 })();
