@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AI 短剧工厂</title>
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/result_summary.css" />
 </head>
 <body>
   <div class="app">
@@ -13,7 +14,7 @@
         <div class="brand-mark">影</div>
         <div>
           <div class="brand-title">AI 短剧工厂</div>
-          <div class="brand-sub">实时流水线工作台</div>
+          <div class="brand-sub">成果可视化工作台</div>
         </div>
       </div>
 
@@ -36,8 +37,8 @@
 
       <div class="sidebar-section">
         <div class="sidebar-label">快捷操作</div>
-        <button class="btn primary full" id="startFullBtn">启动全流程 (01→10)</button>
-        <button class="btn full" id="startTextBtn">文本链路 (01→06)</button>
+        <button class="btn primary full" id="startFullBtn">启动全流程 (00→10)</button>
+        <button class="btn full" id="startTextBtn">文本链路 (00→06)</button>
         <button class="btn full" id="dataLinkBtn">数据链路检查</button>
         <button class="btn ghost full" id="selfCheckBtn">总控自检</button>
       </div>
@@ -77,19 +78,19 @@
 
       <section class="output-panel">
         <div class="output-header">
-          <h2>实时输出</h2>
+          <h2>成果工作台</h2>
           <div class="output-tabs">
-            <button class="tab active" data-tab="stream">流水线日志</button>
-            <button class="tab" data-tab="stage">阶段详情</button>
+            <button class="tab active" data-tab="stage">成果详情</button>
             <button class="tab" data-tab="repair">返工中心</button>
+            <button class="tab" data-tab="stream">流水线日志</button>
           </div>
         </div>
         <div class="output-body">
-          <div class="tab-content active" id="tabStream">
+          <div class="tab-content" id="tabStream">
             <pre id="liveLog" class="log-box">等待任务...</pre>
           </div>
-          <div class="tab-content" id="tabStage">
-            <div id="stageDetail" class="stage-detail">点击模块查看阶段详情</div>
+          <div class="tab-content active" id="tabStage">
+            <div id="stageDetail" class="stage-detail">点击上方模块，查看每个子系统的可读成果。</div>
           </div>
           <div class="tab-content" id="tabRepair">
             <div id="repairCenter" class="repair-center">选择项目后查看返工中心</div>
