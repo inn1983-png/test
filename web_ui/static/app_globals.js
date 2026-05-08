@@ -8,5 +8,9 @@
     if (typeof api !== "undefined") window.api = api;
     if (typeof previewFile !== "undefined") window.previewFile = previewFile;
     if (typeof switchTab !== "undefined") window.switchTab = switchTab;
+    if (typeof renderStageDetail !== "undefined") window.renderStageDetail = renderStageDetail;
+    if (typeof refreshAll !== "undefined") window.refreshAll = refreshAll;
+    if (typeof renderPipeline !== "undefined") window.renderPipeline = renderPipeline;
+    if (typeof renderRepairCenter !== "undefined") window.renderRepairCenter = renderRepairCenter;
   } catch (_) {}
 })();
