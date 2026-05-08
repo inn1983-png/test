@@ -1,16 +1,34 @@
 {
   "description": "Module input/output contracts used by 00 controller before running modules. Requires are checked against manifest key_outputs, artifacts.db, and conventional module output paths.",
   "modules": {
-    "01_novel_parser": {
+    "00_style_system": {
       "requires": [],
+      "produces": [
+        {"module": "00_style_system", "name": "style_bible.json", "type": "json"},
+        {"module": "00_style_system", "name": "style_bible.md", "type": "markdown"},
+        {"module": "00_style_system", "name": "style_prompt_prefix.txt", "type": "text"},
+        {"module": "00_style_system", "name": "image_style_lock.txt", "type": "text"},
+        {"module": "00_style_system", "name": "video_style_lock.txt", "type": "text"},
+        {"module": "00_style_system", "name": "style_negative_prompt.txt", "type": "text"},
+        {"module": "00_style_system", "name": "style_meta.json", "type": "json"}
+      ]
+    },
+    "01_novel_parser": {
+      "requires": [{"module": "00_style_system", "name": "style_bible.json"}],
       "produces": [{"module": "01_novel_parser", "name": "novel_analysis.json", "type": "json"}]
     },
     "02_script_writer": {
-      "requires": [{"module": "01_novel_parser", "name": "novel_analysis.json"}],
+      "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
+        {"module": "00_style_system", "name": "style_prompt_prefix.txt"},
+        {"module": "01_novel_parser", "name": "novel_analysis.json"}
+      ],
       "produces": [{"module": "02_script_writer", "name": "script.json", "type": "json"}]
     },
     "03_character_system": {
       "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
+        {"module": "00_style_system", "name": "style_prompt_prefix.txt"},
         {"module": "01_novel_parser", "name": "novel_analysis.json"},
         {"module": "02_script_writer", "name": "script.json"}
       ],
@@ -18,6 +36,8 @@
     },
     "04_scene_system": {
       "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
+        {"module": "00_style_system", "name": "style_prompt_prefix.txt"},
         {"module": "01_novel_parser", "name": "novel_analysis.json"},
         {"module": "02_script_writer", "name": "script.json"}
       ],
@@ -25,6 +45,8 @@
     },
     "05_prop_system": {
       "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
+        {"module": "00_style_system", "name": "style_prompt_prefix.txt"},
         {"module": "01_novel_parser", "name": "novel_analysis.json"},
         {"module": "02_script_writer", "name": "script.json"}
       ],
@@ -32,6 +54,8 @@
     },
     "06_storyboard": {
       "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
+        {"module": "00_style_system", "name": "style_prompt_prefix.txt"},
         {"module": "02_script_writer", "name": "script.json"},
         {"module": "03_character_system", "name": "characters.json"},
         {"module": "04_scene_system", "name": "scenes.json"},
@@ -40,11 +64,19 @@
       "produces": [{"module": "06_storyboard", "name": "storyboard.json", "type": "json"}]
     },
     "07_storyboard_image": {
-      "requires": [{"module": "06_storyboard", "name": "storyboard.json"}],
+      "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
+        {"module": "00_style_system", "name": "image_style_lock.txt"},
+        {"module": "00_style_system", "name": "style_negative_prompt.txt"},
+        {"module": "06_storyboard", "name": "storyboard.json"}
+      ],
       "produces": [{"module": "07_storyboard_image", "name": "image_manifest.json", "type": "json"}]
     },
     "08_audio": {
-      "requires": [{"module": "02_script_writer", "name": "script.json"}],
+      "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
+        {"module": "02_script_writer", "name": "script.json"}
+      ],
       "produces": [
         {"module": "08_audio", "name": "final_audio.wav", "type": "audio"},
         {"module": "08_audio", "name": "audio_timeline.json", "type": "json"},
@@ -56,6 +88,8 @@
     },
     "09_video": {
       "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
+        {"module": "00_style_system", "name": "video_style_lock.txt"},
         {"module": "07_storyboard_image", "name": "image_manifest.json"},
         {"module": "08_audio", "name": "final_audio.wav"},
         {"module": "08_audio", "name": "audio_timeline.json"}
@@ -67,6 +101,7 @@
     },
     "10_final_assembly": {
       "requires": [
+        {"module": "00_style_system", "name": "style_bible.json"},
         {"module": "09_video", "name": "video_manifest.json", "type": "json"},
         {"module": "08_audio", "name": "final_audio.wav", "type": "audio"},
         {"module": "09_video", "name": "final_video.mp4", "type": "video", "optional": true},
