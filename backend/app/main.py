@@ -10,6 +10,7 @@ from backend.agents.repair_agent import repair_node
 from backend.app.canvas_store import load_canvas, refresh_canvas
 from backend.app.node_store import list_nodes, load_node, update_node
 from backend.app.project_store import list_projects, load_project, save_project
+from backend.app.project_actions import import_source_text
 from backend.app.settings_store import load_settings, save_settings
 from backend.app.task_store import list_tasks, enqueue_node_task
 from backend.app.workflow_store import list_workflows, save_workflow
@@ -68,18 +69,13 @@ class Handler(BaseHTTPRequestHandler):
                 if len(parts) == 3:
                     self._json(runtime_snapshot(project_id)); return
                 area = parts[3]
-                if area == "canvas":
-                    self._json(load_canvas(project_id)); return
-                if area == "settings":
-                    self._json(load_settings(project_id)); return
-                if area == "workflows":
-                    self._json({"workflows": list_workflows(project_id)}); return
+                if area == "canvas": self._json(load_canvas(project_id)); return
+                if area == "settings": self._json(load_settings(project_id)); return
+                if area == "workflows": self._json({"workflows": list_workflows(project_id)}); return
                 if area == "nodes":
-                    if len(parts) == 4:
-                        self._json({"nodes": list_nodes(project_id)}); return
+                    if len(parts) == 4: self._json({"nodes": list_nodes(project_id)}); return
                     self._json(load_node(project_id, parts[4])); return
-                if area == "tasks":
-                    self._json({"tasks": list_tasks(project_id)}); return
+                if area == "tasks": self._json({"tasks": list_tasks(project_id)}); return
             self._json({"error": "not found"}, 404)
         except Exception as exc:
             self._json({"error": str(exc)}, 500)
@@ -91,8 +87,10 @@ class Handler(BaseHTTPRequestHandler):
                 project_id = parts[2]
                 action = parts[3]
                 if action == "init": self._json(init_project(project_id)); return
-                if action == "step":
-                    next_step(project_id); run_pending(project_id); self._json(runtime_snapshot(project_id)); return
+                if action == "source":
+                    data = self._body()
+                    self._json(import_source_text(project_id, data.get("title", project_id), data.get("content", ""))); return
+                if action == "step": next_step(project_id); run_pending(project_id); self._json(runtime_snapshot(project_id)); return
                 if action == "run": self._json(run_until_idle(project_id)); return
                 if action == "refresh": self._json(refresh_canvas(project_id)); return
                 if action == "tasks" and len(parts) >= 6:
@@ -125,8 +123,7 @@ class Handler(BaseHTTPRequestHandler):
         parts = [p for p in urlparse(self.path).path.split("/") if p]
         try:
             data = self._body()
-            if len(parts) == 5 and parts[0] == "api" and parts[1] == "projects" and parts[3] == "nodes":
-                self._json(update_node(parts[2], parts[4], data)); return
+            if len(parts) == 5 and parts[0] == "api" and parts[1] == "projects" and parts[3] == "nodes": self._json(update_node(parts[2], parts[4], data)); return
             if len(parts) == 4 and parts[0] == "api" and parts[1] == "projects" and parts[3] == "settings":
                 settings = load_settings(parts[2]); settings.update(data); self._json(save_settings(parts[2], settings)); return
             if len(parts) == 3 and parts[0] == "api" and parts[1] == "projects":
