@@ -10,7 +10,7 @@ Canvas 状态机
 + Executor 执行
 + 文件任务队列
 + 前端可视化工作台
-+ ComfyUI / LTX / CosyVoice2 接入骨架
++ ComfyUI / LTX / CosyVoice2 / FFmpeg 可配置接入
 ```
 
 旧结构不再作为默认入口。旧模块如果还需要参考，后续应移动到 `legacy/`。
@@ -22,13 +22,13 @@ Canvas 状态机
 ```text
 run.py
 backend/
-  app/          # 项目、Canvas、Node、Task、HTTP API
+  app/          # 项目、Canvas、Node、Task、Settings、Workflow、HTTP API
   agents/       # Director / Writer / Asset / Storyboard / Reviewer / Repair
   executors/    # Image / Grid / Audio / Video / Final
   workers/      # 文件任务队列 runner
   schemas/      # Canvas / Node / Task schema
 frontend/       # Vite + React 工作台
-projects/       # 本地项目数据、节点、任务、素材、成片
+projects/       # 本地项目数据、节点、任务、素材、成片、工作流
 ```
 
 核心原则：
@@ -39,6 +39,8 @@ Node 负责内容
 Agent 负责判断
 Executor 负责执行
 Task 负责排队
+Workflow 负责 ComfyUI JSON 分类管理
+Settings 负责本机路径配置
 UI 负责可视化和人工干预
 ```
 
@@ -46,39 +48,13 @@ UI 负责可视化和人工干预
 
 ## 本地运行
 
-### 1. 初始化 Demo 项目
-
 ```bash
 python run.py init --project demo_project
-```
-
-### 2. 单步推进
-
-```bash
-python run.py step --project demo_project
-```
-
-### 3. 自动运行直到空闲
-
-```bash
 python run.py run --project demo_project
-```
-
-### 4. 启动后端 API
-
-```bash
 python run.py serve --host 127.0.0.1 --port 7860
 ```
 
-后端 API 默认地址：
-
-```text
-http://127.0.0.1:7860
-```
-
----
-
-## 前端工作台
+前端：
 
 ```bash
 cd frontend
@@ -92,15 +68,97 @@ npm run dev
 http://127.0.0.1:7860/api/projects/demo_project
 ```
 
-页面包含：
+---
+
+## UI 页面
+
+当前前端工作台包含：
 
 ```text
-项目阶段
-Storyboard Canvas
-Grid View
-Asset Hub
-Task Center
-Node Detail
+Dashboard     项目总览
+Script        小说 / 剧本节点
+Assets        角色 / 场景 / 道具资产
+Storyboard    shot 卡片 + grid 宫格视图
+Tasks         任务中心，支持重试 / 取消
+Preview       成片预览入口
+Settings      本地路径配置 + ComfyUI 工作流 JSON 上传
+Node Detail   右侧节点详情，支持编辑 / 重跑 / 审核 / 修复 / 锁定
+```
+
+---
+
+## 本机路径配置
+
+以下内容不写死，由你本地设置：
+
+```json
+{
+  "comfyui_url": "http://127.0.0.1:8188",
+  "image_workflow": "workflows/image/storyboard_image.json",
+  "video_workflow": "workflows/video/ltx23_grid_video.json",
+  "cosyvoice2_command": "",
+  "ffmpeg_path": "ffmpeg"
+}
+```
+
+保存位置：
+
+```text
+projects/{project_id}/settings.json
+```
+
+也可以在前端 `Settings` 页面直接修改。
+
+---
+
+## ComfyUI 工作流 JSON 在线上传
+
+前端 `Settings` 页面支持上传 ComfyUI workflow JSON。
+
+按功能分类保存：
+
+```text
+projects/{project_id}/workflows/image/
+projects/{project_id}/workflows/video/
+projects/{project_id}/workflows/audio/
+projects/{project_id}/workflows/grid/
+projects/{project_id}/workflows/final/
+projects/{project_id}/workflows/utility/
+```
+
+分类建议：
+
+```text
+image   分镜图、角色图、场景图、道具图
+video   LTX2.3、图生视频、宫格图生视频
+audio   CosyVoice2、配音、字幕
+grid    grid_4 / grid_6 / grid_9 拼宫格
+final   成片合成
+utility 反推提示词、元数据提取、辅助工作流
+```
+
+上传 API：
+
+```text
+POST /api/projects/{project_id}/workflows
+```
+
+Body：
+
+```json
+{
+  "category": "video",
+  "name": "ltx23_grid_video.json",
+  "content": "{...ComfyUI workflow JSON...}"
+}
+```
+
+`content` 支持：
+
+```text
+1. 原始 JSON 字符串
+2. JSON object
+3. base64 JSON
 ```
 
 ---
@@ -111,6 +169,8 @@ Node Detail
 GET    /api/projects
 GET    /api/projects/{project_id}
 GET    /api/projects/{project_id}/canvas
+GET    /api/projects/{project_id}/settings
+GET    /api/projects/{project_id}/workflows
 GET    /api/projects/{project_id}/nodes
 GET    /api/projects/{project_id}/nodes/{node_id}
 GET    /api/projects/{project_id}/tasks
@@ -118,33 +178,17 @@ POST   /api/projects/{project_id}/init
 POST   /api/projects/{project_id}/step
 POST   /api/projects/{project_id}/run
 POST   /api/projects/{project_id}/refresh
+POST   /api/projects/{project_id}/workflows
+POST   /api/projects/{project_id}/nodes/{node_id}/rerun
+POST   /api/projects/{project_id}/nodes/{node_id}/review
+POST   /api/projects/{project_id}/nodes/{node_id}/repair
+POST   /api/projects/{project_id}/nodes/{node_id}/lock
+POST   /api/projects/{project_id}/tasks/{task_id}/retry
+POST   /api/projects/{project_id}/tasks/{task_id}/cancel
+POST   /api/projects/{project_id}/tasks/{task_id}/log
 PATCH  /api/projects/{project_id}
+PATCH  /api/projects/{project_id}/settings
 PATCH  /api/projects/{project_id}/nodes/{node_id}
-```
-
----
-
-## Agent 分工
-
-```text
-director_agent      总调度，判断下一步，排任务，运行队列
-writer_agent        小说解析、剧本块生成骨架
-asset_agent         角色、场景、道具资产生成骨架
-storyboard_agent    shot 与 grid 生成骨架
-reviewer_agent      节点质量检查骨架
-repair_agent        局部返工骨架
-```
-
----
-
-## Executor 分工
-
-```text
-image_executor      分镜图执行器，后续接 ComfyUI 生图工作流
-grid_executor       宫格拼图执行器，后续接真实拼图逻辑
-audio_executor      配音与字幕执行器，后续接 CosyVoice2
-video_executor      视频执行器，后续接 ComfyUI / LTX2.3
-final_assembler     成片合成执行器，后续接 FFmpeg
 ```
 
 ---
@@ -156,12 +200,21 @@ final_assembler     成片合成执行器，后续接 FFmpeg
 ```text
 projects/{project_id}/
   project.json
+  settings.json
   canvas.json
   nodes/*.json
   tasks/pending/*.json
   tasks/running/*.json
   tasks/done/*.json
   tasks/failed/*.json
+  tasks/cancelled/*.json
+  tasks/logs/*.log
+  workflows/image/*.json
+  workflows/video/*.json
+  workflows/audio/*.json
+  workflows/grid/*.json
+  workflows/final/*.json
+  workflows/utility/*.json
   assets/
   images/
   grids/
@@ -174,24 +227,11 @@ projects/{project_id}/
 
 ---
 
-## 重要说明
+## 开发日志
 
-这次改造不是继续维护旧的：
-
-```text
-00_style_system → 01_novel_parser → 02_script_writer → ... → 10_final_assembly
-```
-
-而是把项目默认方向切到：
+详细改造记录和本地配置说明见：
 
 ```text
-Agent Canvas 短剧生产工作台
-```
-
-旧模块后续只作为参考资产，不再作为默认总控入口。
-
-详细总方案见：
-
-```text
+docs/DEVELOPMENT_LOG.md
 docs/AGENT_CANVAS_UI_REFACTOR_PLAN.md
 ```
