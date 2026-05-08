@@ -1,8 +1,9 @@
 {
   "project_name": "AI_ShortDrama_System",
-  "version": "0.1.0",
-  "description": "Modular AI short drama production pipeline.",
+  "version": "0.2.0",
+  "description": "Modular AI short drama production pipeline with global style bible.",
   "pipeline": [
+    "00_style_system",
     "01_novel_parser",
     "02_script_writer",
     "03_character_system",
