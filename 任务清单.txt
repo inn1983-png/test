@@ -1,0 +1,269 @@
+你现在接手 GitHub 仓库：inn1983-png/test
+
+当前仓库只保留新系统 Agent Canvas，不再保留旧 00-10 模块流水线。请先阅读并遵守：
+
+docs/CODEX_REMAINING_WORK_PLAN.md
+docs/AGENT_CANVAS_COMPLETION_CHECKLIST.md
+README.md
+
+注意：当前项目音频使用 IndexTTS，不使用 CosyVoice2。凡是文档、代码、UI 中仍出现 CosyVoice2 的地方，全部改成 IndexTTS。不要把本地路径写死，所有本地路径都必须通过 Settings / settings.json 配置。
+
+当前仓库已经完成的内容包括：
+- Source import API and UI
+- Workflow node mapping settings and UI
+- Image executor uses configurable workflow mapping
+- Video executor uses configurable workflow mapping
+- ComfyUI history output extraction
+- Real grid_4 / grid_6 / grid_9 image builder
+- IndexTTS command adapter
+- FFmpeg final assembly
+- Task runner logs, traceback and duration
+- Task log viewer in UI
+- Basic pytest tests
+
+你的任务是继续完成仓库内还能完成的部分，不要处理必须本地配置才能完成的内容。必须本地完成的内容只保留为文档说明和 UI 配置入口，不能写死路径。
+
+必须本地完成的内容包括：
+- ComfyUI URL
+- 真实 ComfyUI workflow JSON
+- ComfyUI workflow node ids / input names
+- IndexTTS 推理脚本路径、模型路径、音色参数
+- FFmpeg 路径
+- 真实图片、音频、视频生成测试
+
+请按以下优先级执行。
+
+第一阶段：修正文档一致性
+
+1. 更新 docs/AGENT_CANVAS_COMPLETION_CHECKLIST.md：
+   - 删除 CosyVoice2，改为 IndexTTS。
+   - 删除旧的 PROMPT_NODE / NEGATIVE_NODE / IMAGE_NODE 固定占位说法。
+   - 改成 workflow_mappings 配置说明：
+     - image.prompt_node
+     - image.prompt_input
+     - image.negative_node
+     - image.negative_input
+     - video.prompt_node
+     - video.prompt_input
+     - video.image_node
+     - video.image_input
+   - 把当前已经完成的仓库内能力列为 completed。
+   - 把必须本地完成的内容单独列为 Local-only。
+   - 明确说明：本地路径不能写死，必须通过 Settings UI 或 projects/{project_id}/settings.json 设置。
+
+2. 更新 docs/DEVELOPMENT_LOG.md：
+   - 追加最新开发状态。
+   - 明确当前音频方案是 IndexTTS。
+   - 明确 ComfyUI workflow JSON 支持在线上传和分类管理。
+   - 明确 FFmpeg 已经有 final assembly executor，但 ffmpeg_path 由本地配置。
+
+第二阶段：Dashboard 增加分阶段操作按钮
+
+当前 Dashboard 只有“下一步 / 一键运行 / 刷新”。请增加更细的生产按钮：
+
+- 只生成剧本
+- 只生成资产
+- 只生成分镜
+- 只生成图片
+- 只生成宫格
+- 只生成音频
+- 只生成视频
+- 只合成成片
+
+后端需要增加对应 API，建议：
+
+POST /api/projects/{project_id}/actions/generate-script
+POST /api/projects/{project_id}/actions/generate-assets
+POST /api/projects/{project_id}/actions/generate-storyboard
+POST /api/projects/{project_id}/actions/enqueue-images
+POST /api/projects/{project_id}/actions/enqueue-grids
+POST /api/projects/{project_id}/actions/enqueue-audio
+POST /api/projects/{project_id}/actions/enqueue-video
+POST /api/projects/{project_id}/actions/enqueue-final
+
+要求：
+- 不要破坏现有 run / step。
+- 每个 action 执行后刷新 canvas。
+- 如果前置节点不存在，返回清晰错误，比如“source_text not found”。
+- UI 点击后自动刷新。
+
+第三阶段：Storyboard 页面增强
+
+在 Storyboard 页面增加：
+
+1. 搜索框：
+   - 按 cap / id / scene / character 搜索。
+
+2. 状态过滤：
+   - all
+   - waiting_image
+   - pending_image
+   - done
+   - needs_review
+   - failed
+   - locked
+
+3. 批量操作：
+   - 批量审核当前筛选结果
+   - 批量修复当前筛选结果
+   - 批量重跑当前筛选结果
+
+后端增加批量 API，建议：
+
+POST /api/projects/{project_id}/nodes/batch-review
+POST /api/projects/{project_id}/nodes/batch-repair
+POST /api/projects/{project_id}/nodes/batch-rerun
+
+Body:
+{
+  "node_ids": ["shot_001", "shot_002"]
+}
+
+要求：
+- 只处理存在的 node。
+- 返回成功数量、失败数量、失败原因。
+- UI 显示结果。
+
+第四阶段：Assets 页面增强
+
+当前 Assets 页面只是卡片。请增强为：
+
+1. tab：
+   - Characters
+   - Scenes
+   - Props
+
+2. 每个资产卡片显示：
+   - name
+   - type
+   - status
+   - visual_lock
+   - negative_prompt
+   - locked
+
+3. 右侧 Node Detail 已经可以编辑 JSON，但 Assets 页面需要增加简单表单编辑：
+   - visual_lock
+   - negative_prompt
+   - locked
+
+4. 增加“锁定全部资产”按钮。
+
+第五阶段：Settings 页面增强
+
+在 Settings 页面增加检测按钮：
+
+1. ComfyUI ping
+   - 调用后端接口，后端使用 backend/executors/comfyui_client.py 的 ping(project_id)。
+   - UI 显示成功/失败结果。
+
+2. FFmpeg check
+   - 后端读取 settings.ffmpeg_path，执行 ffmpeg -version。
+   - 返回 stdout 第一行或错误。
+
+3. IndexTTS command check
+   - 不要真正生成长音频。
+   - 后端检查 settings.indextts_command 是否存在。
+   - 用一段极短文本生成 dry-run 参数预览。
+   - 如果可以安全执行，则只在用户本地执行一次短测试；如果不执行，也要返回“configured / not configured”。
+
+4. Workflow JSON 格式校验
+   - 上传前先在前端 JSON.parse。
+   - 后端 save_workflow 也要返回更清晰错误。
+   - UI 显示“JSON valid / invalid”。
+
+第六阶段：Preview 页面增强
+
+当前 Preview 只是显示输出目录。请增强：
+
+1. 读取：
+   projects/{project_id}/final/final_manifest.json
+
+2. 显示：
+   - status
+   - output
+   - ffmpeg_path
+   - video_clips
+   - missing
+   - command
+   - stderr/stdout
+
+3. 如果 final/final.mp4 存在，尽量显示 video 标签。
+   - 注意浏览器无法直接访问本地文件路径时，可以先显示路径和说明。
+   - 不要强制要求视频可播放，能显示 manifest 即可。
+
+后端可增加：
+GET /api/projects/{project_id}/final-manifest
+
+第七阶段：测试补全
+
+当前已有基础测试。请继续新增：
+
+tests/test_settings_store.py
+tests/test_task_runner.py
+tests/test_audio_executor.py
+tests/test_final_assembler.py
+tests/test_project_actions.py
+
+要求：
+1. 测试不依赖真实 ComfyUI。
+2. 测试不依赖真实 IndexTTS。
+3. 测试不依赖真实 FFmpeg 成功执行。
+4. 对本地依赖项使用空配置 / fake command / no-video case。
+5. pytest 能跑通。
+
+重点测试：
+- settings deep merge 包含 workflow_mappings 和 indextts_command。
+- project_actions.import_source_text 会清空旧 generated nodes。
+- audio_executor 在 indextts_command 为空时返回 needs_review。
+- final assembler 在没有 video clips 时返回 needs_review。
+- task_runner 失败时写 traceback 和 duration。
+- workflow_store 能保存/读取 JSON。
+
+第八阶段：README 更新
+
+完成后更新 README.md：
+
+1. 明确当前音频使用 IndexTTS。
+2. 明确 ComfyUI / IndexTTS / FFmpeg 都是本地配置项。
+3. 明确运行方式：
+   pip install -r requirements.txt
+   python run.py init --project demo_project
+   python run.py serve --host 127.0.0.1 --port 7860
+   cd frontend && npm install && npm run dev
+
+4. 明确测试方式：
+   pytest
+
+5. 明确 UI 中可以完成：
+   - 导入小说
+   - 一键运行
+   - 分阶段运行
+   - 上传 workflow JSON
+   - 配置 workflow mapping
+   - 配置 IndexTTS command
+   - 查看任务日志
+   - 查看 final manifest
+
+第九阶段：不要做的事
+
+不要恢复旧 00-10。
+不要创建 legacy。
+不要写死 ComfyUI workflow node id。
+不要写死 IndexTTS 模型路径。
+不要写死 FFmpeg 路径。
+不要假装已经跑通本地真实生成。
+如果某项依赖本地配置，状态必须是 needs_review 或在文档中标注 Local-only。
+
+最终验收标准：
+
+1. 仓库中不存在旧 00-10。
+2. npm run dev 能启动前端。
+3. python run.py serve 能启动后端。
+4. UI 能导入小说正文。
+5. UI 能分阶段触发生成。
+6. UI 能配置 ComfyUI workflow mapping。
+7. UI 能配置 IndexTTS command。
+8. UI 能查看任务日志。
+9. UI 能查看 final manifest。
+10. pytest 通过。
+11. docs/AGENT_CANVAS_COMPLETION_CHECKLIST.md 和 docs/CODEX_REMAINING_WORK_PLAN.md 不再互相矛盾。
