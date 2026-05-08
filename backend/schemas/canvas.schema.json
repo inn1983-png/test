@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Canvas",
+  "type": "object",
+  "required": ["project_id", "status", "current_stage", "nodes"],
+  "properties": {
+    "project_id": { "type": "string" },
+    "chapter_id": { "type": "string" },
+    "style_id": { "type": "string" },
+    "grid_mode": { "type": "string" },
+    "status": { "type": "string" },
+    "current_stage": { "type": "string" },
+    "nodes": { "type": "array" },
+    "edges": { "type": "array" },
+    "updated_at": { "type": "string" }
+  },
+  "additionalProperties": true
+}
