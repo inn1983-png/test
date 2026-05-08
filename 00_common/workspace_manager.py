@@ -239,7 +239,18 @@ def bootstrap_shared_asset_files(context: RuntimeContext) -> None:
                 io_utils.write_json(path, value)
         style_bible = global_memory / "style_bible.md"
         if not style_bible.exists():
-            style_bible.write_text("# Style Bible\n\n", encoding="utf-8")
+            style_bible.write_text(
+                "# Style Bible Pointer\n\n"
+                "当前项目风格圣经由每章运行目录下的 `00_style_system/` 生成。\n\n"
+                "请以以下文件为准：\n\n"
+                "- `00_style_system/style_bible.json`\n"
+                "- `00_style_system/style_bible.md`\n"
+                "- `00_style_system/style_prompt_prefix.txt`\n"
+                "- `00_style_system/image_style_lock.txt`\n"
+                "- `00_style_system/video_style_lock.txt`\n\n"
+                "本文件只是全书记忆目录里的指针，不参与运行时风格注入。\n",
+                encoding="utf-8",
+            )
 
 
 def dump_context_for_log(context: RuntimeContext) -> str:
