@@ -16,6 +16,7 @@ from importlib import import_module
 io_utils = import_module("00_common.io_utils")
 module_contracts = import_module("00_common.module_contracts")
 module_runner = import_module("00_common.module_runner")
+repair_index = import_module("00_common.repair_index")
 resource_manager = import_module("00_common.resource_manager")
 run_status = import_module("00_common.run_status")
 workspace_manager = import_module("00_common.workspace_manager")
@@ -283,6 +284,10 @@ def main() -> int:
         if code != 0:
             print(f"Pipeline stopped at: {module_name}")
             return code
+        try:
+            repair_index.write_repair_index(context.run_dir)
+        except Exception:
+            pass
         previous_module = module_name
 
     print("Pipeline finished.")

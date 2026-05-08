@@ -252,6 +252,30 @@ def _run_status_issues(run_dir: Path, data: Any, path: Path) -> list[dict[str, A
     return issues
 
 
+def _module_succeeded(run_dir: Path, module_name: str | None) -> bool:
+    if not module_name:
+        return False
+    status_path = run_dir / module_name / "current_stage_status.json"
+    if status_path.exists():
+        try:
+            data = io_utils.read_json(status_path, default={})
+            if data.get("status") == "success":
+                return True
+        except Exception:
+            pass
+    run_status_path = run_dir / "run_status.json"
+    if run_status_path.exists():
+        try:
+            data = io_utils.read_json(run_status_path, default={})
+            modules = data.get("modules", {})
+            mod_data = modules.get(module_name, {})
+            if isinstance(mod_data, dict) and mod_data.get("status") == "success":
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _json_file_issues(run_dir: Path, path: Path, data: Any) -> list[dict[str, Any]]:
     module_name = _module_from_path(run_dir, path)
     stage = _stage_from_data(path, data)
@@ -261,21 +285,26 @@ def _json_file_issues(run_dir: Path, path: Path, data: Any) -> list[dict[str, An
         if isinstance(quality, dict):
             score = quality.get("score")
     issues: list[dict[str, Any]] = []
+    module_ok = _module_succeeded(run_dir, module_name)
     for field, value, field_path in _walk_problem_fields(data):
         issue_type = _classify_issue_type(field, value, module_name)
         suggested_action = _suggest_action(issue_type, module_name)
+        if module_ok and field in {"needs_retry", "retry_stages", "retry_plan"}:
+            issue_type = "quality_suggestion"
+            suggested_action = "optional_rerun"
+        status = "suggestion" if issue_type == "quality_suggestion" else ("needs_review" if field in {"needs_review", "schema_validation_issues"} else "failed")
         issues.append(
             {
                 "module": module_name,
                 "stage_id": stage,
-                "status": "needs_review" if field in {"needs_review", "schema_validation_issues"} else "failed",
+                "status": status,
                 "score": score,
                 "issue_type": issue_type,
                 "issue_message": f"{field}: {_summarize_value(value)}",
                 "suggested_action": suggested_action,
-                "recommended_from_module": _recommended_from(module_name, issue_type),
-                "recommended_only_module": _recommended_only(module_name, issue_type),
-                "can_run_current_module": _can_run_current(module_name, issue_type),
+                "recommended_from_module": _recommended_from(module_name, issue_type) if issue_type != "quality_suggestion" else None,
+                "recommended_only_module": _recommended_only(module_name, issue_type) if issue_type != "quality_suggestion" else module_name,
+                "can_run_current_module": True if issue_type == "quality_suggestion" else _can_run_current(module_name, issue_type),
                 "file": _rel(run_dir, path),
                 "field": field,
                 "json_path": ".".join(field_path),

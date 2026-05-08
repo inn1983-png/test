@@ -468,7 +468,8 @@ def run_llm_stages(novel_text: str, output_dir: str | Path, max_retries: int = D
         start_index = min(STAGE_INDEX[stage_id] for stage_id in retry_stage_ids)
         quality_report = outputs.get("01F", {}).get("quality_report", {})
         final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_report, "instruction": "01F 总检要求重跑。请按 quality_report.revision_instructions 修正本阶段，并保持 JSON 字段完整。"}
-        rerun_status = _run_stage_range(client, novel_text, outputs, output_dir, start_index, max_retries, final_revision_context, force=force, force_stages=force_stages)
+        revision_force_stages = list(set((force_stages or []) + retry_stage_ids))
+        rerun_status = _run_stage_range(client, novel_text, outputs, output_dir, start_index, max_retries, final_revision_context, force=force, force_stages=revision_force_stages)
         final_revision_rounds.append({"round": round_index, "retry_stage_ids": retry_stage_ids, "rerun_status": rerun_status})
         stage_status.extend(rerun_status)
 

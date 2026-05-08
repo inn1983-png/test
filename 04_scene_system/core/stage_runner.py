@@ -191,7 +191,8 @@ def run_llm_stages(novel_analysis: dict[str, Any], script: dict[str, Any], outpu
         review_context = outputs.get("04E", {}).get("review_report", {})
         quality_context = outputs.get("04D", {}).get("quality_report", {})
         final_revision_context = {"round": round_index, "retry_stage_ids": retry_stage_ids, "quality_report": quality_context, "review_report": review_context, "instruction": "04D/04E 要求重跑。请从最早问题阶段修正，并保持字段完整。"}
-        rerun_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, start_index, max_retries, final_revision_context, force=force, force_stages=force_stages)
+        revision_force_stages = list(set((force_stages or []) + retry_stage_ids))
+        rerun_status = _run_stage_range(client, novel_analysis, script, outputs, output_dir, start_index, max_retries, final_revision_context, force=force, force_stages=revision_force_stages)
         final_revision_rounds.append({"round": round_index, "retry_stage_ids": retry_stage_ids, "rerun_status": rerun_status})
         stage_status.extend(rerun_status)
     return {"schema_version": SCHEMA_VERSION, "stage_mode": "llm", "stage_status": stage_status, "final_revision_rounds": final_revision_rounds, "outputs": outputs}

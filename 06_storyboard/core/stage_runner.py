@@ -333,7 +333,8 @@ def run_llm_stages(
             "frame_transition_report": outputs.get("06D", {}).get("frame_transition_report", {}),
             "instruction": "06D/06E 要求重跑。请从最早问题阶段修正，并保持字段完整。不得新增资产或输出图像提示词。",
         }
-        rerun_status = _run_stage_range(client, script, characters, scenes, props, outputs, output_dir, start_index, max_retries, final_revision_context, force=force, force_stages=force_stages)
+        revision_force_stages = list(set((force_stages or []) + retry_stage_ids))
+        rerun_status = _run_stage_range(client, script, characters, scenes, props, outputs, output_dir, start_index, max_retries, final_revision_context, force=force, force_stages=revision_force_stages)
         final_revision_rounds.append({"round": round_index, "retry_stage_ids": retry_stage_ids, "rerun_status": rerun_status})
         stage_status.extend(rerun_status)
     return {"schema_version": SCHEMA_VERSION, "stage_mode": "llm", "stage_status": stage_status, "final_revision_rounds": final_revision_rounds, "outputs": outputs}

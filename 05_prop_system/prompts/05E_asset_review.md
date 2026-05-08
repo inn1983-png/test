@@ -54,6 +54,7 @@ retry_stages 只能是：05A、05B、05C、05D。
     "merge_error_check": [],
     "level_error_check": [],
     "reference_image_strategy_check": [],
+    "wearable_policy_check": [],
     "source_understanding_check": []
   },
   "downstream_readiness_for_06": {

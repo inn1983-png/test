@@ -1148,3 +1148,89 @@ tests/fixtures/minimal_novel.txt
 08 必须参考 TxtovideoAudio 的音频驱动思路：IndexTTS2 作为唯一 TTS，N/D/M/S 标记，旁白固定 narrator 音色，角色对白绑定角色音色，心理 OS 中等情绪，静音留白生成静音段，从真实音频时长开始服务 09 视频单元规划。
 Web UI 不是测试用 UI，而是最终版 UI 设计：要让用户在界面里看到每一步发生了什么，阶段输出、评分、修改意见、返工、产物都要有对应显示区域。当前 web_ui 已按最终工作台骨架落地，后续 07/08/09/10 必须继续接入同一工作台。Web UI 默认端口使用 1144。
 ```
+
+---
+
+# 第十一阶段：02-06 端到端测试问题修复
+
+## 测试概况
+
+对 02-06 模块执行了端到端真实 LLM 测试（DeepSeek V4 Flash），发现并修复以下问题：
+
+## 修复 1：06E retry_stages 跨模块引用
+
+问题：06E quality_check 的 retry_stages 中出现了 "05B" 等跨模块阶段引用，导致 quality_checker 扣分且系统无法自动执行跨模块重试。
+
+修复：在 06E prompt 模板中增加严格约束，明确 retry_stages 只能填 06A-06D，跨模块问题必须写入 upstream_blocking_issues，两者互斥。
+
+修改文件：
+
+```text
+06_storyboard/prompts/06E_quality_check.md
+```
+
+## 修复 2：05E 缺少 wearable_policy_check 字段
+
+问题：05E asset_review 的 prompt 模板中 review_report JSON 结构缺少 wearable_policy_check 字段，但 quality_checker.py 将其作为必需字段校验，导致 LLM 输出遗漏该字段被扣 5 分。
+
+修复：在 05E prompt 模板的 review_report JSON 结构中补充 wearable_policy_check 字段。
+
+修改文件：
+
+```text
+05_prop_system/prompts/05E_asset_review.md
+```
+
+## 修复 3：最终修订轮次 force_stages 不生效
+
+问题：01-06 各模块的 stage_runner.py 中，最终修订轮次（final revision rounds）调用 `_run_stage_range` 时传入的 `force_stages` 来自命令行参数，而非 `retry_stage_ids`。当 quality_check 标记 `needs_retry=true` 并指定 `retry_stages=["05A"]` 时，修订轮次仍使用缓存结果跳过这些阶段，导致重试不生效。
+
+修复：在最终修订轮次中，将 `retry_stage_ids` 合并到 `force_stages` 中，确保需要重跑的阶段不被缓存跳过。
+
+```python
+revision_force_stages = list(set((force_stages or []) + retry_stage_ids))
+rerun_status = _run_stage_range(..., force_stages=revision_force_stages)
+```
+
+修改文件：
+
+```text
+01_novel_parser/core/stage_runner.py
+02_script_writer/core/stage_runner.py
+03_character_system/core/stage_runner.py
+04_scene_system/core/stage_runner.py
+05_prop_system/core/stage_runner.py
+06_storyboard/core/stage_runner.py
+```
+
+## 修复 4：repair_index.json 过时
+
+问题：run_pipeline.py 在每个模块运行完成后不刷新 repair_index.json，导致返工中心显示的信息过时。repair_index.json 仅在 Web UI 被请求时按需生成。
+
+修复：在 run_pipeline.py 的模块运行循环中，每个模块成功完成后自动调用 `repair_index.write_repair_index()`。
+
+修改文件：
+
+```text
+00_main_controller/run_pipeline.py
+```
+
+## 测试结果
+
+05 道具库重跑后改善：
+
+```text
+车灯资产：已补充（prop_008 香樟树条目中引用了车灯照亮场景）
+香水分类：已修正（不再标记为 normal_prop）
+wearable_policy_check 字段：已出现 ✅
+05E 评分：从 70 提升到 98 ✅
+downstream_readiness：从 "blocked" 变为 "ready" ✅
+```
+
+## 已知遗留问题
+
+```text
+01 段落拆分过粗：全文只拆为一个段落 p001，未按场景转换细分。影响有限，下游模块已自行处理。
+05 车灯未作为独立 prop_group：LLM 将车灯归入香樟树条目而非独立 prop_group，06A 仍可能报资产缺失。
+06E retry_stages 跨模块引用：prompt 已修复，需验证 LLM 是否遵守新约束。
+```

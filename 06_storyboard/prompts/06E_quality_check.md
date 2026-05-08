@@ -52,3 +52,8 @@
   "upstream_blocking_issues": [],
   "warnings": []
 }
+
+严格约束：
+- retry_stages 只能填 06A、06B、06C、06D，禁止填入其他模块的阶段（如 05A/05B/03A 等）。
+- 如果问题根因在上游模块（03/04/05 缺资产），必须写入 upstream_blocking_issues，不能写入 retry_stages。
+- retry_stages 和 upstream_blocking_issues 互斥：同一问题只能出现在其中一个。
