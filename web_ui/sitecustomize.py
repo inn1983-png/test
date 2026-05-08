@@ -11,6 +11,7 @@ Adds:
 - POST /api/review/apply    -> apply reviewed JSON over official module output
 - build_command support for payload.to_module -> --to-module
 - build_command support for payload.style_preset -> AI_DRAMA_STYLE_PRESET
+- generous default timeout env for image/video long-running ComfyUI jobs
 """
 
 import json
@@ -52,6 +53,11 @@ def _send_json(handler: http.server.SimpleHTTPRequestHandler, data: dict[str, An
     handler.wfile.write(body)
 
 
+def _set_default_env(env: dict[str, str], key: str, value: str) -> None:
+    if not str(env.get(key) or "").strip():
+        env[key] = value
+
+
 def _patch_build_command(globals_dict: dict[str, Any]) -> None:
     original = globals_dict.get("build_command")
     if not callable(original) or getattr(original, "__ui_patch_applied__", False):
@@ -67,6 +73,14 @@ def _patch_build_command(globals_dict: dict[str, Any]) -> None:
         if style_preset:
             env["AI_DRAMA_STYLE_PRESET"] = style_preset
             env["AI_DRAMA_SELECTED_STYLE_PRESET"] = style_preset
+
+        # Long-running generation defaults. These only fill blanks, so local env
+        # or explicit server settings still win.
+        _set_default_env(env, "AI_DRAMA_LLM_TIMEOUT_SEC", "6000")
+        _set_default_env(env, "AI_DRAMA_IMAGE_COMFYUI_TIMEOUT_SEC", "7200")
+        _set_default_env(env, "AI_DRAMA_VIDEO_COMFYUI_TIMEOUT_SEC", "14400")
+        _set_default_env(env, "AI_DRAMA_COMFYUI_POLL_INTERVAL_SEC", "5")
+        _set_default_env(env, "AI_DRAMA_VIDEO_DRY_RUN_PLACEHOLDER_BYTES", "2048")
 
         return cmd, env, kind
 
