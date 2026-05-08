@@ -22,8 +22,10 @@ class ComfyUIClient:
     def __init__(self) -> None:
         self.base_url = os.getenv("AI_DRAMA_COMFYUI_BASE_URL", "http://127.0.0.1:8188").rstrip("/")
         self.workflow_path = os.getenv("AI_DRAMA_VIDEO_COMFYUI_WORKFLOW", os.getenv("AI_DRAMA_COMFYUI_WORKFLOW", "")).strip()
-        self.timeout_sec = int(os.getenv("AI_DRAMA_VIDEO_COMFYUI_TIMEOUT_SEC", os.getenv("AI_DRAMA_COMFYUI_TIMEOUT_SEC", "3600")))
-        self.poll_interval_sec = float(os.getenv("AI_DRAMA_COMFYUI_POLL_INTERVAL_SEC", "2"))
+        # LTX/video segments are the longest queue items in the pipeline. The
+        # default is intentionally large; override with env when needed.
+        self.timeout_sec = int(os.getenv("AI_DRAMA_VIDEO_COMFYUI_TIMEOUT_SEC", os.getenv("AI_DRAMA_COMFYUI_TIMEOUT_SEC", "14400")))
+        self.poll_interval_sec = float(os.getenv("AI_DRAMA_COMFYUI_POLL_INTERVAL_SEC", "5"))
         self.client_id = os.getenv("AI_DRAMA_COMFYUI_CLIENT_ID", "ai_drama_09_video_ltx23")
         self.mode = os.getenv("AI_DRAMA_VIDEO_EXECUTION_MODE", "dry_run").strip().lower()
         self.ffmpeg = os.getenv("AI_DRAMA_FFMPEG", "ffmpeg")
@@ -256,6 +258,7 @@ class ComfyUIClient:
                 "prompt_id": None,
                 "segment_id": segment.get("segment_id"),
                 "output_clip_path": str(output_path),
+                "timeout_sec": self.timeout_sec,
                 "note": "Existing clip found; skipped by breakpoint resume.",
             }
         if self.dry_run:
@@ -267,6 +270,7 @@ class ComfyUIClient:
                 "prompt_id": None,
                 "segment_id": segment.get("segment_id"),
                 "output_clip_path": clip,
+                "timeout_sec": self.timeout_sec,
                 "note": "Dry run clip generated for one keyframe window. Set AI_DRAMA_VIDEO_EXECUTION_MODE=execute and workflow node mappings to run LTX2.3 ComfyUI.",
             }
         workflow = self.build_workflow(segment)
@@ -283,7 +287,7 @@ class ComfyUIClient:
                 break
             time.sleep(self.poll_interval_sec)
         if str(prompt_id) not in history:
-            raise TimeoutError(f"ComfyUI prompt timeout: {prompt_id}")
+            raise TimeoutError(f"ComfyUI prompt timeout after {self.timeout_sec}s: {prompt_id}")
         history_item = history.get(str(prompt_id), {})
         history_outputs = self._extract_history_outputs(history_item if isinstance(history_item, dict) else {})
         resolved_from: str | None = None
@@ -304,6 +308,7 @@ class ComfyUIClient:
                 "output_clip_path": str(output_path),
                 "history": history_item,
                 "history_outputs": history_outputs,
+                "timeout_sec": self.timeout_sec,
                 "error": "ComfyUI finished but clip not found",
                 "debug": {
                     "expected_output_clip_path": str(output_path),
@@ -322,5 +327,6 @@ class ComfyUIClient:
             "history": history_item,
             "history_outputs": history_outputs,
             "resolved_from": resolved_from,
+            "timeout_sec": self.timeout_sec,
             "note": "ComfyUI finished one keyframe-window segment.",
         }
