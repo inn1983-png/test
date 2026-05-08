@@ -41,15 +41,18 @@ def save_workflow(project_id, category, name, content):
         data = json.dumps(content, ensure_ascii=False, indent=2)
     else:
         text = str(content)
+        json_error = None
         try:
             parsed = json.loads(text)
             data = json.dumps(parsed, ensure_ascii=False, indent=2)
-        except Exception:
+        except Exception as exc:
+            json_error = exc
             try:
                 parsed = json.loads(base64.b64decode(text).decode("utf-8"))
                 data = json.dumps(parsed, ensure_ascii=False, indent=2)
-            except Exception as exc:
-                raise ValueError("workflow content must be JSON or base64 JSON") from exc
+            except Exception as base64_exc:
+                detail = str(json_error or base64_exc)
+                raise ValueError("workflow content must be valid JSON or base64 JSON: " + detail) from base64_exc
     path = workflow_path(project_id, category, name)
     path.write_text(data, encoding="utf-8")
     return {"category": category, "name": path.name, "path": "workflows/" + category + "/" + path.name}

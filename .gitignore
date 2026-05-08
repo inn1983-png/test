@@ -4,6 +4,8 @@ __pycache__/
 .venv/
 node_modules/
 dist/
+index-tts/
+projects/
 projects/*/images/
 projects/*/grids/
 projects/*/audio/

@@ -8,9 +8,11 @@ from backend.agents.director_agent import init_project, next_step, run_until_idl
 from backend.agents.reviewer_agent import review_node
 from backend.agents.repair_agent import repair_node
 from backend.app.canvas_store import load_canvas, refresh_canvas
+from backend.app.checks import run_check
+from backend.app.final_manifest import final_video_path, load_final_manifest
 from backend.app.node_store import list_nodes, load_node, update_node
 from backend.app.project_store import list_projects, load_project, save_project
-from backend.app.project_actions import import_source_text
+from backend.app.project_actions import batch_node_action, import_source_text, lock_all_assets, run_project_action
 from backend.app.settings_store import load_settings, save_settings
 from backend.app.task_store import list_tasks, enqueue_node_task
 from backend.app.workflow_store import list_workflows, save_workflow
@@ -25,6 +27,7 @@ def runtime_snapshot(project_id: str) -> dict:
         "nodes": list_nodes(project_id),
         "tasks": list_tasks(project_id),
         "workflows": list_workflows(project_id),
+        "final_manifest": load_final_manifest(project_id),
     }
 
 
@@ -55,6 +58,18 @@ class Handler(BaseHTTPRequestHandler):
         text = self.rfile.read(length).decode("utf-8") if length else "{}"
         return json.loads(text or "{}")
 
+    def _binary(self, path, content_type):
+        if not path.exists():
+            self._json({"error": "not found"}, 404)
+            return
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_OPTIONS(self):
         self._json({"ok": True})
 
@@ -72,6 +87,8 @@ class Handler(BaseHTTPRequestHandler):
                 if area == "canvas": self._json(load_canvas(project_id)); return
                 if area == "settings": self._json(load_settings(project_id)); return
                 if area == "workflows": self._json({"workflows": list_workflows(project_id)}); return
+                if area == "final-manifest": self._json(load_final_manifest(project_id)); return
+                if area == "final-video": self._binary(final_video_path(project_id), "video/mp4"); return
                 if area == "nodes":
                     if len(parts) == 4: self._json({"nodes": list_nodes(project_id)}); return
                     self._json(load_node(project_id, parts[4])); return
@@ -93,6 +110,10 @@ class Handler(BaseHTTPRequestHandler):
                 if action == "step": next_step(project_id); run_pending(project_id); self._json(runtime_snapshot(project_id)); return
                 if action == "run": self._json(run_until_idle(project_id)); return
                 if action == "refresh": self._json(refresh_canvas(project_id)); return
+                if action == "actions" and len(parts) >= 5:
+                    self._json(run_project_action(project_id, parts[4])); return
+                if action == "checks" and len(parts) >= 5:
+                    self._json(run_check(project_id, parts[4], self._body())); return
                 if action == "tasks" and len(parts) >= 6:
                     task_id = parts[4]
                     task_action = parts[5]
@@ -100,6 +121,13 @@ class Handler(BaseHTTPRequestHandler):
                     if task_action == "retry": self._json(retry_task(project_id, task_id)); return
                     if task_action == "cancel": self._json(cancel_task(project_id, task_id)); return
                     if task_action == "log": self._json({"log": read_log(project_id, task_id)}); return
+                if action == "nodes" and len(parts) == 5:
+                    node_action = parts[4]
+                    if node_action in ["batch-review", "batch-repair", "batch-rerun"]:
+                        data = self._body()
+                        self._json(batch_node_action(project_id, node_action, data.get("node_ids", []))); return
+                    if node_action == "lock-assets":
+                        self._json(lock_all_assets(project_id)); return
                 if action == "nodes" and len(parts) >= 6:
                     node_id = parts[4]
                     node_action = parts[5]
@@ -114,8 +142,14 @@ class Handler(BaseHTTPRequestHandler):
                     if node_action == "lock": self._json(update_node(project_id, node_id, {"locked": True, "status": "locked"})); return
                 if action == "workflows":
                     data = self._body()
-                    self._json(save_workflow(project_id, data["category"], data["name"], data["content"])); return
+                    try:
+                        self._json(save_workflow(project_id, data["category"], data["name"], data["content"]))
+                    except ValueError as exc:
+                        self._json({"error": str(exc)}, 400)
+                    return
             self._json({"error": "not found"}, 404)
+        except ValueError as exc:
+            self._json({"error": str(exc)}, 400)
         except Exception as exc:
             self._json({"error": str(exc)}, 500)
 

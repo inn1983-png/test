@@ -18,18 +18,22 @@ Task log viewer in UI
 Basic pytest tests
 ```
 
-## 仍然需要 Codex 可继续优化的仓库任务
+## 已完成的增强项
 
-这些不是本地路径问题，但属于增强项：
+以下增强项已经在仓库内完成，不依赖真实本地生成环境：
 
 ```text
-1. 给 Dashboard 增加更细的单阶段按钮：只生成剧本 / 只生成资产 / 只生成分镜 / 只生成图片 / 只生成视频 / 只合成。
-2. Storyboard 增加搜索、状态过滤、批量审核、批量修复、批量重跑。
-3. Assets 增加角色 / 场景 / 道具 tab 和更友好的编辑表单。
-4. Settings 增加 ComfyUI ping、FFmpeg check、IndexTTS command check、workflow JSON schema validation。
-5. Preview 增加本地视频播放器路径展示和 final_manifest 读取。
-6. 增加更完整的 tests：settings、task runner、audio executor dry-run、final assembler no-video case。
+1. Dashboard 单阶段按钮：只生成剧本 / 只生成资产 / 只生成分镜 / 只生成图片 / 只生成宫格 / 只生成音频 / 只生成视频 / 只合成。
+2. Storyboard 搜索、状态过滤、批量审核、批量修复、批量重跑。
+3. Assets 角色 / 场景 / 道具 tab 和 visual_lock / negative_prompt / locked 表单编辑。
+4. Settings ComfyUI ping、FFmpeg check、IndexTTS command check、workflow JSON validation。
+5. Preview final_manifest 读取、成片路径展示和可用时 video 标签预览。
+6. tests 覆盖 settings、task runner、audio executor、final assembler、project actions、workflow store。
 ```
+
+## 仍然需要 Codex 可继续优化的仓库任务
+
+当前仓库内任务已经完成。后续增强应围绕真实项目体验继续迭代，但不能写死本地路径或真实 workflow node id。
 
 ## 必须本地完成
 
@@ -83,5 +87,6 @@ IndexTTS 命令支持占位符：
 6. IndexTTS command 配置后能生成 wav。
 7. FFmpeg 配置后能合成 final.mp4。
 8. Task 页面能查看错误日志。
-9. pytest 基础测试通过。
+9. Preview 页面能查看 final_manifest。
+10. pytest 基础测试通过。
 ```

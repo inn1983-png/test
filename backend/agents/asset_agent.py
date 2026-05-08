@@ -53,6 +53,7 @@ def generate_assets(project_id):
             "visual_lock": "single consistent Chinese period drama character, no age split, no identity drift",
             "costume_lock": "ancient Chinese costume, no modern accessories",
             "negative_prompt": "modern clothes, western face, glasses, watch, zipper, cartoon, 3d render",
+            "voice_id": "",
             "locked": True,
         })
 

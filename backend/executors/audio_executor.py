@@ -4,6 +4,7 @@ from pathlib import Path
 from backend.app.node_store import load_node, update_node
 from backend.app.project_store import ensure_project_dirs
 from backend.app.settings_store import load_settings
+from backend.app.indextts_voice_store import indextts_root, resolve_voice_file
 
 
 def _audio_text(node):
@@ -16,13 +17,15 @@ def _audio_text(node):
     return node.get("content") or node.get("cap") or ""
 
 
-def _format_command(template, project_dir, text_file, output_file, text, voice_id):
+def _format_command(template, project_dir, text_file, output_file, text, voice_id, voice_file, root):
     return template.format(
         project_dir=str(project_dir),
         text_file=str(text_file),
         output_file=str(output_file),
         text=text.replace('"', '\\"'),
         voice_id=voice_id,
+        voice_file=str(voice_file),
+        indextts_root=str(root),
     )
 
 
@@ -31,7 +34,9 @@ def run(project_id, node_id):
     node = load_node(project_id, node_id)
     settings = load_settings(project_id)
     command_template = settings.get("indextts_command", "")
-    voice_id = node.get("voice_id") or settings.get("default_voice_id", "default")
+    voice_id = node.get("voice_id") or settings.get("narrator_voice_id") or settings.get("default_voice_id", "voice_06")
+    voice = resolve_voice_file(project_id, voice_id)
+    root = indextts_root(project_id)
     text = _audio_text(node)
 
     audio_dir = project_dir / "audio"
@@ -49,10 +54,12 @@ def run(project_id, node_id):
             "audio_path": "audio/" + output_file.name,
             "subtitle_path": "audio/" + subtitle_file.name,
             "indextts_command_configured": False,
-            "executor_note": "Set indextts_command in Settings. Supported placeholders: {text}, {text_file}, {output_file}, {voice_id}, {project_dir}",
+            "voice_file": voice["voice_file"],
+            "voice_file_exists": voice["voice_file_exists"],
+            "executor_note": "Set indextts_command in Settings. Supported placeholders: {text}, {text_file}, {output_file}, {voice_id}, {voice_file}, {project_dir}, {indextts_root}",
         })
 
-    command = _format_command(command_template, project_dir, text_file, output_file, text, voice_id)
+    command = _format_command(command_template, project_dir, text_file, output_file, text, voice_id, voice["voice_file"], root)
     try:
         completed = subprocess.run(command, shell=True, check=False, capture_output=True, text=True)
     except Exception as exc:
@@ -80,5 +87,6 @@ def run(project_id, node_id):
         "audio_path": "audio/" + output_file.name,
         "subtitle_path": "audio/" + subtitle_file.name,
         "voice_id": voice_id,
+        "voice_file": voice["voice_file"],
         "indextts_command_configured": True,
     })
