@@ -21,6 +21,14 @@ NODE_STATUS = {
     "failed",
     "locked",
     "needs_review",
+    "pending_image",
+    "pending_grid",
+    "pending_audio",
+    "pending_video",
+    "waiting_image",
+    "waiting_grid",
+    "waiting_audio",
+    "waiting_video",
 }
 
 TASK_STATUS = {
