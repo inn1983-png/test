@@ -21,9 +21,31 @@ SCHEMA_VERSION = "1.0"
 
 
 def _load_presets() -> dict[str, Any]:
-    path = ROOT_DIR / MODULE_NAME / "presets" / "style_presets.json"
-    data = io_utils.read_json(path, default={})
-    return data if isinstance(data, dict) else {}
+    """Load and merge all JSON files under 00_style_system/presets.
+
+    This keeps the base presets readable and allows future style packs to be
+    added as independent JSON files without editing the core runner.
+    """
+    presets_dir = ROOT_DIR / MODULE_NAME / "presets"
+    merged: dict[str, Any] = {
+        "schema_version": SCHEMA_VERSION,
+        "default_preset": "ancient_live_action_realistic",
+        "preset_sources": [],
+        "presets": {},
+    }
+
+    for path in sorted(presets_dir.glob("*.json")):
+        data = io_utils.read_json(path, default={})
+        if not isinstance(data, dict):
+            continue
+        if data.get("default_preset") and not merged.get("default_preset"):
+            merged["default_preset"] = data.get("default_preset")
+        presets = data.get("presets", {})
+        if isinstance(presets, dict):
+            merged["presets"].update(presets)
+            merged["preset_sources"].append(str(path.relative_to(ROOT_DIR)))
+
+    return merged
 
 
 def _select_preset(presets_data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -178,6 +200,7 @@ def main() -> int:
             "style_id": style_id,
             "display_name": bible.get("display_name"),
             "available_presets": sorted((presets_data.get("presets") or {}).keys()),
+            "preset_sources": presets_data.get("preset_sources", []),
             "env_override": "AI_DRAMA_STYLE_PRESET",
             "status": "success"
         }, "风格系统元信息。")
