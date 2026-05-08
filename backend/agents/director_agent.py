@@ -26,6 +26,13 @@ def has_pending_task(project_id, node_id, task_type):
     return False
 
 
+def task_done(project_id, node_id, task_type):
+    for task in list_tasks(project_id):
+        if task.get("node_id") == node_id and task.get("task_type") == task_type and task.get("status") == "done":
+            return True
+    return False
+
+
 def set_stage(project_id, stage, progress):
     meta = load_project(project_id)
     meta["current_stage"] = stage
@@ -71,7 +78,7 @@ def ensure_review(project_id):
     return reviewed
 
 
-def enqueue_media_tasks(project_id):
+def enqueue_image_and_grid_tasks(project_id):
     for shot in list_nodes(project_id, "shot"):
         if shot.get("status") in ["waiting", "waiting_image", "done", "needs_review"] and not shot.get("image_path") and not has_pending_task(project_id, shot["id"], "image_generate"):
             update_node(project_id, shot["id"], {"status": "pending_image"})
@@ -87,23 +94,52 @@ def enqueue_media_tasks(project_id):
     return False
 
 
+def enqueue_audio_tasks(project_id):
+    for script in list_nodes(project_id, "script_block"):
+        if not script.get("audio_path") and not has_pending_task(project_id, script["id"], "audio_generate") and not task_done(project_id, script["id"], "audio_generate"):
+            update_node(project_id, script["id"], {"status": "pending_audio"})
+            enqueue_node_task(project_id, script["id"], "audio_generate", "audio_executor")
+            set_stage(project_id, "audio", 82)
+            return True
+    return False
+
+
+def enqueue_video_tasks(project_id):
+    for grid in list_nodes(project_id, "storyboard_grid"):
+        if grid.get("grid_path") and not grid.get("video_path") and not has_pending_task(project_id, grid["id"], "video_generate") and not task_done(project_id, grid["id"], "video_generate"):
+            update_node(project_id, grid["id"], {"status": "pending_video"})
+            enqueue_node_task(project_id, grid["id"], "video_generate", "video_executor")
+            set_stage(project_id, "video", 90)
+            return True
+    return False
+
+
+def enqueue_final_task(project_id):
+    grids = list_nodes(project_id, "storyboard_grid")
+    if not grids or not all(grid.get("video_path") for grid in grids):
+        return False
+    if has_pending_task(project_id, "final", "final_assembly") or task_done(project_id, "final", "final_assembly"):
+        return False
+    enqueue_node_task(project_id, "final", "final_assembly", "final_assembler")
+    set_stage(project_id, "final", 98)
+    return True
+
+
 def next_step(project_id):
     init_project(project_id)
-    if ensure_script(project_id):
-        return refresh_canvas(project_id)
-    if ensure_assets(project_id):
-        return refresh_canvas(project_id)
-    if ensure_storyboard(project_id):
-        return refresh_canvas(project_id)
-    if ensure_review(project_id):
-        return refresh_canvas(project_id)
-    if enqueue_media_tasks(project_id):
-        return refresh_canvas(project_id)
+    if ensure_script(project_id): return refresh_canvas(project_id)
+    if ensure_assets(project_id): return refresh_canvas(project_id)
+    if ensure_storyboard(project_id): return refresh_canvas(project_id)
+    if ensure_review(project_id): return refresh_canvas(project_id)
+    if enqueue_image_and_grid_tasks(project_id): return refresh_canvas(project_id)
+    if enqueue_audio_tasks(project_id): return refresh_canvas(project_id)
+    if enqueue_video_tasks(project_id): return refresh_canvas(project_id)
+    if enqueue_final_task(project_id): return refresh_canvas(project_id)
     set_stage(project_id, "final", 100)
     return refresh_canvas(project_id)
 
 
-def run_until_idle(project_id, max_steps=80):
+def run_until_idle(project_id, max_steps=120):
     canvas = init_project(project_id)
     for _ in range(max_steps):
         next_step(project_id)
@@ -111,7 +147,7 @@ def run_until_idle(project_id, max_steps=80):
         canvas = refresh_canvas(project_id)
         pending = [task for task in list_tasks(project_id) if task.get("status") in ["pending", "running"]]
         nodes = list_nodes(project_id)
-        unfinished = [n for n in nodes if n.get("status") in ["waiting", "waiting_image", "waiting_grid", "pending_image", "pending_grid"]]
+        unfinished = [n for n in nodes if n.get("status") in ["waiting", "waiting_image", "waiting_grid", "pending_image", "pending_grid", "pending_audio", "pending_video"]]
         if not pending and not unfinished:
             break
     return canvas
