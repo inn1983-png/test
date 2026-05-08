@@ -109,6 +109,7 @@ def print_dry_run_plan(context: Any, selected_pipeline: list[str], contracts: di
     print(f"  input_dir: {context.input_dir}")
     print(f"  shared_assets_dir: {context.shared_assets_dir}")
     print(f"  global_memory_dir: {context.global_memory_dir}")
+    print(f"  style_preset: {os.getenv('AI_DRAMA_STYLE_PRESET', '')}")
     print("  modules:")
     for module_name in selected_pipeline:
         contract = module_contracts.describe_contract(module_name, contracts)
@@ -131,6 +132,10 @@ def _save_config_snapshot(context: Any, args: argparse.Namespace, selected_pipel
     snapshot = {
         "snapshot_version": "1.0",
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "style": {
+            "selected_preset": os.getenv("AI_DRAMA_STYLE_PRESET", ""),
+            "note": "Only the selected style preset id is passed into the run. Full preset lists are not sent to downstream LLM stages.",
+        },
         "llm": {
             "base_url": os.getenv("AI_DRAMA_LLM_BASE_URL", ""),
             "model": os.getenv("AI_DRAMA_LLM_MODEL", ""),
@@ -237,8 +242,10 @@ def main() -> int:
         return 1
 
     context = create_context(args)
+    os.environ["AI_DRAMA_RUN_DIR"] = str(context.run_dir)
     print("Runtime context:")
     print(workspace_manager.dump_context_for_log(context))
+    print(f"[STYLE] selected preset: {os.getenv('AI_DRAMA_STYLE_PRESET', '') or 'default'}")
 
     _save_config_snapshot(context, args, selected_pipeline, pipeline_config)
 
