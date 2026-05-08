@@ -14,7 +14,6 @@ Adds:
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -79,14 +78,16 @@ def _patch_handler(handler_cls: type) -> None:
     if getattr(handler_cls, "__review_rewrite_api_patched__", False):
         return
 
-    # server.py's class body is created after module globals such as build_command.
-    # Patch those globals here, before user requests can start.
+    original_do_post = getattr(handler_cls, "do_POST", None)
+
+    # The Handler.__init__ method is inherited from socketserver and does NOT
+    # point to server.py globals. The do_POST function is defined inside
+    # server.py, so its __globals__ is the correct namespace for build_command.
     try:
-        _patch_build_command(handler_cls.__init__.__globals__)
+        if callable(original_do_post) and hasattr(original_do_post, "__globals__"):
+            _patch_build_command(original_do_post.__globals__)
     except Exception:
         pass
-
-    original_do_post = getattr(handler_cls, "do_POST", None)
 
     def do_POST(self):  # noqa: N802
         parsed = urlparse(self.path)
