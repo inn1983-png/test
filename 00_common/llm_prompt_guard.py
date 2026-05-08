@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 from typing import Any
+from importlib import import_module
 
 LOCAL_GEMMA_JSON_GUARD = """
 # 本地/远程 LLM JSON 输出护栏
@@ -39,9 +41,51 @@ INTERNAL_OUTPUT_FIELD_NAMES = {
 }
 
 
+def _load_runtime_style_guard() -> str:
+    """Return a compact global style guard for all 01-06 LLM text phases.
+
+    The module contracts make 00_style_system a hard dependency. This function is
+    the runtime bridge: every LLMClient calls apply_json_guard(), so injecting the
+    style here makes all staged text LLM modules inherit the same style bible
+    without editing every stage_runner payload.
+    """
+    run_dir = os.getenv("AI_DRAMA_RUN_DIR")
+    if not run_dir:
+        return ""
+
+    try:
+        style_context = import_module("00_common.style_context")
+        prefix = style_context.load_style_prompt_prefix(run_dir).strip()
+        summary = style_context.build_style_summary_for_llm(run_dir).strip()
+    except Exception:
+        return ""
+
+    if not prefix and not summary:
+        return ""
+
+    body = prefix or summary
+    if prefix and summary and summary not in prefix:
+        body = f"{prefix}\n\n【风格摘要】\n{summary}"
+
+    return f"""
+# 项目风格圣经 / STYLE_BIBLE 硬约束
+
+{body}
+
+风格继承规则：
+1. 当前 01-06 文本 LLM 阶段必须继承 00_style_system 生成的 STYLE_BIBLE。
+2. 不得自行切换时代体系、视觉风格、服装材质、场景美术、光影色彩或镜头语言。
+3. 角色、场景、道具、分镜、生产标注只能在 STYLE_BIBLE 允许的风格体系内描述。
+4. 如原文风格与 STYLE_BIBLE 冲突，优先保持原作核心设定，再用 STYLE_BIBLE 统一视觉表达。
+5. 本风格约束只用于指导业务输出，不要把完整风格圣经复制到最终 JSON 中。
+""".strip()
+
+
 def apply_json_guard(system_prompt: str, stage_id: str | None = None) -> str:
     stage_line = f"\n\n当前阶段：{stage_id}" if stage_id else ""
-    return f"{LOCAL_GEMMA_JSON_GUARD}{stage_line}\n\n---\n\n{system_prompt.strip()}"
+    style_guard = _load_runtime_style_guard()
+    style_block = f"\n\n---\n\n{style_guard}" if style_guard else ""
+    return f"{LOCAL_GEMMA_JSON_GUARD}{stage_line}{style_block}\n\n---\n\n{system_prompt.strip()}"
 
 
 def compact_payload_hint(payload: dict[str, Any]) -> dict[str, Any]:
@@ -55,6 +99,7 @@ def compact_payload_hint(payload: dict[str, Any]) -> dict[str, Any]:
             "do_not_repeat_full_input": True,
             "avoid_long_arrays_unless_required": True,
             "avoid_long_strings": True,
+            "style_bible_injected_by_system_prompt": True,
         },
         **payload,
     }
