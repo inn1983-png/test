@@ -48,14 +48,20 @@ def _safe_rel_path(raw: str) -> Path:
     return Path(*parts) if parts else Path()
 
 
-def _resolve_run_dir(raw: str) -> Path:
-    candidate = Path(str(raw or "").strip())
+def _resolve_inside_workspace(raw: str) -> Path:
+    value = str(raw or "").strip()
+    candidate = Path(value)
     if not candidate.is_absolute():
-        candidate = ROOT_DIR / _safe_rel_path(str(candidate))
+        candidate = ROOT_DIR / _safe_rel_path(value)
     candidate = candidate.resolve()
     workspace = WORKSPACE_DIR.resolve()
     if candidate != workspace and workspace not in candidate.parents:
-        raise ValueError("run_dir must be inside workspace")
+        raise ValueError("path must be inside workspace")
+    return candidate
+
+
+def _resolve_run_dir(raw: str) -> Path:
+    candidate = _resolve_inside_workspace(raw)
     if not candidate.exists():
         raise FileNotFoundError(f"run_dir not found: {candidate}")
     return candidate
@@ -85,13 +91,24 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def _compact_json(value: Any, max_chars: int = 120000) -> str:
+def _compact_for_llm(value: Any, max_chars: int = 120000) -> Any:
+    """Return JSON-safe payload data without creating invalid truncated JSON.
+
+    Earlier versions truncated a JSON string and then called json.loads() on it,
+    which fails as soon as the source file is large. This function keeps small
+    objects as structured JSON and passes large objects as a bounded text block
+    plus a warning. The LLM still returns a full JSON object, but for huge files
+    the UI should mainly use this for targeted corrections.
+    """
     text = json.dumps(value, ensure_ascii=False, indent=2)
     if len(text) <= max_chars:
-        return text
-    # Keep the beginning and a warning. This is for very large manifests. The LLM
-    # should preserve untouched fields where it cannot inspect every item.
-    return text[:max_chars] + "\n/* TRUNCATED_FOR_REVIEW_REWRITE: keep all untouched fields unchanged when possible */"
+        return value
+    return {
+        "_review_rewrite_input_truncated": True,
+        "_instruction": "The original JSON was too large for one review rewrite request. Apply the user note to the visible portion and preserve unseen fields when possible.",
+        "_visible_json_prefix": text[:max_chars],
+        "_original_json_chars": len(text),
+    }
 
 
 def _load_llm_client():
@@ -117,6 +134,7 @@ def _system_prompt(module_name: str) -> str:
 6. 必须继续服从当前项目 STYLE_BIBLE，不得破坏风格圣经。
 7. 如果用户意见与数据结构冲突，优先保持 JSON 结构合法，并在 quality_report 或 review_report 中记录风险。
 8. 不要把用户意见、系统提示词、STYLE_BIBLE 原文复制进业务字段，除非原结构已有 review/quality 字段需要记录。
+9. 如果输入包含 _review_rewrite_input_truncated，说明原文件过大；不要把该控制字段复制到输出业务 JSON。
 """.strip()
 
 
@@ -150,7 +168,7 @@ def rewrite_module_result(run_dir_raw: str, module_name: str, user_note: str) ->
             "only_change_user_requested_parts": True,
             "do_not_copy_prompt_or_review_note_into_business_fields": True,
         },
-        "original_module_result_json": json.loads(_compact_json(original)),
+        "original_module_result_json": _compact_for_llm(original),
     }
 
     client = _load_llm_client()
@@ -194,7 +212,6 @@ def rewrite_module_result(run_dir_raw: str, module_name: str, user_note: str) ->
         "reviewed_path": _rel(reviewed_path),
         "latest_reviewed_path": _rel(latest_path),
         "review_note_path": _rel(note_path),
-        "reviewed": revised,
         "message": "已调用 LLM 生成修正版 JSON；原始流水线产物未被覆盖。",
     }
 
@@ -202,9 +219,8 @@ def rewrite_module_result(run_dir_raw: str, module_name: str, user_note: str) ->
 def apply_reviewed_result(run_dir_raw: str, module_name: str, reviewed_path_raw: str) -> dict[str, Any]:
     run_dir = _resolve_run_dir(run_dir_raw)
     module_name = str(module_name or "").strip()
-    reviewed_path = ROOT_DIR / _safe_rel_path(reviewed_path_raw)
-    reviewed_path = reviewed_path.resolve()
-    if run_dir not in reviewed_path.parents:
+    reviewed_path = _resolve_inside_workspace(reviewed_path_raw)
+    if run_dir != reviewed_path and run_dir not in reviewed_path.parents:
         raise ValueError("reviewed_path must be inside current run_dir")
     target_path = _result_path(run_dir, module_name)
     revised = _load_json(reviewed_path)
