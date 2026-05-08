@@ -25,8 +25,10 @@ class ComfyUIClient:
     def __init__(self) -> None:
         self.base_url = os.getenv("AI_DRAMA_COMFYUI_BASE_URL", "http://127.0.0.1:8188").rstrip("/")
         self.workflow_path = os.getenv("AI_DRAMA_COMFYUI_WORKFLOW", "").strip()
-        self.timeout_sec = int(os.getenv("AI_DRAMA_COMFYUI_TIMEOUT_SEC", "1800"))
-        self.poll_interval_sec = float(os.getenv("AI_DRAMA_COMFYUI_POLL_INTERVAL_SEC", "2"))
+        # Image batches may queue for a long time in ComfyUI. Keep this generous
+        # by default and allow UI/server/env overrides.
+        self.timeout_sec = int(os.getenv("AI_DRAMA_IMAGE_COMFYUI_TIMEOUT_SEC", os.getenv("AI_DRAMA_COMFYUI_TIMEOUT_SEC", "7200")))
+        self.poll_interval_sec = float(os.getenv("AI_DRAMA_COMFYUI_POLL_INTERVAL_SEC", "5"))
         self.client_id = os.getenv("AI_DRAMA_COMFYUI_CLIENT_ID", "ai_drama_07_storyboard_image")
         self.mode = os.getenv("AI_DRAMA_IMAGE_EXECUTION_MODE", "dry_run").strip().lower()
         self.comfyui_output_dir = os.getenv("AI_DRAMA_COMFYUI_OUTPUT_DIR", os.getenv("COMFYUI_OUTPUT_DIR", "")).strip()
@@ -244,7 +246,7 @@ class ComfyUIClient:
                 break
             time.sleep(self.poll_interval_sec)
         if str(prompt_id) not in history:
-            raise TimeoutError(f"ComfyUI prompt timeout: {prompt_id}")
+            raise TimeoutError(f"ComfyUI prompt timeout after {self.timeout_sec}s: {prompt_id}")
         expected_path = Path(output_path)
         output_exists = expected_path.exists()
         history_item = history.get(str(prompt_id), {})
@@ -281,6 +283,8 @@ class ComfyUIClient:
                 "history_outputs": history_outputs,
                 "resolved_from": resolved_from,
                 "comfyui_output_dir": self.comfyui_output_dir,
+                "timeout_sec": self.timeout_sec,
+                "poll_interval_sec": self.poll_interval_sec,
                 "error": error,
             },
         )
@@ -295,5 +299,6 @@ class ComfyUIClient:
             "history": history_item,
             "history_outputs": history_outputs,
             "resolved_from": resolved_from,
+            "timeout_sec": self.timeout_sec,
             "error": error,
         }
