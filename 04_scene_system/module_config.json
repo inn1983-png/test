@@ -1,0 +1,8 @@
+{
+  "module_name": "04_scene_system",
+  "display_name": "场景库系统",
+  "description": "负责把 01 候选场景与 02 剧本场景使用信息标准化为稳定场景资产库。",
+  "status": "scaffold",
+  "standalone_input_dir": "04_scene_system\\input",
+  "standalone_output_dir": "04_scene_system\\output"
+}

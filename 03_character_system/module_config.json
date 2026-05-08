@@ -1,0 +1,8 @@
+{
+  "module_name": "03_character_system",
+  "display_name": "角色库系统",
+  "description": "负责把 01 候选角色与 02 剧本角色使用信息标准化为稳定角色资产库。",
+  "status": "scaffold",
+  "standalone_input_dir": "03_character_system\\input",
+  "standalone_output_dir": "03_character_system\\output"
+}

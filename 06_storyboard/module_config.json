@@ -1,0 +1,8 @@
+{
+  "module_name": "06_storyboard",
+  "display_name": "单帧分镜系统",
+  "description": "负责把 02 剧本与 03/04/05 稳定资产库转成只引用稳定资产名的单帧分镜 JSON。",
+  "status": "scaffold",
+  "standalone_input_dir": "06_storyboard\\input",
+  "standalone_output_dir": "06_storyboard\\output"
+}

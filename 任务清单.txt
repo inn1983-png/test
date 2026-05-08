@@ -1,646 +1,122 @@
-请继续处理 inn1983-png/test 仓库。
-
-任务目标：
-对当前已经修改完成的系统进行一次全面的代码质量检查、完整流程验证、全数据链路测试与自动修复，确保 01–10 pipeline、Web UI、健康检查、返工中心、LLM、本地执行模式、dry-run、execute 前置检查等组件能够正确集成并协同工作。
-
-注意：
-这次不是新增大功能，而是做“系统级验收 + 修复 + 稳定性优化”。
-发现简单问题请直接修复，不要只写建议。
-发现可能破坏架构的大改动，先以最小侵入方式修复。
-最终必须给出测试结果、修复清单、剩余风险。
-
-==================================================
-一、优先修复当前已发现的明显问题
-==================================================
-
-请先重点检查并修复以下问题：
-
-1. 00_main_controller/health_check.py 中 pipeline.json 路径疑似错误。
-
-当前项目根目录已有：
-pipeline.json
-
-但 health_check.py 里可能检查的是：
-ROOT / "00_main_controller" / "pipeline.json"
-
-请修正为：
-ROOT / "pipeline.json"
-
-并确保健康检查能正确读取根目录 pipeline.json。
-
-2. 00_main_controller/health_check.py 中 contracts 解析逻辑疑似错误。
-
-当前 configs/module_contracts.json 的结构是：
-
-{
-  "description": "...",
-  "modules": {
-    "01_novel_parser": {...},
-    "02_script_writer": {...}
-  }
-}
-
-但 health_check.py 里可能直接 data.get(module_name)，这会导致所有模块 contract 检查误判。
-
-请改为：
-modules = data.get("modules", {})
-contract = modules.get(module_name)
-
-并检查每个模块是否有 requires / produces。
-
-3. 检查 00_common/llm_config_utils.py 的本地 LLM 判断逻辑。
-
-要求：
-- 用户显式设置 AI_DRAMA_LLM_BASE_URL 为本地地址时，不要求 API Key。
-- 本地地址包括：
-  127.0.0.1
-  localhost
-  ::1
-  0.0.0.0
-- 如果没有显式设置 AI_DRAMA_LLM_BASE_URL，使用默认云端 DeepSeek 时才要求 AI_DRAMA_LLM_API_KEY。
-- 如果用户设置的是非本地但也不是默认云端 URL，不要武断强制报错，优先 warning 或允许运行。
-- 01–06 的 LLMClient.from_env 都必须统一使用这个逻辑。
-
-4. 检查 10_final_assembly 是否还会在 dry_run 或 ffmpeg 不可用时生成假的 final.mp4。
-
-要求：
-- dry_run 不允许创建 final.mp4。
-- ffmpeg 不可用不允许创建 final.mp4。
-- 只能创建 final.placeholder.txt。
-- final_manifest.json 中必须有：
-  final_video_ready=false
-  final_video_path=null
-  final_video_placeholder_path=...
-- execute 成功并通过 ffprobe 后，才允许 final_video_ready=true。
-
-5. 检查 00_common/module_contracts.py 的推荐顺序必须是完整 01–10：
-
-01_novel_parser
-02_script_writer
-03_character_system
-04_scene_system
-05_prop_system
-06_storyboard
-07_storyboard_image
-08_audio
-09_video
-10_final_assembly
-
-不要再把 04/05 推荐回 03。
-
-==================================================
-二、全代码语法检查
-==================================================
-
-请对仓库内所有 Python 文件执行语法检查。
-
-要求：
-1. 遍历所有 .py 文件。
-2. 排除：
-   - .git
-   - __pycache__
-   - workspace 里的历史运行产物
-   - venv / .venv / env
-   - node_modules
-3. 对每个 .py 执行：
-   python -m py_compile <file>
-4. 如果发现语法错误，直接修复。
-5. 修复后重新执行，直到所有 Python 文件语法检查通过。
-
-建议新增脚本：
-
-tools/check_python_syntax.py
-
-输出：
-workspace/validation_reports/python_syntax_report.json
-
-报告格式：
-
-{
-  "status": "passed|failed",
-  "checked_files": 0,
-  "failed_files": [
-    {
-      "path": "...",
-      "error": "..."
-    }
-  ]
-}
-
-==================================================
-三、代码结构与导入检查
-==================================================
-
-请检查关键模块能否导入。
-
-必须检查：
-
-00_common.io_utils
-00_common.module_contracts
-00_common.module_runner
-00_common.workspace_manager
-00_common.run_status
-00_common.artifact_registry
-00_common.artifact_resolver
-00_common.repair_index
-00_common.llm_config_utils
-00_main_controller.validate_pipeline
-00_main_controller.health_check
-
-以及各模块核心文件：
-
-01_novel_parser.core.stage_runner
-02_script_writer.core.stage_runner
-03_character_system.core.stage_runner
-04_scene_system.core.stage_runner
-05_prop_system.core.stage_runner
-06_storyboard.core.stage_runner
-07_storyboard_image.core.stage_runner
-08_audio.core.stage_runner
-09_video.core.stage_runner
-10_final_assembly.core.stage_runner
-
-要求：
-1. 导入失败必须修复。
-2. 如果导入失败是因为数字开头目录不能用普通 import，请使用 importlib.import_module。
-3. 输出导入检查报告：
-
-workspace/validation_reports/import_check_report.json
-
-==================================================
-四、pipeline 配置验证
-==================================================
-
-请验证：
-
-pipeline.json
-configs/module_contracts.json
-configs/local_resource_release.json
-
-要求：
-1. pipeline.json 必须包含 01–10，顺序正确。
-2. 每个 pipeline 模块目录必须存在。
-3. 每个模块必须有 run_staged.py。
-4. module_contracts.json 必须有 modules 字段。
-5. 每个模块必须有 requires / produces。
-6. produces 中的关键产物路径必须与实际模块输出一致。
-7. 10_final_assembly 对 09_video/final_video.mp4 和 clips 的 optional 逻辑必须合理。
-8. validate_pipeline.py 必须能通过：
-
-python 00_main_controller/validate_pipeline.py --pipeline pipeline.json --strict-order
-
-如果 validate_pipeline.py 本身有问题，请修复。
-
-输出报告：
-workspace/validation_reports/pipeline_validation_report.json
-
-==================================================
-五、健康检查验证
-==================================================
-
-请执行并修复：
-
-python 00_main_controller/health_check.py
-
-要求：
-1. health_check.py 不能因为缺少 ComfyUI / TTS / ffmpeg 就崩溃。
-2. 缺少外部环境只能输出 warning 或 failed check，不允许程序异常退出。
-3. 如果本地 LLM 未启动，只能 warning，不要阻断健康检查本身。
-4. health_check.py 必须生成：
-   workspace/system_health_report.json
-
-再执行：
-
-python 00_main_controller/health_check.py --project-id project_test_001
-
-要求：
-1. 如果项目目录不存在，可以 warning。
-2. 不能崩溃。
-
-==================================================
-六、Web UI 接口级验证
-==================================================
-
-请检查 web_ui/server.py 的所有 API 路由是否能正常工作。
-
-重点检查：
-
-GET  /api/pipeline
-GET  /api/projects
-GET  /api/system/snapshot
-POST /api/system/health-check
-POST /api/system/self-check
-POST /api/system/check-data-link
-GET  /api/module-requirements
-GET  /api/comfyui-workflow-mapping/check
-POST /api/jobs/start
-POST /api/jobs/<id>/stop
-GET  /api/jobs/<id>/snapshot
-GET  /api/jobs/<id>/events
-GET  /api/projects/<project_id>/snapshot
-GET  /api/projects/<project_id>/repair-index
-
-要求：
-1. 每个接口必须有稳定 JSON 返回。
-2. 参数缺失时返回清晰错误，不要抛异常。
-3. project_id / run_dir 路径必须做安全限制，不能跳出 workspace。
-4. 文件预览接口不能读取 workspace 外部敏感文件。
-5. media 接口只能服务 workspace 内产物。
-6. Web UI 启动命令必须可用：
-
-python web_ui/server.py --host 127.0.0.1 --port 1144
-
-如发现 API 参数解析、路径安全、异常处理问题，直接修复。
-
-输出报告：
-workspace/validation_reports/web_ui_api_report.json
-
-==================================================
-七、dry-run 全流程验证
-==================================================
-
-请构造一个最小测试项目：
-
-workspace/projects/project_validation_001/input/novel.txt
-
-内容用一段 300–500 字中文古风短剧测试文本，包含：
-- 男主
-- 女配或反派
-- 一个主要场景
-- 一个关键道具
-- 一段对白
-- 一段旁白/OS
-
-然后执行：
-
-set AI_DRAMA_IMAGE_EXECUTION_MODE=dry_run
-set AI_DRAMA_AUDIO_EXECUTION_MODE=dry_run
-set AI_DRAMA_VIDEO_EXECUTION_MODE=dry_run
-set AI_DRAMA_FINAL_DRY_RUN=1
-
-python 00_main_controller/run_pipeline.py --mode project --project-id project_validation_001 --from-module 01_novel_parser --strict-order
-
-注意：
-如果本地 LLM 没有启动，01–06 可能无法真实跑完。
-这种情况下，请至少完成以下替代验证：
-
-1. run_pipeline.py --dry-run 必须通过。
-2. 00 self-check 必须通过。
-3. health_check 必须通过。
-4. 依赖检查逻辑必须能正确判断缺少上游产物。
-5. 07/08/09/10 的 dry-run 在已有伪造上游产物时必须能跑通。
-
-如果为了测试 07–10 需要构造最小上游产物，请创建测试 fixture，不要污染正式逻辑。
-
-建议新增：
-
-tests/fixtures/minimal_project_builder.py
-
-用于生成最小合法产物：
-
-01_novel_parser/novel_analysis.json
-02_script_writer/script.json
-03_character_system/characters.json
-04_scene_system/scenes.json
-05_prop_system/props.json
-06_storyboard/storyboard.json
-07_storyboard_image/image_manifest.json
-08_audio/final_audio.wav
-08_audio/audio_timeline.json
-08_audio/subtitle.srt
-08_audio/subtitle.ass
-09_video/video_manifest.json
-
-要求：
-这些 fixture 只用于测试，不要替代正式模块逻辑。
-
-==================================================
-八、全数据链路检查
-==================================================
-
-请新增或完善数据链路检查脚本：
-
-00_main_controller/check_data_link.py
-
-要求检查：
-
-1. 01 输出 novel_analysis.json
-2. 02 是否正确读取 01，并输出 script.json
-3. 03 是否正确读取 01/02，并输出 characters.json
-4. 04 是否正确读取 01/02，并输出 scenes.json
-5. 05 是否正确读取 01/02，并输出 props.json
-6. 06 是否正确读取 02/03/04/05，并输出 storyboard.json
-7. 07 是否正确读取 06，并输出 image_manifest.json
-8. 08 是否正确读取 02，并输出 final_audio.wav / audio_timeline.json / subtitles
-9. 09 是否正确读取 07/08，并输出 video_manifest.json
-10. 10 是否正确读取 09/08，并输出 final_manifest.json / final_meta.json
-
-每个检查项输出：
-- module
-- required_inputs
-- found_inputs
-- missing_inputs
-- expected_outputs
-- found_outputs
-- status
-- fix_hint
-
-输出：
-workspace/projects/<project_id>/00_data_link_check_report.json
-
-如果当前脚本已有，请修复并增强，不要重复造轮子。
-
-测试：
-
-python 00_main_controller/check_data_link.py --project-id project_validation_001
-
-==================================================
-九、模块产物契约检查
-==================================================
-
-请验证 module_runner.py 在模块成功后会检查 produces。
-
-要求：
-1. 每个模块执行成功后，必须检查 module_contracts produces。
-2. required output 缺失时，模块应标记 failed。
-3. optional output 缺失时，只提示不失败。
-4. directory 类型产物必须至少包含一个文件，空目录不能算成功。
-5. dry-run 下是否允许缺少真实视频/图片，要通过 manifest 的 ready=false 表示，而不是写假文件骗过检查。
-
-重点检查：
-09_video dry_run：
-- video_manifest.json 必须存在。
-- final_video.mp4 optional。
-- 不要生成假 final_video.mp4。
-
-10_final_assembly dry_run：
-- final_manifest.json 必须存在。
-- final_meta.json 必须存在。
-- final.mp4 如果不存在，不应导致 dry-run 测试彻底失败。
-- 如果 contracts 里 final.mp4 是 required，请改为 optional，并通过 final_video_ready 表示真实视频是否生成。
-
-==================================================
-十、返工中心 Repair Center 验证
-==================================================
-
-请检查：
-
-00_common/repair_index.py
-web_ui 返工中心展示逻辑
-
-要求：
-1. repair_index.py 能读取：
-   - run_status.json
-   - current_stage_status.json
-   - intermediate/*.json
-   - stage_quality
-   - quality_report
-   - schema_validation
-   - retry_plan
-   - upstream_blocking_issues
-   - failed_frames
-   - failed_audio_segments
-   - failed_video_segments
-   - long_voice_line_warnings
-2. 输出结构稳定：
-   summary
-   issues
-3. 每个 issue 至少包含：
-   - module
-   - stage_id
-   - issue_type
-   - status
-   - score
-   - message
-   - suggested_action
-   - recommended_from_module
-   - recommended_only_module
-   - payload
-4. 没有问题时返回空 issues，不要报错。
-5. Web UI 能显示中文说明和重跑按钮。
-6. 缺上游产物时，不允许误导用户只跑当前模块。
-
-==================================================
-十一、性能与稳定性优化
-==================================================
-
-请排查以下潜在性能问题：
-
-1. Web UI snapshot 每 1.5 秒扫描整个 workspace 是否过重。
-   - 如过重，限制扫描当前 run_dir。
-   - intermediate 文件只读最近或按模块读。
-   - 大 JSON 预览不要一次性加载全文。
-
-2. repair_index 每次 snapshot 都写入文件是否过重。
-   - 如过重，增加轻量模式。
-   - 或只有项目详情页请求 repair-index 时才写。
-
-3. discover_projects 最多读取 100 个项目可以保留，但不要读取每个项目大文件。
-
-4. LLM trace / intermediate 目录可能很大，UI 列表要限制数量。
-
-5. 文件预览接口要限制最大读取大小，例如 2MB。
-   - 超过只返回前 N 字符，并提示 truncated=true。
-
-==================================================
-十二、最终测试脚本
-==================================================
-
-请新增一个总体验收脚本：
-
-tools/system_validation.py
-
-功能：
-按顺序执行：
-
-1. Python 语法检查
-2. import 检查
-3. pipeline 配置检查
-4. health_check
-5. validate_pipeline
-6. run_pipeline --dry-run
-7. check_data_link
-8. 07–10 fixture dry-run 测试
-9. Web UI 核心函数静态检查，不强制启动服务器
-
-输出：
-
-workspace/validation_reports/system_validation_report.json
-
-报告结构：
-
-{
-  "status": "passed|warning|failed",
-  "created_at": "...",
-  "summary": {
-    "passed": 0,
-    "warning": 0,
-    "failed": 0
-  },
-  "checks": [
-    {
-      "check_id": "...",
-      "status": "passed|warning|failed",
-      "message": "...",
-      "fix_hint": "...",
-      "details": {}
-    }
-  ],
-  "fixed_files": [],
-  "remaining_risks": []
-}
-
-命令：
-
-python tools/system_validation.py
-
-==================================================
-十三、最终交付要求
-==================================================
-
-完成后必须输出：
-
-1. 修复了哪些问题。
-2. 修改了哪些文件。
-3. 新增了哪些测试脚本。
-4. 哪些测试已经通过。
-5. 哪些测试因为本地环境缺失只能 warning。
-6. 最终建议的运行顺序。
-
-最终推荐运行顺序：
-
-python tools/system_validation.py
-python 00_main_controller/health_check.py
-python 00_main_controller/validate_pipeline.py --pipeline pipeline.json --strict-order
-python web_ui/server.py --host 127.0.0.1 --port 1144
-
-然后在 UI 中：
-1. 系统健康检查
-2. 新建 project_validation_001
-3. 粘贴小说
-4. 只跑 01
-5. 从 02 继续
-6. 从 03 继续
-7. 跑到 06
-8. 07 dry_run
-9. 08 dry_run
-10. 09 dry_run
-11. 10 dry_run
-
-==================================================
-十四、重要约束
-==================================================
-
-1. 不要删除现有 01–10 架构。
-2. 不要改变模块边界。
-3. 不要让 07/08/09/10 回头改写 02/03/04/05/06 的正式产物。
-4. 不要生成假的 mp4 / wav 来冒充真实产物。
-5. dry-run 可以生成 manifest、placeholder.txt、静音 WAV，但必须在 manifest 中明确 ready=false 或 dry_run=true。
-6. 所有修复必须更新 docs/development_log.md。
-7. 所有新增脚本必须能从项目根目录直接运行。
-8. 所有路径必须兼容 Windows。
-9. 所有 JSON 输出必须 ensure_ascii=False，方便中文显示。
-10. 最终不要只给建议，能修的直接修。
-
-==================================================
-执行记录 (2026-05-08)
-==================================================
-
-一、修复已知明显问题 ✅ 已完成
-  1. health_check.py pipeline.json 路径已修正为 ROOT / "pipeline.json"
-  2. health_check.py contracts 解析逻辑已修正，支持 data.get("modules", {})
-  3. llm_config_utils.py 本地 LLM 判断逻辑已验证正确
-  4. 10_final_assembly dry-run 不生成假 mp4 已验证
-  5. module_contracts.py RECOMMENDED_ORDER 包含完整 01-10 已验证
-  额外修复：
-  - configs/module_contracts.json 中 10_final_assembly 的 final.mp4 标记为 optional: true
-  - health_check.py 添加 sys.path.insert(0, str(ROOT)) 确保导入正常
-  - health_check.py LLM API key 未设置时改为 warning 而非 failed
-
-二、全代码语法检查 ✅ 已完成
-  - 325 个 Python 文件全部通过语法检查
-  - 修复 index-tts/expand_voice_library.py 中的转义序列警告
-  - 新增 tools/check_python_syntax.py
-
-三、代码结构与导入检查 ✅ 已完成
-  - 21 个核心模块全部导入成功
-  - 新增 tools/check_imports.py
-
-四、pipeline 配置验证 ✅ 已完成
-  - pipeline.json 01-10 顺序正确
-  - module_contracts.json 结构完整
-  - validate_pipeline.py --strict-order 通过
-  - 新增 tools/check_pipeline_config.py
-
-五、健康检查验证 ✅ 已完成
-  - health_check.py 正常运行，30 passed, 10 warning, 0 failed
-  - --project-id 模式正常
-  - 缺少外部环境只输出 warning，不崩溃
-
-六、Web UI 接口级验证 ✅ 已完成
-  - 所有 API 路由正常返回 JSON
-  - 修复文件预览大小限制（2MB）
-  - 修复 media 接口路径安全限制（只允许 workspace 内）
-  - 文本/JSON 预览增加 truncated 标记
-
-七、dry-run 全流程验证 + fixture ✅ 已完成
-  - 新增 tests/fixtures/minimal_project_builder.py
-  - 构建 project_validation_001 测试项目，12 个 fixture 文件
-
-八、全数据链路检查 ✅ 已完成
-  - 增强 check_data_link.py，添加按模块检查数据链路功能
-  - project_validation_001 数据链路检查通过
-
-九、模块产物契约检查 ✅ 已完成
-  - module_contracts.json 中 10_final_assembly/final.mp4 标记为 optional
-  - module_runner.py produces 检查逻辑已验证
-
-十、返工中心验证 ✅ 已完成
-  - repair_index.py 正常读取各类状态文件
-  - Web UI 返工中心 API 正常返回
-
-十一、性能与稳定性优化 ✅ 已完成
-  - 文件预览增加 2MB 大小限制
-  - media 接口限制只服务 workspace 内文件
-  - 文本预览增加 truncated 标记
-
-十二、最终测试脚本 ✅ 已完成
-  - 新增 tools/system_validation.py
-  - 9 项检查全部通过：33 passed, 0 warning, 0 failed
-
-十三、最终交付 ✅ 已完成
-
-修改的文件：
-  - 00_main_controller/health_check.py（修复路径、导入、API key 级别）
-  - configs/module_contracts.json（final.mp4 标记 optional）
-  - web_ui/server.py（文件预览大小限制、media 路径安全）
-  - index-tts/expand_voice_library.py（修复转义序列警告）
-  - 00_main_controller/check_data_link.py（增强数据链路检查）
-
-新增的文件：
-  - tools/check_python_syntax.py
-  - tools/check_imports.py
-  - tools/check_pipeline_config.py
-  - tools/system_validation.py
-  - tests/fixtures/minimal_project_builder.py
-
-测试结果：
-  - Python 语法检查：325 文件全部通过
-  - 导入检查：21 模块全部通过
-  - Pipeline 配置验证：23 项全部通过
-  - 健康检查：30 passed, 10 warning（环境配置相关）
-  - Web UI API：所有接口正常
-  - 数据链路检查：通过
-  - 系统验收：33 passed, 0 warning, 0 failed
-
-剩余风险：
-  - LLM 未配置时 01-06 无法真实运行（需要设置 AI_DRAMA_LLM_BASE_URL 和 AI_DRAMA_LLM_API_KEY）
-  - ComfyUI 未配置时 07/09 无法真实生成图片/视频
-  - TTS 未配置时 08 无法真实生成语音
-  - shared_assets 目录不可写（权限问题）
-
-推荐运行顺序：
-  python tools/system_validation.py
-  python 00_main_controller/health_check.py
-  python 00_main_controller/validate_pipeline.py --pipeline pipeline.json --strict-order
-  python web_ui/server.py --host 127.0.0.1 --port 1144
+任务清单 — AI 短剧工厂 Web UI 正式化
+========================================
+
+状态：✅ 全部完成（2026-05-08）
+
+一、后端 server.py 正式支持
+--------------------------
+✅ 已完成。修改内容：
+
+1. build_command 新增 to_module 参数支持
+   - 在 from_module/only_module 循环中增加 to_module 映射到 --to-module
+   - 文件：web_ui/server.py
+
+2. style_preset 支持
+   - build_command 中读取 payload.style_preset，设置环境变量 AI_DRAMA_STYLE_PRESET 和 AI_DRAMA_SELECTED_STYLE_PRESET
+   - 文件：web_ui/server.py
+
+3. 超时默认值
+   - build_command 中为未设置的超时环境变量填充默认值：
+     - AI_DRAMA_LLM_TIMEOUT_SEC=6000
+     - AI_DRAMA_IMAGE_COMFYUI_TIMEOUT_SEC=7200
+     - AI_DRAMA_VIDEO_COMFYUI_TIMEOUT_SEC=14400
+     - AI_DRAMA_COMFYUI_POLL_INTERVAL_SEC=5
+     - AI_DRAMA_VIDEO_DRY_RUN_PLACEHOLDER_BYTES=2048
+   - 文件：web_ui/server.py
+
+4. /api/review/rewrite 和 /api/review/apply API
+   - 新增 _handle_review_rewrite() 方法：接收 run_dir/module_name/user_note，调用 result_rewriter.rewrite_module_result()
+   - 新增 _handle_review_apply() 方法：接收 run_dir/module_name/reviewed_path，调用 result_rewriter.apply_reviewed_result()
+   - 文件：web_ui/server.py
+
+二、前端 app.js 正式支持成果工作台
+---------------------------------
+✅ 已完成。将所有 patch 文件逻辑合并到 app.js：
+
+1. 风格选择器（原 style_picker.js）
+   - 18 种风格预设列表 STYLE_PRESETS
+   - renderStylePicker() 动态插入风格选择下拉框
+   - getSelectedStylePreset() 读取选择值，持久化到 localStorage
+   - getPayload() 自动包含 style_preset
+
+2. 文本链路按钮（原 text_chain_patch.js）
+   - startTextBtn 绑定：from_module=00_style_system, to_module=06_storyboard, 图片/音频/视频=dry_run
+
+3. 成果摘要（原 result_summary.js）
+   - MODULE_RESULT_FILES / MODULE_RESULT_TITLES 映射
+   - renderResultSummary() 读取模块关键产物 JSON 并渲染可读摘要
+   - summarizeModuleResult() 按模块分发摘要渲染
+   - 10 个模块专用摘要函数：summarizeStyle/Novel/Script/Characters/Scenes/Props/Storyboard/Images/Audio/Video/Final
+   - 辅助函数：rMetric/rChips/rTable/rGet/rArr/rShort/rCount/rGenericArray
+
+4. 修改意见（原 review_notes.js）
+   - renderReviewBox() 渲染修改意见文本框
+   - callLLMRewrite() 调用 /api/review/rewrite
+   - applyLatestReviewedResult() 调用 /api/review/apply
+   - 意见持久化到 localStorage
+
+5. 全流程按钮改为从 00_style_system 开始
+   - startFullBtn: from_module=00_style_system
+
+6. selectModule() 点击模块节点切换到成果详情标签
+
+7. ISSUE_TYPE_NAMES / ACTION_NAMES 中文映射
+
+8. 文件：web_ui/static/app.js（完整重写，855 行）
+
+三、index.html / styles.css 正式整理
+------------------------------------
+✅ 已完成。
+
+1. index.html 移除所有 patch 脚本引用
+   - 删除：style_picker.js, app_globals.js, text_chain_patch.js, result_summary.js, review_notes.js, workbench_patch.js
+   - 只保留：<script src="/app.js"></script>
+   - 移除 result_summary.css 单独引用
+
+2. styles.css 合并 result_summary.css 样式
+   - 新增：module-result-summary, result-header, result-card, result-metrics, result-metric, result-chips, result-table, review-box, review-actions, style-preset-hint 等样式
+   - 合并 @media 响应式规则
+
+四、数据链路完整性检查脚本
+-------------------------
+✅ 已确认存在，无需新建。
+   - 00_main_controller/check_data_link.py 已实现完整功能
+   - server.py 中 /api/system/check-data-link API 已接入
+   - data_link_btn 前端按钮已绑定
+
+五、超时配置正式化
+-----------------
+✅ 已确认。
+   - 07_storyboard_image/core/comfyui_client.py: timeout_sec 默认 7200s
+   - 09_video/core/comfyui_client.py: timeout_sec 默认 14400s
+   - server.py build_command 填充默认值
+
+六、result_rewriter.py 逻辑完整性
+---------------------------------
+✅ 已确认。逻辑完整：
+   - rewrite_module_result(): 读取模块产物 → 调用 LLM 修正 → 保存修正版到 reviews/ 目录
+   - apply_reviewed_result(): 备份原文件 → 用修正版覆盖
+   - 安全措施：路径必须在 workspace 内、_compact_for_llm 处理大文件、保留备份
+
+七、删除临时 patch 文件
+-----------------------
+✅ 已删除以下 8 个文件：
+   - web_ui/static/app_globals.js
+   - web_ui/static/text_chain_patch.js
+   - web_ui/static/workbench_patch.js
+   - web_ui/static/style_picker.js
+   - web_ui/static/result_summary.js
+   - web_ui/static/review_notes.js
+   - web_ui/static/result_summary.css
+   - web_ui/sitecustomize.py
+
+八、本地测试验证
+---------------
+✅ 已通过。
+   - Python 编译检查：server.py, result_rewriter.py, repair_index.py, run_pipeline.py, 01-06 stage_runner.py 全部通过
+   - Web UI 启动测试：http://127.0.0.1:1144 正常加载
+   - 浏览器验证：风格选择器(18种)、分步运行(00-10)、快捷操作、流水线可视化、成果工作台、已有项目列表均正常
+
+九、最终交付
+-----------
+✅ 所有任务已完成。

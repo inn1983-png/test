@@ -499,7 +499,7 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
     else:
         cmd.extend(["--project-id", safe_id(payload.get("project_id"), "project")])
 
-    for key, flag in [("from_module", "--from-module"), ("only_module", "--only-module")]:
+    for key, flag in [("from_module", "--from-module"), ("only_module", "--only-module"), ("to_module", "--to-module")]:
         value = str(payload.get(key) or "").strip()
         if value:
             cmd.extend([flag, value])
@@ -537,6 +537,22 @@ def build_command(payload: dict[str, Any], run_dir: Path) -> tuple[list[str], di
             env[env_key] = value
     if payload.get("force") or payload.get("image_retry_force"):
         env["AI_DRAMA_IMAGE_RETRY_FORCE"] = "1"
+
+    style_preset = str(payload.get("style_preset") or "").strip()
+    if style_preset:
+        env["AI_DRAMA_STYLE_PRESET"] = style_preset
+        env["AI_DRAMA_SELECTED_STYLE_PRESET"] = style_preset
+
+    for env_key, default in [
+        ("AI_DRAMA_LLM_TIMEOUT_SEC", "6000"),
+        ("AI_DRAMA_IMAGE_COMFYUI_TIMEOUT_SEC", "7200"),
+        ("AI_DRAMA_VIDEO_COMFYUI_TIMEOUT_SEC", "14400"),
+        ("AI_DRAMA_COMFYUI_POLL_INTERVAL_SEC", "5"),
+        ("AI_DRAMA_VIDEO_DRY_RUN_PLACEHOLDER_BYTES", "2048"),
+    ]:
+        if not str(env.get(env_key) or "").strip():
+            env[env_key] = default
+
     return cmd, env, job_kind
 
 
@@ -656,6 +672,10 @@ class Handler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/jobs/start":
             return self.send_json({"job": job_summary(start_job(self.read_body_json()))})
+        if parsed.path == "/api/review/rewrite":
+            return self._handle_review_rewrite()
+        if parsed.path == "/api/review/apply":
+            return self._handle_review_apply()
         if parsed.path == "/api/system/health-check":
             return self._handle_health_check()
         if parsed.path == "/api/system/check-data-link":
@@ -706,6 +726,32 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(result)
         except Exception as exc:
             self.send_json({"error": str(exc)}, status=500)
+
+    def _handle_review_rewrite(self) -> None:
+        try:
+            payload = self.read_body_json()
+            result_rewriter = import_module("00_common.result_rewriter")
+            result = result_rewriter.rewrite_module_result(
+                run_dir_raw=str(payload.get("run_dir") or ""),
+                module_name=str(payload.get("module_name") or payload.get("module") or ""),
+                user_note=str(payload.get("user_note") or payload.get("note") or ""),
+            )
+            self.send_json(result, status=200)
+        except Exception as exc:
+            self.send_json({"status": "failed", "error": str(exc)}, status=500)
+
+    def _handle_review_apply(self) -> None:
+        try:
+            payload = self.read_body_json()
+            result_rewriter = import_module("00_common.result_rewriter")
+            result = result_rewriter.apply_reviewed_result(
+                run_dir_raw=str(payload.get("run_dir") or ""),
+                module_name=str(payload.get("module_name") or payload.get("module") or ""),
+                reviewed_path_raw=str(payload.get("reviewed_path") or ""),
+            )
+            self.send_json(result, status=200)
+        except Exception as exc:
+            self.send_json({"status": "failed", "error": str(exc)}, status=500)
 
     def _handle_module_requirements(self, params: dict[str, str]) -> None:
         try:
