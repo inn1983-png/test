@@ -1,8 +1,0 @@
-{
-  "module_name": "02_script_writer",
-  "display_name": "剧本改编系统",
-  "description": "负责把 01 小说解析结果分阶段改编成音频驱动、单帧分镜友好的短剧剧本。",
-  "status": "scaffold",
-  "standalone_input_dir": "02_script_writer\\input",
-  "standalone_output_dir": "02_script_writer\\output"
-}

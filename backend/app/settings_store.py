@@ -3,8 +3,8 @@ from backend.app.project_store import ensure_project_dirs, utc_now
 
 DEFAULT_SETTINGS = {
     "comfyui_url": "http://127.0.0.1:8188",
-    "image_workflow": "workflows/image_storyboard.json",
-    "video_workflow": "workflows/ltx23_grid_video.json",
+    "image_workflow": "workflows/image/storyboard_image.json",
+    "video_workflow": "workflows/video/ltx23_grid_video.json",
     "cosyvoice2_command": "",
     "ffmpeg_path": "ffmpeg",
     "default_grid_mode": "grid_4",

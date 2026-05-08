@@ -1,42 +1,12 @@
-# Python
 __pycache__/
-*.py[cod]
-.venv/
-venv/
+*.pyc
 .env
-
-# Runtime outputs
-workspace/
-shared_assets/
-**/output/*
-!**/output/.gitkeep
-**/input/*
-!**/input/.gitkeep
-
-# Media files
-*.mp4
-*.mov
-*.avi
-*.mkv
-*.wav
-*.mp3
-*.flac
-*.png
-*.jpg
-*.jpeg
-*.webp
-
-# Local models and checkpoints
-models/
-checkpoints/
-index-tts/
-*.safetensors
-*.ckpt
-*.pt
-*.pth
-*.bin
-*.gguf
-
-# Logs
-logs/
-*.log
+.venv/
+node_modules/
+dist/
+projects/*/images/
+projects/*/grids/
+projects/*/audio/
+projects/*/videos/
+projects/*/final/*.mp4
+projects/*/tasks/logs/

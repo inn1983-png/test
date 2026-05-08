@@ -1,22 +1,5 @@
-# Core runtime dependencies shared by all subsystems
 pydantic>=2.7.0
 PyYAML>=6.0.1
 python-dotenv>=1.0.1
 requests>=2.31.0
 rich>=13.7.0
-
-# Built-in Python sqlite3 is used for artifacts.db, no extra dependency required.
-
-# Optional media dependencies, enable only when the related modules need them.
-# Do not force-install heavy model dependencies at the beginning.
-# moviepy>=1.0.3
-# pillow>=10.0.0
-# pydub>=0.25.1
-
-# Optional local model dependencies, keep commented until a module is actually implemented.
-# torch
-# torchvision
-# torchaudio
-# transformers
-# accelerate
-# sentencepiece

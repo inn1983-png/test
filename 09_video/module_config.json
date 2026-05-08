@@ -1,8 +1,0 @@
-{
-  "module_name": "09_video",
-  "display_name": "视频生成系统",
-  "description": "读取 07 分镜图片与 08 完整音频，按 10/12 秒切片调用本地 LTX2.3 ComfyUI 工作流生成视频段，支持断点续跑与最终合并。",
-  "status": "active",
-  "standalone_input_dir": "09_video/input",
-  "standalone_output_dir": "09_video/output"
-}

@@ -1,8 +1,0 @@
-{
-  "module_name": "05_prop_system",
-  "display_name": "道具库系统",
-  "description": "负责把 01 候选道具与 02 剧本道具使用信息标准化为稳定道具资产库。",
-  "status": "scaffold",
-  "standalone_input_dir": "05_prop_system\\input",
-  "standalone_output_dir": "05_prop_system\\output"
-}

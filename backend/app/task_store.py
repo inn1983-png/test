@@ -1,14 +1,15 @@
 import json
-import shutil
-from pathlib import Path
-
 from backend.app.project_store import ensure_project_dirs, utc_now
 
-VALID_BUCKETS = {"pending", "running", "done", "failed"}
+VALID_BUCKETS = {"pending", "running", "done", "failed", "cancelled"}
 
 
 def tasks_root(project_id):
-    return ensure_project_dirs(project_id) / "tasks"
+    root = ensure_project_dirs(project_id) / "tasks"
+    for bucket in VALID_BUCKETS:
+        (root / bucket).mkdir(parents=True, exist_ok=True)
+    (root / "logs").mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def task_path(project_id, bucket, task_id):
@@ -44,17 +45,11 @@ def move_task(project_id, task_id, src_bucket, dst_bucket, changes=None):
         task.update(changes)
     task["status"] = dst_bucket
     task["updated_at"] = utc_now()
-    dst = task_path(project_id, dst_bucket, task_id)
-    dst.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
+    task_path(project_id, dst_bucket, task_id).write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
     src.unlink()
     return task
 
 
 def enqueue_node_task(project_id, node_id, task_type, executor):
     task_id = "task_" + task_type + "_" + node_id
-    return save_task(project_id, {
-        "task_id": task_id,
-        "node_id": node_id,
-        "task_type": task_type,
-        "executor": executor,
-    })
+    return save_task(project_id, {"task_id": task_id, "node_id": node_id, "task_type": task_type, "executor": executor})

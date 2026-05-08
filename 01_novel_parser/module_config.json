@@ -1,8 +1,0 @@
-{
-  "module_name": "01_novel_parser",
-  "display_name": "小说解析系统",
-  "description": "负责通读小说、理解故事核心，并分阶段解析章节、事件图谱、全量候选资产、生产预判与故事质量控制信息。",
-  "status": "scaffold",
-  "standalone_input_dir": "01_novel_parser\\input",
-  "standalone_output_dir": "01_novel_parser\\output"
-}
