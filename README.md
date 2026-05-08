@@ -46,34 +46,44 @@ AI_ShortDrama_System/
 
 这些产物已经写入 `configs/module_contracts.json`，后续模块会把风格文件作为必需上游产物。这样风格不是一句提示词建议，而是流水线硬依赖。
 
+风格预设支持多文件合并：
+
+```text
+00_style_system/presets/*.json
+```
+
+只要 JSON 文件里包含 `presets` 字段，`00_style_system/run_staged.py` 会自动合并。
+
 当前内置风格预设：
 
 ```text
 ancient_live_action_realistic  # 古装真人写实短剧，默认
+ancient_gritty_realism         # 古代粗粝现实主义
+ancient_palace_drama           # 古装宫廷权谋剧
+ancient_war_epic               # 古代战争史诗
+song_dynasty_slice_of_life     # 宋韵市井生活剧
+tang_dynasty_romance           # 盛唐华丽爱情剧
+ming_qing_mystery              # 明清探案悬疑剧
 wuxia_live_action              # 武侠真人电影感
 xianxia_cinematic              # 仙侠电影感
+dark_fantasy_chinese           # 东方暗黑奇幻
 modern_urban_drama             # 现代都市真人短剧
+modern_suspense_thriller       # 现代悬疑冷峻短剧
+modern_romance_idol            # 现代偶像甜宠短剧
 republic_era_cinematic         # 民国电影感
+cyberpunk_noir                 # 赛博朋克冷色 noir
 chinese_3d_animation           # 中国风3D动画
+claymation_chinese_folk        # 中国民俗黏土动画
 ink_wash_motion                # 水墨国风动态绘本
 ```
 
 切换风格：
 
 ```bash
-set AI_DRAMA_STYLE_PRESET=ancient_live_action_realistic
+set AI_DRAMA_STYLE_PRESET=ancient_gritty_realism
 ```
 
-也可以改成：
-
-```bash
-set AI_DRAMA_STYLE_PRESET=wuxia_live_action
-set AI_DRAMA_STYLE_PRESET=xianxia_cinematic
-set AI_DRAMA_STYLE_PRESET=modern_urban_drama
-set AI_DRAMA_STYLE_PRESET=republic_era_cinematic
-set AI_DRAMA_STYLE_PRESET=chinese_3d_animation
-set AI_DRAMA_STYLE_PRESET=ink_wash_motion
-```
+或任意替换为上面的 preset id。
 
 公共读取工具：
 
@@ -90,6 +100,19 @@ image_style_lock = style_context.load_image_style_lock(run_dir)
 video_style_lock = style_context.load_video_style_lock(run_dir)
 negative_prompt = style_context.load_style_negative_prompt(run_dir)
 ```
+
+## 01–06 LLM 阶段风格注入
+
+`00_common/llm_prompt_guard.py` 已经接入 `00_common/style_context.py`。
+
+所有 01–06 文本 LLM 阶段在调用 `complete_json()` 时，都会经过 `prompt_guard.apply_json_guard()`，因此会自动注入：
+
+```text
+00_style_system/style_prompt_prefix.txt
+00_style_system/style_bible.json 的简要摘要
+```
+
+这意味着 01–06 不只是合同依赖风格文件，而是在实际 LLM system prompt 里继承风格圣经。
 
 ## 运行方式
 
