@@ -2,7 +2,7 @@ from pathlib import Path
 
 from backend.app.node_store import load_node, update_node
 from backend.app.settings_store import load_settings
-from backend.executors.comfyui_client import run_workflow
+from backend.executors.comfyui_client import run_workflow, extract_videos_from_history
 
 
 def _workflow_name(settings):
@@ -10,24 +10,41 @@ def _workflow_name(settings):
     return Path(value).name if value else "ltx23_grid_video.json"
 
 
+def _build_inputs(settings, node):
+    mapping = settings.get("workflow_mappings", {}).get("video", {})
+    prompt_node = mapping.get("prompt_node")
+    image_node = mapping.get("image_node")
+    if not prompt_node:
+        return None, "Missing video workflow mapping: prompt_node"
+    if not image_node:
+        return None, "Missing video workflow mapping: image_node"
+    inputs = {
+        prompt_node: {mapping.get("prompt_input", "text"): node.get("video_prompt", node.get("image_prompt", ""))},
+        image_node: {mapping.get("image_input", "image"): node.get("grid_path", node.get("image_path", ""))},
+    }
+    return inputs, None
+
+
 def run(project_id, node_id):
     node = load_node(project_id, node_id)
     settings = load_settings(project_id)
-    output = "videos/" + node_id + ".mp4"
+    inputs, error = _build_inputs(settings, node)
+    if error:
+        return update_node(project_id, node_id, {"status": "needs_review", "error": error})
     try:
-        result = run_workflow(project_id, "video", _workflow_name(settings), {
-            "PROMPT_NODE": {"text": node.get("video_prompt", node.get("image_prompt", ""))},
-            "IMAGE_NODE": {"image": node.get("grid_path", node.get("image_path", ""))},
-        })
-        return update_node(project_id, node_id, {
-            "status": "done",
-            "video_path": output,
-            "comfyui_result": result,
-        })
+        result = run_workflow(project_id, "video", _workflow_name(settings), inputs)
+        videos = extract_videos_from_history(result)
+        patch = {"status": "done", "comfyui_result": result}
+        if videos:
+            patch["comfyui_output"] = videos[0]
+            patch["video_path"] = videos[0]
+        else:
+            patch["status"] = "needs_review"
+            patch["error"] = "ComfyUI finished but no video output was parsed from history."
+        return update_node(project_id, node_id, patch)
     except Exception as exc:
         return update_node(project_id, node_id, {
             "status": "failed",
-            "video_path": output,
             "error": str(exc),
-            "executor_note": "Upload video workflow JSON or adjust node ids in local workflow mapping.",
+            "executor_note": "Upload video workflow JSON and configure video workflow mapping in Settings.",
         })
