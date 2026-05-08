@@ -1,21 +1,70 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
+from importlib import import_module
+
+try:
+    style_context = import_module("00_common.style_context")
+except Exception:  # pragma: no cover - defensive fallback for standalone imports
+    style_context = None
+
+
+DEFAULT_IMAGE_STYLE = "Chinese historical drama, cinematic realistic live-action style, natural color, ancient China setting, consistent characters, stable scene, high detail, no modern objects"
+DEFAULT_IMAGE_NEGATIVE = "modern objects, modern clothing, western face, cartoon, anime, 3d render, low quality, blurry, extra limbs, deformed hands, wrong gender, duplicate people, text, watermark"
+
+
+def _run_dir() -> str:
+    return os.getenv("AI_DRAMA_RUN_DIR", "").strip()
+
+
+def _looks_like_preset_id(value: str) -> bool:
+    return bool(re.fullmatch(r"[a-z0-9_\-]+", value.strip())) and " " not in value and "," not in value
+
+
+def _manual_image_style_suffix() -> str:
+    """Return a manual suffix only when it is real prompt text, not a style id.
+
+    The UI may pass the selected style preset id through AI_DRAMA_IMAGE_STYLE_SUFFIX
+    as a compatibility bridge. That id must never be appended to the image prompt
+    as if it were natural-language style text.
+    """
+    value = os.getenv("AI_DRAMA_IMAGE_STYLE_SUFFIX", "").strip()
+    if not value or _looks_like_preset_id(value):
+        return ""
+    return value
 
 
 def style_suffix() -> str:
-    return os.getenv(
-        "AI_DRAMA_IMAGE_STYLE_SUFFIX",
-        "Chinese historical drama, cinematic realistic live-action style, natural color, ancient China setting, consistent characters, stable scene, high detail, no modern objects",
-    )
+    if style_context and _run_dir():
+        locked = style_context.load_image_style_lock(_run_dir()).strip()
+        if locked:
+            manual = _manual_image_style_suffix()
+            return "\n".join([locked, manual]).strip() if manual else locked
+
+    manual = _manual_image_style_suffix()
+    return manual or DEFAULT_IMAGE_STYLE
 
 
 def negative_prompt() -> str:
-    return os.getenv(
-        "AI_DRAMA_IMAGE_NEGATIVE_PROMPT",
-        "modern objects, modern clothing, western face, cartoon, anime, 3d render, low quality, blurry, extra limbs, deformed hands, wrong gender, duplicate people, text, watermark",
-    )
+    parts: list[str] = []
+    if style_context and _run_dir():
+        locked_negative = style_context.load_style_negative_prompt(_run_dir()).strip()
+        if locked_negative:
+            parts.append(locked_negative)
+
+    manual_negative = os.getenv("AI_DRAMA_IMAGE_NEGATIVE_PROMPT", "").strip()
+    parts.append(manual_negative or DEFAULT_IMAGE_NEGATIVE)
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for part in ", ".join(parts).split(","):
+        text = part.strip()
+        if text and text not in seen:
+            seen.add(text)
+            deduped.append(text)
+    return ", ".join(deduped)
 
 
 def _to_text(value: Any) -> str:
