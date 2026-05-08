@@ -51,13 +51,13 @@ http://127.0.0.1:7860/api/projects/demo_project
 ## UI 页面
 
 ```text
-Dashboard     项目总览
-Script        小说 / 剧本节点
+Dashboard     项目总览 + 导入原文 + 一键运行
+Script        小说 / 剧本节点 + 原文导入
 Assets        角色 / 场景 / 道具资产
-Storyboard    shot 卡片 + grid 宫格视图
-Tasks         任务中心，支持重试 / 取消
+Storyboard    shot 卡片 + grid 宫格视图 + 缩略图
+Tasks         任务中心，支持重试 / 取消 / 查看日志
 Preview       成片预览入口
-Settings      本地路径配置 + ComfyUI 工作流 JSON 上传
+Settings      本地路径配置 + ComfyUI 工作流 JSON 上传 + workflow mapping
 Node Detail   右侧节点详情，支持编辑 / 重跑 / 审核 / 修复 / 锁定
 ```
 
@@ -70,9 +70,20 @@ Node Detail   右侧节点详情，支持编辑 / 重跑 / 审核 / 修复 / 锁
   "comfyui_url": "http://127.0.0.1:8188",
   "image_workflow": "workflows/image/storyboard_image.json",
   "video_workflow": "workflows/video/ltx23_grid_video.json",
-  "cosyvoice2_command": "",
+  "indextts_command": "",
+  "default_voice_id": "default",
   "ffmpeg_path": "ffmpeg"
 }
+```
+
+IndexTTS 命令支持占位符：
+
+```text
+{text}
+{text_file}
+{output_file}
+{voice_id}
+{project_dir}
 ```
 
 保存位置：
@@ -96,10 +107,34 @@ projects/{project_id}/workflows/final/
 projects/{project_id}/workflows/utility/
 ```
 
+ComfyUI workflow node id 和 input name 在 Settings 页面配置：
+
+```text
+image.prompt_node / image.prompt_input
+image.negative_node / image.negative_input
+video.prompt_node / video.prompt_input
+video.image_node / video.image_input
+```
+
+## 已完成的仓库内生产钩子
+
+```text
+原文导入 API + UI
+Writer / Asset / Storyboard / Reviewer / Repair Agent
+ComfyUI workflow 上传与 mapping
+真实 grid_4 / grid_6 / grid_9 宫格拼图
+ComfyUI history 输出路径解析
+IndexTTS 本地命令适配器
+FFmpeg final.mp4 合成器
+Task 日志、traceback、耗时记录
+Tasks UI 日志查看
+```
+
 ## 文档
 
 ```text
 docs/AGENT_CANVAS_UI_REFACTOR_PLAN.md
 docs/AGENT_CANVAS_COMPLETION_CHECKLIST.md
 docs/DEVELOPMENT_LOG.md
+docs/CODEX_REMAINING_WORK_PLAN.md
 ```
