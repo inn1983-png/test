@@ -12,5 +12,6 @@
     if (typeof refreshAll !== "undefined") window.refreshAll = refreshAll;
     if (typeof renderPipeline !== "undefined") window.renderPipeline = renderPipeline;
     if (typeof renderRepairCenter !== "undefined") window.renderRepairCenter = renderRepairCenter;
+    if (typeof startJob !== "undefined") window.startJob = startJob;
   } catch (_) {}
 })();
