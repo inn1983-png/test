@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Canvas Task",
+  "type": "object",
+  "required": ["task_id", "node_id", "task_type", "executor", "status"],
+  "properties": {
+    "task_id": { "type": "string" },
+    "node_id": { "type": "string" },
+    "task_type": { "type": "string" },
+    "executor": { "type": "string" },
+    "status": { "type": "string" },
+    "retry_count": { "type": "integer" },
+    "max_retry": { "type": "integer" }
+  },
+  "additionalProperties": true
+}
