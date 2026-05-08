@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-"""Web UI review rewrite API hook.
+"""Web UI server hook.
 
 server.py is a long file. To avoid overwriting it, this sitecustomize hook patches
-its Handler class when the class is created. Python loads sitecustomize from the
-script directory before executing web_ui/server.py.
+its Handler class when the class is created and patches build_command after
+server.py imports are complete.
 
 Adds:
 - POST /api/review/rewrite  -> call LLM to generate reviewed JSON, preview only
 - POST /api/review/apply    -> apply reviewed JSON over official module output
+- build_command support for payload.to_module -> --to-module
+- build_command support for payload.style_preset -> AI_DRAMA_STYLE_PRESET
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -50,9 +53,38 @@ def _send_json(handler: http.server.SimpleHTTPRequestHandler, data: dict[str, An
     handler.wfile.write(body)
 
 
+def _patch_build_command(globals_dict: dict[str, Any]) -> None:
+    original = globals_dict.get("build_command")
+    if not callable(original) or getattr(original, "__ui_patch_applied__", False):
+        return
+
+    def build_command(payload: dict[str, Any], run_dir: Path):
+        cmd, env, kind = original(payload, run_dir)
+        to_module = str(payload.get("to_module") or "").strip()
+        if to_module and "--to-module" not in cmd:
+            cmd.extend(["--to-module", to_module])
+
+        style_preset = str(payload.get("style_preset") or "").strip()
+        if style_preset:
+            env["AI_DRAMA_STYLE_PRESET"] = style_preset
+            env["AI_DRAMA_SELECTED_STYLE_PRESET"] = style_preset
+
+        return cmd, env, kind
+
+    build_command.__ui_patch_applied__ = True
+    globals_dict["build_command"] = build_command
+
+
 def _patch_handler(handler_cls: type) -> None:
     if getattr(handler_cls, "__review_rewrite_api_patched__", False):
         return
+
+    # server.py's class body is created after module globals such as build_command.
+    # Patch those globals here, before user requests can start.
+    try:
+        _patch_build_command(handler_cls.__init__.__globals__)
+    except Exception:
+        pass
 
     original_do_post = getattr(handler_cls, "do_POST", None)
 
