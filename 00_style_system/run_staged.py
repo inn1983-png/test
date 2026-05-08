@@ -21,11 +21,7 @@ SCHEMA_VERSION = "1.0"
 
 
 def _load_presets() -> dict[str, Any]:
-    """Load and merge all JSON files under 00_style_system/presets.
-
-    This keeps the base presets readable and allows future style packs to be
-    added as independent JSON files without editing the core runner.
-    """
+    """Load and merge all JSON files under 00_style_system/presets."""
     presets_dir = ROOT_DIR / MODULE_NAME / "presets"
     merged: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -38,8 +34,6 @@ def _load_presets() -> dict[str, Any]:
         data = io_utils.read_json(path, default={})
         if not isinstance(data, dict):
             continue
-        if data.get("default_preset") and not merged.get("default_preset"):
-            merged["default_preset"] = data.get("default_preset")
         presets = data.get("presets", {})
         if isinstance(presets, dict):
             merged["presets"].update(presets)
@@ -48,17 +42,35 @@ def _load_presets() -> dict[str, Any]:
     return merged
 
 
+def _selected_style_from_env() -> str:
+    """Return one selected preset id.
+
+    Preferred source is AI_DRAMA_STYLE_PRESET. The Web UI currently sends exactly
+    one selected preset id through the existing image_style_suffix payload field,
+    which the server already maps to AI_DRAMA_IMAGE_STYLE_SUFFIX. This function
+    treats that value as a preset selector only when it matches a known preset.
+    It never forwards the whole style library to LLM stages.
+    """
+    return (
+        os.getenv("AI_DRAMA_STYLE_PRESET")
+        or os.getenv("AI_DRAMA_SELECTED_STYLE_PRESET")
+        or os.getenv("AI_DRAMA_IMAGE_STYLE_SUFFIX")
+        or ""
+    ).strip()
+
+
 def _select_preset(presets_data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     presets = presets_data.get("presets", {})
     if not isinstance(presets, dict) or not presets:
         raise ValueError("style presets not found")
 
-    requested = os.getenv("AI_DRAMA_STYLE_PRESET") or presets_data.get("default_preset") or "ancient_live_action_realistic"
+    requested = _selected_style_from_env() or presets_data.get("default_preset") or "ancient_live_action_realistic"
     if requested not in presets:
         available = ", ".join(sorted(presets.keys()))
         print(f"[STYLE] Unknown preset {requested!r}; fallback to default. Available: {available}")
         requested = presets_data.get("default_preset") or next(iter(presets.keys()))
 
+    os.environ["AI_DRAMA_STYLE_PRESET"] = requested
     preset = presets.get(requested, {})
     if not isinstance(preset, dict):
         raise ValueError(f"invalid style preset: {requested}")
